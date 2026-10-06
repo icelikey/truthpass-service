@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="真验：消费者 Agent 驱动的鱼油批次证据演示。" />
+    <title>真验 · 这批鱼油，为什么值得我信？</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="真验首页">
+          <span class="brand-mark">真验</span>
+          <span class="brand-sub">ZHENYAN / TRUTHPASS</span>
+        </a>
+        <nav class="nav-links" aria-label="主要导航">
+          <a href="#evidence">证据故事</a>
+          <a href="#journey">链路观察</a>
+          <a href="#co-build">消费者共建</a>
+        </nav>
+        <div class="top-actions">
+          <span class="demo-chip"><span class="pulse"></span>DEMO / SYNTHETIC</span>
+          <button class="ghost-button" id="open-observer" type="button">评委观察台</button>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="hero section-wrap">
+          <div class="hero-copy">
+            <p class="eyebrow">CONSUMER AGENT · CLI OBSERVATION</p>
+            <h1>这批鱼油，<br /><em>为什么值得我信？</em></h1>
+            <p class="hero-intro">
+              真验把生产端的证据翻译成消费者 Agent 能理解的判断。
+              你只需要问，CLI 会完成发现、验收、解释和公共信誉查询。
+            </p>
+            <div class="hero-actions">
+              <button class="primary-button" id="run-verification" type="button">
+                <span class="button-icon">✦</span> 让 Agent 验证这批鱼油
+              </button>
+              <button class="text-button" id="jump-chain" type="button">查看证据如何上链 <span>↗</span></button>
+            </div>
+            <div class="confidence-line"><span class="confidence-dot"></span> 当前服务可用 · 证据链完整度 86% · 规则 v1.0</div>
+          </div>
+
+          <div class="hero-terminal" aria-label="消费者 Agent CLI 调用预览">
+            <div class="terminal-head">
+              <span class="terminal-title"><span class="agent-orb">◌</span> 与 Zhenyan Agent 对话</span>
+              <span class="terminal-live"><i></i> 在线</span>
+            </div>
+            <div class="terminal-body" id="terminal-body">
+              <div class="chat-bubble user">帮我看看 FO-2026-001，重点看含量、新鲜度和冷链。</div>
+              <div class="cli-command"><span class="prompt">$</span> zhenyan verify batch FO-2026-001 --policy freshness-v1 --json</div>
+              <div class="cli-line"><span class="check">✓</span> 发现 3 个候选检测服务</div>
+              <div class="cli-line"><span class="check">✓</span> 探测在线状态与能力声明</div>
+              <div class="cli-line"><span class="check">✓</span> JEV 输出结构化路由：证据范围可判别</div>
+              <div class="cli-line"><span class="check">✓</span> 验收 EPA+DHA / 氧化 / 冷链证据</div>
+              <div class="cli-line muted"><span class="waiting">◌</span> 等待消费者确认共建反馈…</div>
+              <div class="chat-bubble agent" id="agent-answer">这批鱼油按当前公开规则通过。检测报告、冷链记录和链上锚定均已找到；重金属数据尚未覆盖。</div>
+            </div>
+            <div class="terminal-foot"><span>JSON 输出 · schema v0.5.0 · JEV gate demo</span><button id="copy-command" type="button">复制 CLI 命令</button></div>
+          </div>
+        </section>
+
+        <section class="batch-section section-wrap" id="evidence">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">BATCH EVIDENCE / FO-2026-001</p>
+              <h2>不是一个总分，是一条能回看的证据故事</h2>
+            </div>
+            <span class="scope-label">按当前规则通过 · 仍有数据缺口</span>
+          </div>
+
+          <div class="batch-layout">
+            <article class="product-card">
+              <div class="product-visual" aria-label="鱼油软胶囊示意图">
+                <div class="ocean-glow"></div>
+                <div class="capsule capsule-one"></div>
+                <div class="capsule capsule-two"></div>
+                <div class="capsule capsule-three"></div>
+                <div class="product-seal">FO<br /><small>001</small></div>
+              </div>
+              <div class="product-meta">
+                <div><span class="meta-label">产品</span><strong>深海鱼油软胶囊</strong></div>
+                <div><span class="meta-label">批次</span><strong>FO-2026-001</strong></div>
+                <div><span class="meta-label">来源</span><strong>多方证据 · demo/synthetic</strong></div>
+              </div>
+            </article>
+
+            <article class="decision-card">
+              <div class="decision-top"><span class="decision-icon">✓</span><span><small>真验 Agent 结论</small><strong id="decision-label">按当前规则通过</strong></span><span class="decision-arrow">↗</span></div>
+              <p id="decision-copy">基于第三方检测、冷链记录和链上证据锚定，当前未发现规则范围内的异常。</p>
+              <div class="decision-divider"></div>
+              <div class="source-summary"><span class="source-avatars"><b>检</b><b>冷</b><b>链</b><b>消</b></span><span>4 类来源已关联</span><button class="inline-link" id="view-sources" type="button">查看来源</button></div>
+            </article>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card good"><div class="metric-head"><span>EPA + DHA</span><span class="metric-state">PASS</span></div><strong>78<span>%</span></strong><div class="meter"><i style="width:78%"></i></div><small>检测结果 · 规则下限 70%</small></article>
+            <article class="metric-card good"><div class="metric-head"><span>过氧化值</span><span class="metric-state">PASS</span></div><strong>2.1<span class="unit"> meq/kg</span></strong><div class="meter"><i style="width:36%"></i></div><small>检测结果 · 规则上限 5.0</small></article>
+            <article class="metric-card good"><div class="metric-head"><span>冷链中断</span><span class="metric-state">PASS</span></div><strong>2<span class="unit"> 小时</span></strong><div class="meter"><i style="width:28%"></i></div><small>设备观察 · 规则上限 6 小时</small></article>
+            <article class="metric-card missing"><div class="metric-head"><span>重金属报告</span><span class="metric-state">MISSING</span></div><strong>—</strong><div class="meter"><i style="width:12%"></i></div><small>未覆盖 · 可继续调用独立检测服务</small></article>
+          </div>
+        </section>
+
+        <section class="journey-section section-wrap" id="journey">
+          <div class="section-heading compact">
+            <div><p class="eyebrow">EVIDENCE JOURNEY</p><h2>评委可以展开：证据如何从现实进入公共判断</h2></div>
+            <button class="ghost-button" id="toggle-detail" type="button">展开技术细节 <span>＋</span></button>
+          </div>
+          <div class="journey-track">
+            <article class="journey-node active"><span class="node-index">01</span><span class="node-icon">⌁</span><h3>设备采集</h3><p>温度、批次、时间和序列由设备签名。</p><small>device-cold-07 · device-signed</small></article>
+            <div class="journey-link"></div>
+            <article class="journey-node active"><span class="node-index">02</span><span class="node-icon">⌘</span><h3>Agent 关联</h3><p>把设备和报告关联到 FO-2026-001。</p><small>cold-chain-agent-c · schema v1</small></article>
+            <div class="journey-link"></div>
+            <article class="journey-node active jev-node"><span class="node-index">03</span><span class="node-icon">◇</span><h3>JEV 判别</h3><p>用固定类型输出识别缺口、冲突和下一步路由。</p><small>route_to_rule · confidence 0.94</small></article>
+            <div class="journey-link"></div>
+            <article class="journey-node active"><span class="node-index">04</span><span class="node-icon">◈</span><h3>规则验收</h3><p>Verifier 执行确定性门槛，不接受模型改判。</p><small>policy-freshness-v1 · result hash</small></article>
+            <div class="journey-link"></div>
+            <article class="journey-node active"><span class="node-index">05</span><span class="node-icon">⛓</span><h3>链上锚定</h3><p>公开记录哈希、时间、状态和撤销入口。</p><small>BOT Chain · evidence root</small></article>
+          </div>
+          <div class="technical-detail" id="technical-detail" hidden>
+            <div class="detail-code"><span class="code-label">EvidenceEnvelope → JevDecision</span><code>{ eventId: "evt-01H…", subject: "FO-2026-001", issuer: "device-cold-07", payloadHash: "0x…" }<br />{ decision: "route_to_rule_verifier", confidence: 0.94, missing: ["HEAVY_METALS_NOT_COVERED"], modelVersion: "demo-adapter" }</code></div>
+            <div class="detail-note"><span>链上边界</span><p>原始报告、设备明细和个人信息留在链下；链上只保存可复核指纹。上链证明记录被提交过，不替代现实世界的独立检测。</p></div>
+          </div>
+        </section>
+
+        <section class="co-build-section section-wrap" id="co-build">
+          <div class="co-build-copy"><p class="eyebrow">CONSUMER CO-BUILDING</p><h2>买到之后，你也可以让下一批更好</h2><p>消费者不是被动评分者。购买后，Agent 只读取本批次反馈所需的最小范围，把包装、气味、保存和批次可查反馈变成公共信誉。</p><div class="rights-row"><span>早期共建者</span><span>复检优先</span><span>服务额度</span><span>不可交易积分</span></div></div>
+          <article class="consent-card"><div class="consent-head"><span class="consent-icon">◌</span><div><strong>授权 FO-2026-001 的质量反馈</strong><small>你可以随时撤销，不上传健康数据</small></div><label class="switch"><input id="consent-toggle" type="checkbox" /><span></span></label></div><div class="tag-list"><button class="feedback-tag" data-tag="包装完好" type="button">包装完好</button><button class="feedback-tag" data-tag="无明显腥味" type="button">无明显腥味</button><button class="feedback-tag" data-tag="批次可查" type="button">批次可查</button></div><button class="primary-button full" id="submit-feedback" type="button" disabled>提交反馈，获得 14 点共建积分</button><p class="consent-foot">这是消费服务权益，不代表股权、债权或投资回报。</p></article>
+        </section>
+
+        <section class="model-section section-wrap" id="model">
+          <div class="section-heading compact"><div><p class="eyebrow">A NEW CONSUMPTION MODEL</p><h2>从“相信品牌”到“共同维护证据”</h2></div></div>
+          <div class="model-grid"><article><span class="model-number">01</span><h3>生产方</h3><p>提供批次和过程证据，接受第三方、设备与消费者反馈的持续复核。</p></article><article><span class="model-number">02</span><h3>真验 Agent</h3><p>把复杂技术转成消费者能理解的判断，并把一次履约沉淀为公共信誉。</p></article><article><span class="model-number">03</span><h3>消费者</h3><p>用购买和授权反馈参与共建，获得服务权益，而不是被动接受广告结论。</p></article></div>
+          <div class="model-statement">先有可验证证据 <b>→</b> 再有公共信誉 <b>→</b> 再有共建权益 <b>→</b> 最后才讨论受监管的收益分配</div>
+        </section>
+      </main>
+
+      <footer class="footer section-wrap"><div><strong>真验 Zhenyan</strong><span>让真实被看见，让信任自然发生。</span></div><span>CLI-first · Consumer-owned · demo/synthetic</span></footer>
+    </div>
+
+    <aside class="observer-drawer" id="observer-drawer" aria-hidden="true">
+      <div class="drawer-head"><div><p class="eyebrow">JUDGE OBSERVER MODE</p><h2>系统观察台</h2></div><button class="close-button" id="close-observer" type="button">×</button></div>
+      <p class="drawer-intro">网页只是同一条 CLI 验证链的可视化投影。每一步都可以回到事件、规则和哈希。</p>
+      <div class="observer-row"><span>当前验证任务</span><strong>ver-FO-2026-001-001</strong></div>
+      <div class="observer-row"><span>规则集</span><strong>fish-oil-freshness-v1</strong></div>
+      <div class="observer-row"><span>JEV 决策门</span><strong>route_to_rule · 0.94 · demo</strong></div>
+      <div class="observer-row"><span>证据根哈希</span><strong>0xb436…dca6</strong></div>
+      <div class="observer-row"><span>链上状态</span><strong class="green-text">待锚定 · 可重试</strong></div>
+      <div class="service-table"><div class="table-head"><span>服务</span><span>历史</span><span>当前</span><span>本次</span></div><div><span>lab-a</span><span>92</span><span class="amber-text">降级</span><span class="red-text">拒绝</span></div><div><span>lab-b</span><span>96</span><span class="red-text">离线</span><span>未调用</span></div><div><span>lab-c</span><span>88</span><span class="green-text">在线</span><span class="green-text">通过</span></div></div>
+      <div class="drawer-boundary"><span>边界提醒</span><p>链上确认提交过的记录没有被悄悄改写；设备、实验室和生产方的现实真实性仍需要多源、复检和争议机制共同维护。</p></div>
+    </aside>
+    <div class="drawer-scrim" id="drawer-scrim"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

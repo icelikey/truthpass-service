@@ -1,6 +1,10 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-真验（TruthPass）是一层面向 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：让消费者 Agent、生产方 Agent、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
+> 项目文档版本：v0.5.0
+> 最近修改：2026-10-06
+> 本次修改：新增 JEV 结构化决策门方案；网页展示消费者 Agent、JEV、确定性验收和链上锚定的同一条验证链。
+
+真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
 ## 解决的问题
 
@@ -16,7 +20,7 @@
 ## Demo 闭环
 
 ```text
-消费者 Agent 查询 FO-2026-001
+消费者 Agent 通过 CLI 查询 FO-2026-001
         ↓
 真验发现三个实验室服务
         ↓
@@ -34,6 +38,8 @@ lab-c：在线、签名有效、指标和冷链通过
 ```
 
 演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
+
+比赛网页只是现场观察台，不是产品主入口。完整的消费者 CLI、数据采集关联、链上分层、共建权益和评委展示叙事见 [docs/strategy-v0.4-consumer-cli.md](docs/strategy-v0.4-consumer-cli.md) 与 [docs/cli-contract.md](docs/cli-contract.md)。
 
 ## 质量规则示例
 
@@ -75,7 +81,12 @@ docs/architecture-v0.3-fish-oil.md 鱼油战略架构
 docs/consumer-participation.md     消费者 Agent 参与规则
 docs/fish-oil-demo-script.md       现场演示脚本
 docs/frontend-visual-plan.md       前端页面和美工预案
+docs/strategy-v0.4-consumer-cli.md 消费者 CLI、链上结构、商业与展示战略
+docs/cli-contract.md               CLI 命令、JSON 输出和安全合同
+docs/DOCUMENT-VERSIONING.md        文档版本、修改说明和协作规则
+docs/jev-integration-v0.5.md       JEV 结构化决策门、类型合同和降级策略
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
+assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
 
 ## 赛题对应
@@ -90,3 +101,5 @@ assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 - 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
 ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环，正式部署时再接入 BOT Chain 和注册表适配器。
+
+JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。
