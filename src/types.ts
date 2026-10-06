@@ -22,6 +22,10 @@ export interface TaskRequest {
   acceptance: {
     requireSignature: boolean;
     maxLogisticsGapHours: number;
+    minEpaDhaPercent?: number;
+    maxPeroxideValue?: number;
+    maxTotox?: number;
+    requireColdChain?: boolean;
   };
 }
 
@@ -44,6 +48,11 @@ export interface ExecutionEvidence {
   reportTime: string;
   logisticsGapHours: number;
   signatureValid: boolean;
+  /** Fish-oil metrics are optional so the generic service layer remains reusable. */
+  epaDhaPercent?: number;
+  peroxideValue?: number;
+  totox?: number;
+  coldChainGapHours?: number;
   payload: Record<string, unknown>;
 }
 

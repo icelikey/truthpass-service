@@ -21,6 +21,10 @@ const evidence: ExecutionEvidence = {
   reportTime: "2026-10-06T10:00:00Z",
   logisticsGapHours: 2,
   signatureValid: true,
+  epaDhaPercent: 78,
+  peroxideValue: 2.1,
+  totox: 11,
+  coldChainGapHours: 2,
   payload: { result: "pass" },
 };
 
@@ -35,4 +39,16 @@ test("rejects evidence for another batch", async () => {
   const result = await verifyExecution(task, { ...evidence, reportBatchId: "B-2" });
   assert.equal(result.status, "rejected");
   assert.match(result.reasons.join(" "), /批次/);
+});
+
+test("rejects fish-oil evidence below quality thresholds", async () => {
+  const result = await verifyExecution(
+    { ...task, acceptance: { ...task.acceptance, minEpaDhaPercent: 70, maxPeroxideValue: 5, maxTotox: 20, requireColdChain: true } },
+    { ...evidence, epaDhaPercent: 61, peroxideValue: 7.2, totox: 26, coldChainGapHours: 11 },
+  );
+  assert.equal(result.status, "rejected");
+  assert.match(result.reasons.join(" "), /EPA\+DHA/);
+  assert.match(result.reasons.join(" "), /过氧化值/);
+  assert.match(result.reasons.join(" "), /TOTOX/);
+  assert.match(result.reasons.join(" "), /冷链/);
 });

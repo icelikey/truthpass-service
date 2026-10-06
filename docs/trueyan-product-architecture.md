@@ -1,4 +1,6 @@
-# 真验：白牌商品公共信誉服务架构
+# 真验：白牌商品公共信誉服务架构（历史基线）
+
+> 当前比赛 Demo 已切换为鱼油批次验收，详见 [fish-oil-development-plan.md](fish-oil-development-plan.md)。本文保留早期白牌 Type-C 方案，用于说明通用层边界。
 
 ## 1. 产品定义
 
@@ -175,4 +177,3 @@ revokeFeedback(feedbackId, reasonHash)
 - 增加消费者扫码页面；
 - 增加争议、复检和责任追踪；
 - 适配 ERC-8004 身份、信誉和验证注册表。
-

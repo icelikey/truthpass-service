@@ -43,9 +43,13 @@
 
 比赛项目正式使用“真验”，英文标识沿用 `TruthPass`；仓库暂时保持 `truthpass-service`，避免把比赛核心误解成完整电商商城。
 
-## 最新 Demo 决策
+## 最新 Demo 决策（2026-10-06 鱼油版）
 
-- Demo 场景暂定为燕窝滋补品批次透明化；核心仍然是服务探测、生产与检测证据验收和公共信誉。
-- 燕窝只作为直观示例，不做健康功效、疾病诊断或用户手环数据医疗分析。
+- Demo 场景确定为白牌高浓度鱼油软胶囊批次透明化；核心仍然是服务探测、生产与检测证据验收和公共信誉。
+- 鱼油指标使用 EPA+DHA、过氧化值、TOTOX、冷链中断、批次一致性和检测签名，便于现场确定性验收。
+- 消费者 Agent 在购买后通过最小授权提交包装、气味、保存和批次可查反馈，参与公共信誉共建。
+- 鱼油不做降血脂、预防疾病等医疗功效判断；所有 Demo 数据标记为 `demo/synthetic`。
 - 所有演示数据必须标记为 `demo/synthetic`，不能把编造的数据描述成真实供应链证明。
-- 原先建议的白牌 Type-C 充电线保留为低责任备选品类；如果燕窝的责任边界或数据准备无法收敛，应退回该方案。
+- 原先的燕窝和白牌 Type-C 方案保留为历史讨论，不代表当前 Demo。
+
+鱼油版的具体实现以 [fish-oil-development-plan.md](fish-oil-development-plan.md)、[architecture-v0.3-fish-oil.md](architecture-v0.3-fish-oil.md) 和 [fish-oil-demo-script.md](fish-oil-demo-script.md) 为准。

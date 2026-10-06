@@ -1,0 +1,16 @@
+{
+  "taskId": "task-fish-oil-2026-001",
+  "serviceKind": "lab",
+  "capability": "fish-oil-batch-quality-check",
+  "batchId": "FO-2026-001",
+  "productionTime": "2026-10-06T08:00:00Z",
+  "acceptance": {
+    "requireSignature": true,
+    "maxLogisticsGapHours": 6,
+    "minEpaDhaPercent": 70,
+    "maxPeroxideValue": 5,
+    "maxTotox": 20,
+    "requireColdChain": true
+  },
+  "dataClass": "demo/synthetic"
+}

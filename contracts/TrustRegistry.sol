@@ -20,8 +20,17 @@ contract TrustRegistry {
         uint64 createdAt;
     }
 
+    struct ConsumerPurchase {
+        bytes32 consumerId;
+        bytes32 batchId;
+        bytes32 purchaseProofHash;
+        bytes32 consentHash;
+        uint64 createdAt;
+    }
+
     mapping(bytes32 => Service) public services;
     mapping(bytes32 => Feedback) public feedback;
+    mapping(bytes32 => ConsumerPurchase) public purchases;
 
     event ServiceRegistered(bytes32 indexed serviceId, address indexed owner, string metadataURI);
     event FeedbackRecorded(
@@ -33,6 +42,8 @@ contract TrustRegistry {
         bytes32 evidenceHash
     );
     event FeedbackRevoked(bytes32 indexed feedbackId, bytes32 reasonHash);
+    event ConsumerPurchaseRecorded(bytes32 indexed purchaseId, bytes32 indexed consumerId, bytes32 indexed batchId, bytes32 consentHash);
+    event ConsumerContributionRecorded(bytes32 indexed contributionId, bytes32 indexed purchaseId, bytes32 indexed batchId, uint8 score, bytes32 evidenceHash);
 
     function registerService(bytes32 serviceId, string calldata metadataURI) external {
         require(services[serviceId].owner == address(0), "service exists");
@@ -69,5 +80,29 @@ contract TrustRegistry {
         require(msg.sender == services[item.serviceId].owner, "not service owner");
         item.revoked = true;
         emit FeedbackRevoked(feedbackId, reasonHash);
+    }
+
+    function recordConsumerPurchase(
+        bytes32 purchaseId,
+        bytes32 consumerId,
+        bytes32 batchId,
+        bytes32 purchaseProofHash,
+        bytes32 consentHash
+    ) external {
+        require(purchases[purchaseId].createdAt == 0, "purchase exists");
+        purchases[purchaseId] = ConsumerPurchase(consumerId, batchId, purchaseProofHash, consentHash, uint64(block.timestamp));
+        emit ConsumerPurchaseRecorded(purchaseId, consumerId, batchId, consentHash);
+    }
+
+    function recordConsumerContribution(
+        bytes32 contributionId,
+        bytes32 purchaseId,
+        uint8 score,
+        bytes32 evidenceHash
+    ) external {
+        ConsumerPurchase memory purchase = purchases[purchaseId];
+        require(purchase.createdAt != 0, "purchase missing");
+        require(score <= 100, "score out of range");
+        emit ConsumerContributionRecorded(contributionId, purchaseId, purchase.batchId, score, evidenceHash);
     }
 }

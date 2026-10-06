@@ -1,37 +1,56 @@
-# 真验 Zhenyan
+# 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-真验是面向白牌电商采购 Agent 的服务可靠性与公共信誉层，英文标识沿用 `TruthPass`。
+真验（TruthPass）是一层面向 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：让消费者 Agent、生产方 Agent、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
-比赛项目名确定为：**真验：白牌商品公共信誉服务**。
+## 解决的问题
 
-长期面向消费者的应用层可以使用产品名 **OpenGoods 透明货**，由真验提供底层 API 或 Skill。
+消费者看到“高浓度鱼油”“深海原料”“无腥味”等宣传时，很难同时确认：标签含量是否兑现、鱼油是否氧化、冷链是否中断、报告是否对应当前批次、检测服务此刻是否可用。链上身份和历史评分也不能自动证明服务当前可用或数据真实。
 
-GitHub 仓库 slug 暂时保留为 `truthpass-service`，便于代码和英文依赖命名。
+真验把问题拆成四步：
 
-当 Agent 需要调用陌生的供应商、检测、物流或售后服务时，真验会完成：
+1. **发现**：根据鱼油批次任务寻找检测和冷链服务；
+2. **探测**：检查端点在线、能力匹配、返回格式和签名；
+3. **验收**：用规则核对批次、时间、EPA+DHA、过氧化值、TOTOX、冷链和签名；
+4. **沉淀**：记录服务履约反馈，消费者购买后提交经过授权的体验反馈，供后续 Agent 查询。
 
-1. 读取服务身份和能力声明；
-2. 进行实时可用性探测和小型挑战任务；
-3. 调用服务并验收交付结果；
-4. 将任务结果、证据哈希和反馈沉淀为公共信誉；
-5. 让后续 Agent 查询并复用这次真实履约记录。
+## Demo 闭环
 
-商品批次是任务对象，服务提供者才是被评价对象。区块链只保存身份、时间、结果和证据哈希，完整报告和隐私数据保留在链下。
+```text
+消费者 Agent 查询 FO-2026-001
+        ↓
+真验发现三个实验室服务
+        ↓
+lab-a：在线但批次错、签名无效、指标不达标
+lab-b：当前离线
+lab-c：在线、签名有效、指标和冷链通过
+        ↓
+确定性 Verifier 选择 lab-c
+        ↓
+生成证据卡和任务履约反馈
+        ↓
+消费者授权 Agent 登记购买并提交“包装/气味/批次可查”反馈
+        ↓
+反馈哈希和贡献事件可锚定到 BOT Chain
+```
 
-## 当前状态
+演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
 
-仓库包含一个不依赖外部 API 的最小可运行核心：
+## 质量规则示例
 
-- 三个模拟白牌茶叶检测服务；
-- 实时探测、挑战任务和确定性验收；
-- 风险评分与服务推荐；
-- 任务级履约反馈；
-- BOT Chain 兼容的最小 `TrustRegistry` 合约草案；
-- 赛题映射、架构决策和 40 小时开发范围。
+当前演示任务使用以下验收条件：
 
-最新燕窝 Demo 的完整架构见 [docs/architecture-v0.2-swallow-nest.md](docs/architecture-v0.2-swallow-nest.md)。
+| 指标 | 示例门槛 |
+| --- | ---: |
+| EPA+DHA 总含量 | ≥ 70% |
+| 过氧化值 | ≤ 5 |
+| TOTOX | ≤ 20 |
+| 冷链中断 | ≤ 6 小时 |
+| 报告批次 | 必须等于商品批次 |
+| 检测签名 | 必须有效 |
 
-## 快速运行
+大模型只负责把自然语言采购意图拆成任务和解释结果；通过、拒绝、评分和防重复由代码规则决定。
+
+## 运行
 
 ```bash
 npm install
@@ -40,36 +59,34 @@ npm test
 npm run typecheck
 ```
 
-如果暂时不安装本地依赖，也可以使用 `npx tsx src/demo.ts` 运行演示。
-
-## 演示情景
-
-采购 Agent 要求检测批次 `TEA-2026-001`：
-
-- `lab-a` 当前在线，但报告批次不匹配；
-- `lab-b` 当前离线；
-- `lab-c` 返回完整、签名有效且通过验收。
-
-系统会选择 `lab-c`，生成任务反馈，并准备将反馈哈希写入 BOT Chain。
-
 ## 目录
 
 ```text
-src/                 核心类型、探测、验收、信誉聚合和演示
-test/                核心规则测试
-contracts/           最小链上信誉登记合约
-docs/                架构和交流决策沉淀
-examples/            演示数据
+src/types.ts                       通用任务、证据和服务类型
+src/verifier.ts                    确定性鱼油验收规则
+src/registry.ts                    服务探测、排序和履约反馈
+src/consumer.ts                    消费者授权、购买登记和反馈防刷
+src/demo.ts                        鱼油端到端演示
+contracts/TrustRegistry.sol        服务信誉与消费者贡献事件合约草案
+examples/fish-oil-batch-task.json  鱼油任务样例
+test/                              验收和消费者参与测试
+docs/fish-oil-development-plan.md  完整开发方案和分工
+docs/architecture-v0.3-fish-oil.md 鱼油战略架构
+docs/consumer-participation.md     消费者 Agent 参与规则
+docs/fish-oil-demo-script.md       现场演示脚本
+docs/frontend-visual-plan.md       前端页面和美工预案
+assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 ```
 
 ## 赛题对应
 
-本项目对应赛题一“Agent 公共信誉与服务验收”：
+项目对应赛题一“Agent 公共信誉与服务验收”：
 
-- 服务探测：`ServiceRegistry.probe`
-- 交付验收：`verifyExecution`
-- 履约记录：`FeedbackRecord`
-- 信誉聚合：`recommendService`
-- 抗刷分基础：反馈绑定任务哈希、服务身份和证据哈希
+- 服务探测：`ServiceRegistry.evaluate`；
+- 交付验收：`verifyExecution`；
+- 履约记录：`FeedbackRecord`；
+- 消费者参与：`ConsumerParticipationRegistry`；
+- 链上锚定：`TrustRegistry.sol`；
+- 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
-ERC-8004 用作身份、信誉和验证模型的参考；比赛 MVP 先实现最小兼容接口，再接入正式注册表。
+ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环，正式部署时再接入 BOT Chain 和注册表适配器。
