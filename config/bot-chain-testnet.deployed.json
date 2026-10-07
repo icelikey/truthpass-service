@@ -27,6 +27,24 @@
     "ethGetCode": "verified",
     "domainSeparatorReadback": "verified",
     "roleReadback": "verified",
+    "lifecycleRunId": "20261007175100",
+    "lifecycleIds": {
+      "evidenceRequestId": "0x5c87dfa19c39341fdbcf5c6138b727f394bf0c759298c230d4be25e187117937",
+      "evidenceRoot": "0x31495885c166989003f8e82354f083d9388705af2df23ddadd4ec2e138f5f7c0",
+      "replacementRequestId": "0x93652179c98c887046cbc41b69057e7330fde66126347da447f12c73e927a630",
+      "replacementRoot": "0xb50d327ddab8174d406e19ff412dcac90f79d53bf9152fed9b6d8a023ae37953",
+      "verificationRequestId": "0xb203865f39591732c4f7c60f5b60f9788d5dada912624f2ca55e1bf01c1ca7ec",
+      "purchaseId": "0xb4fa2163c7b2111a99e758c3107202aa9105069f9e380f05bb7e4674eed2a9f1",
+      "contributionId": "0xa3a5ee7c9a5e5132ff574b1c5ede50db3ea728a82dd0f215ce50e3353606bf55",
+      "disputeId": "0xce868b49f84a3d8bad9a6fc735189d0cdd99d3adbd913195c4eb67e73094b88f"
+    },
+    "finalStateReadback": {
+      "evidence": "superseded",
+      "verification": "accepted",
+      "purchase": "accepted",
+      "contribution": "accepted",
+      "replacement": "linked"
+    },
     "deploymentReceipt": {
       "status": "0x1",
       "blockNumber": 26008937,
