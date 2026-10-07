@@ -32,7 +32,7 @@ test("CLI verify returns shared deterministic assessment and dry-run anchor stat
   assert.equal(result.status, "accepted");
   assert.equal(result.assessment?.status, "accepted");
   assert.equal(result.anchor.submitted, false);
-  assert.equal(result.anchor.status, "not_requested");
+  assert.equal(result.anchor.status, "anchor_pending");
   assert.ok(result.evidenceRoot.startsWith("0x"));
   assert.ok(result.evidence.some((item) => item.evidenceId === "ev-cli-inspection-001"));
 });

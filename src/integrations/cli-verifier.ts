@@ -4,6 +4,7 @@ import { assessProductBatch } from "../verifier.js";
 import type { MemoryDataRepository } from "../data/repository.js";
 import type { ExecutionEvidence, TaskRequest } from "../types.js";
 import { CLI_SCHEMA_VERSION, type CliVerificationResult } from "./cli-contract.js";
+import { BOT_CHAIN_MAINNET } from "./botchain-config.js";
 
 export async function runCliVerify(repository: MemoryDataRepository, task: TaskRequest, policy: { id: string; version: string }): Promise<CliVerificationResult> {
   const context = buildJevContext(repository, task.batchId);
@@ -14,7 +15,7 @@ export async function runCliVerify(repository: MemoryDataRepository, task: TaskR
     return {
       schemaVersion: CLI_SCHEMA_VERSION, dataClass: context.batch.dataMode, command: "verify", batchId: task.batchId,
       status: "missing_evidence", policy, evidence: evidence.map(toReference), evidenceRoot,
-      anchor: { status: "not_requested", submitted: false }, reasons: ["当前批次没有检测证据"],
+    anchor: { status: "anchor_pending", network: BOT_CHAIN_MAINNET.network, submitted: false, chainId: BOT_CHAIN_MAINNET.chainId, contractAddress: BOT_CHAIN_MAINNET.contractAddress }, reasons: ["当前批次没有检测证据"],
     };
   }
   const payload = execution.payload;
@@ -37,7 +38,7 @@ export async function runCliVerify(repository: MemoryDataRepository, task: TaskR
   return {
     schemaVersion: CLI_SCHEMA_VERSION, dataClass: context.batch.dataMode, command: "verify", batchId: task.batchId,
     status: assessment.status === "accepted" ? "accepted" : "rejected", policy, assessment,
-    evidence: evidence.map(toReference), evidenceRoot, anchor: { status: "not_requested", submitted: false }, reasons: assessment.reasons,
+    evidence: evidence.map(toReference), evidenceRoot, anchor: { status: "anchor_pending", network: BOT_CHAIN_MAINNET.network, submitted: false, chainId: BOT_CHAIN_MAINNET.chainId, contractAddress: BOT_CHAIN_MAINNET.contractAddress }, reasons: assessment.reasons,
   };
 }
 

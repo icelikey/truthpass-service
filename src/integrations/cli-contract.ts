@@ -22,6 +22,6 @@ export interface CliVerificationResult {
   assessment?: ProductBatchAssessment;
   evidence: CliEvidenceReference[];
   evidenceRoot: string;
-  anchor: { status: "not_requested" | "anchor_pending"; network?: string; submitted: false };
+  anchor: { status: "not_requested" | "anchor_pending"; network?: string; submitted: false; chainId?: number; contractAddress?: string };
   reasons: string[];
 }
