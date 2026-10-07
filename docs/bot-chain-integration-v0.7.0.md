@@ -5,7 +5,7 @@
 > 最近修改：2026-10-07  
 > 修改摘要：定义 TruthPass 在 BOT Chain 上的网络选择、Agent 身份、鱼油证据锚定、验证结果、消费者购买绑定、公共信誉和分阶段上线方案。  
 > 影响范围：BOT Chain、ERC-8004、`TrustRegistry.sol`、Agent、CLI、网页观察台、消费者权益  
-> 当前代码状态：本次只新增方案文档，不修改 `contracts/`、`src/`、`test/`、`web-demo/`。
+> 当前代码状态：v0.7.1 已新增 `TruthPassEvidenceAnchor.sol` 与 BOT Chain Chain Adapter；本文件保留为接入基线，具体 ABI 以 `docs/bot-chain-handoff-v0.7.1.md` 为准。
 
 ## 1. 接入结论
 
@@ -102,18 +102,20 @@ ValidationRegistry 只记录验证请求和响应的公共指纹，原始实验�
 
 ### 3.3 TruthPass 应用合约：证据、信誉和消费者贡献
 
-当前 `TrustRegistry.sol` 只是草案。正式版本建议拆成清晰的应用接口，至少包括：
+当前 `TrustRegistry.sol` 只是早期草案。当前交接版本使用 `TruthPassEvidenceAnchor.sol` 作为最小证据锚定合约，正式版本建议继续拆成清晰的应用接口，至少包括：
 
 ```text
 registerService(agentId, metadataHash, capabilityHash)
-anchorEvidence(batchCommitment, evidenceRoot, schemaHash)
-recordVerification(taskHash, policyHash, resultHash, status, scope)
+anchorEvidence(requestId, evidenceRoot, subjectHash, schemaHash, sourceHash, state, chainId, domainSeparator)
+recordVerification(requestId, evidenceRoot, taskHash, policyHash, verifierVersionHash, resultHash, state, scope, chainId, domainSeparator)
 recordFulfilment(serviceId, taskHash, evidenceRoot, score, status)
-recordPurchase(purchaseCommitment, batchCommitment, consentCommitment)
-recordContribution(purchaseCommitment, contributionCommitment, evidenceHash)
+recordPurchase(purchaseId, consumerCommitment, batchCommitment, purchaseProofHash, consentHash, chainId, domainSeparator)
+recordContribution(contributionId, purchaseId, evidenceHash, contributionHash, score, chainId, domainSeparator)
 openDispute(targetId, reasonHash)
 revokeOrSupersede(targetId, reasonHash, replacementId)
 ```
+
+客户端默认构造上面的 8 参数 `anchorEvidence`。旧的三参数 `anchorEvidence(batchCommitment,evidenceRoot,schemaHash)` 只作为 `anchorLegacyEvidence` 的历史演示路径，不能发送给当前 `TruthPassEvidenceAnchor` 部署。
 
 建议最终由一个合约管理公共事件，或拆成 `EvidenceAnchor`、`Reputation`、`ConsumerContribution` 三个合约。比赛 Demo 可以使用一个合约，但接口必须预留版本、角色和撤销状态。
 
@@ -312,11 +314,11 @@ chain_unavailable
 
 ### P0：测试网最小闭环
 
-1. 部署一个修订版 `TrustRegistry` 到 Bohr Testnet；
+1. 部署 `TruthPassEvidenceAnchor` 到 Bohr Testnet；
 2. 写入三个 Demo Agent 身份：TruthPass、实验室、消费者；
 3. 使用 `demo/synthetic` 鱼油证据生成 `evidenceRoot`；
 4. 执行 JEV smoke test，但只把模型版本和决策哈希写入链上；
-5. 写入 `recordVerification` 和 `recordFulfilment`；
+5. 写入 `recordVerification`，再按需写入履约、购买和贡献事件；
 6. 从 RPC 和区块浏览器回读 transaction receipt 和事件；
 7. 网页显示真实 `txHash`，没有交易就显示未锚定。
 
