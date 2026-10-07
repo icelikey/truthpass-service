@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { unlinkSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { runCli } from "../src/cli.js";
 
@@ -37,4 +39,53 @@ test("CLI rejects unsupported batch IDs with machine-readable error", async () =
   const result = await runCli(["verify", "--batch", "FO-UNKNOWN", "--json"]);
   assert.equal(result.exitCode, 40);
   assert.equal((result.value as Record<string, any>).code, "BATCH_NOT_FOUND");
+});
+
+
+test("CLI inspect returns consumer-agent product, JEV, and mainnet receipt data", async () => {
+  const result = await runCli(["inspect", "--batch", "FO-2026-001", "--json"]);
+  assert.equal(result.exitCode, 0);
+  const value = result.value as Record<string, any>;
+  assert.equal(value.schemaVersion, "truthpass.cli.inspection.v1");
+  assert.equal(value.command, "inspect");
+  assert.equal(value.status, "accepted");
+  assert.equal(value.product.name, "高浓度鱼油软胶囊");
+  assert.equal(value.batch.id, "FO-2026-001");
+  assert.equal(value.quality.epaDhaPercent, 78);
+  assert.equal(value.evidence.serviceId, "lab-c");
+  assert.equal(value.jev.route, "route_to_rule_verifier");
+  assert.equal(value.verification.verifierVersion, "deterministic-verifier-v1");
+  assert.equal(value.chain.network, "bot-mainnet");
+  assert.equal(value.chain.chainId, 677);
+  assert.equal(value.chain.lifecycle, "anchored");
+  assert.equal(value.chain.anchored, true);
+  assert.match(value.chain.receipts.evidence.txHash, /^0x[0-9a-f]+$/);
+  assert.match(value.chain.receipts.verification.explorerUrl, /scan\.botchain\.ai\/tx\//);
+  assert.equal(value.publicDataBoundary.rawReports, "off_chain");
+  assert.equal(value.publicDataBoundary.notes.length, 3);
+  assert.equal(JSON.stringify(value).includes("apikey_"), false);
+});
+
+test("CLI inspect reports unavailable chain manifest without claiming anchored", async () => {
+  const previous = process.env.TRUTHPASS_MAINNET_REPLAY_MANIFEST;
+  const manifestPath = resolve(process.cwd(), ".test-mainnet-replay-invalid.json");
+  writeFileSync(manifestPath, JSON.stringify({
+    schemaVersion: "truthpass.mainnet.replay.v2",
+    status: "mainnet_receipts_verified",
+    lifecycle: "pending",
+    batchId: "FO-2026-001",
+  }));
+  process.env.TRUTHPASS_MAINNET_REPLAY_MANIFEST = manifestPath;
+  try {
+    const result = await runCli(["inspect", "--batch", "FO-2026-001", "--json"]);
+    assert.equal(result.exitCode, 0);
+    const value = result.value as Record<string, any>;
+    assert.equal(value.chain.lifecycle, "unavailable");
+    assert.equal(value.chain.anchored, false);
+    assert.equal(value.chain.availabilityReason, "manifest_lifecycle_not_anchored");
+  } finally {
+    unlinkSync(manifestPath);
+    if (previous === undefined) delete process.env.TRUTHPASS_MAINNET_REPLAY_MANIFEST;
+    else process.env.TRUTHPASS_MAINNET_REPLAY_MANIFEST = previous;
+  }
 });

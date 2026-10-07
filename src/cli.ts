@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
 import { sha256Hex } from "./hash.js";
 import type { VerificationResult } from "./types.js";
 import { replayFishOilFlow } from "./replay.js";
 import { SafeJevDecisionGate } from "./jev/context.js";
 import { loadLocalEnv, providerFromEnv } from "./jev/http-provider.js";
 
-const CLI_VERSION = "0.1.0";
+const CLI_VERSION = "0.9.1";
 const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "anchor" | "replay" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "anchor" | "replay" | "help";
 
 interface NormalizedService {
   serviceId: string;
   serviceName: string;
+  signer?: string;
   liveStatus: string;
   eligible: boolean;
   score: number;
@@ -50,6 +52,7 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass explain --batch FO-2026-001 [--json]
   truthpass recommend --batch FO-2026-001 [--json]
   truthpass order --batch FO-2026-001 [--json]
+  truthpass inspect --batch FO-2026-001 [--json]
   truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
   truthpass replay --batch FO-2026-001 [--json]
 
@@ -86,7 +89,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
     if (command) return { error: `只能指定一个命令，收到: ${arg}` };
-    if (!["doctor", "discover", "verify", "explain", "recommend", "order", "anchor", "replay", "help"].includes(arg)) {
+    if (!["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "anchor", "replay", "help"].includes(arg)) {
       return { error: `未知命令: ${arg}` };
     }
     command = arg as Command;
@@ -203,24 +206,44 @@ export async function evaluateBatch(batchId: string): Promise<Record<string, unk
   const decisionGate = new SafeJevDecisionGate({ provider: providerConfig.provider, modelId: providerConfig.source === "none" ? "deterministic-fallback" : providerConfig.source });
   const ranking = await registry.evaluate(task, { decisionGate });
   const normalized: NormalizedService[] = ranking.map((item: any): NormalizedService => {
-    const execution = item.execution ?? item.verification;
-    const product = item.product;
-    const eligible = item.eligible ?? execution?.status === "accepted";
+    const verification = item.verification as Record<string, unknown> | undefined;
+    const product = item.product as Record<string, unknown> | undefined;
+    const eligible = item.eligible ?? verification?.status === "accepted";
     return {
       serviceId: item.service.id,
       serviceName: item.service.name,
+      signer: item.service.signer as string | undefined,
       liveStatus: item.probe.status,
       eligible,
       score: item.score,
-      executionStatus: execution?.status ?? "not-executed",
-      productStatus: product?.status ?? "not-evaluated",
-      reasons: [...(execution?.reasons ?? []), ...(product?.reasons ?? []), ...(item.probe.reason ? [item.probe.reason] : [])],
-      evidenceHash: execution?.evidenceHash,
+      executionStatus: typeof verification?.status === "string" ? verification.status : "not-executed",
+      productStatus: typeof product?.status === "string" ? product.status : "not-evaluated",
+      reasons: [...((verification?.reasons as string[] | undefined) ?? []), ...((product?.reasons as string[] | undefined) ?? []), ...(item.probe.reason ? [item.probe.reason] : [])],
+      evidenceHash: verification?.evidenceHash as string | undefined,
     };
   });
   const selected = normalized.find((item) => item.eligible);
   const selectedRanking = ranking.find((item: any) => item.service.id === selected?.serviceId);
   const verificationResult = selectedRanking?.verification as VerificationResult | undefined;
+  const selectedExecution = (selectedRanking?.execution as Record<string, unknown> | undefined)
+    ?? (selectedRanking?.service ? await adapterFor(selectedRanking.service, "valid").execute(makeTask(batchId)) as Record<string, unknown> : undefined);
+  const selectedJevDecision = selectedRanking?.jevDecision as Record<string, unknown> | undefined;
+  const selectedEvidence = selectedExecution
+    ? {
+        serviceId: selectedExecution.serviceId ?? null,
+        taskId: selectedExecution.taskId ?? null,
+        batchId: selectedExecution.batchId ?? null,
+        reportBatchId: selectedExecution.reportBatchId ?? null,
+        productionTime: selectedExecution.productionTime ?? null,
+        reportTime: selectedExecution.reportTime ?? null,
+        logisticsGapHours: selectedExecution.logisticsGapHours ?? null,
+        signatureValid: selectedExecution.signatureValid ?? null,
+        epaDhaPercent: selectedExecution.epaDhaPercent ?? null,
+        peroxideValue: selectedExecution.peroxideValue ?? null,
+        totox: selectedExecution.totox ?? null,
+        coldChainGapHours: selectedExecution.coldChainGapHours ?? null,
+      }
+    : null;
   const status = selected ? (selected.productStatus === "accepted" || selected.productStatus === "not-evaluated" ? "accepted" : "accepted_with_scope") : "rejected";
   return {
     schemaVersion: "truthpass.cli.result.v1",
@@ -239,6 +262,8 @@ export async function evaluateBatch(batchId: string): Promise<Record<string, unk
     // This is the canonical deterministic result reused by replay, the
     // future API and the web demo. Consumers should not reimplement checks.
     verificationResult: verificationResult ?? null,
+    selectedEvidence,
+    jevDecision: selectedJevDecision ?? null,
     jevProvider: providerConfig.source,
     liveApiEnabled: providerConfig.enabled,
     nextAction: status === "accepted" || status === "accepted_with_scope" ? "anchor --dry-run" : "review evidence and retry",
@@ -314,6 +339,183 @@ async function doctor(): Promise<Record<string, unknown>> {
   };
 }
 
+interface ReplayManifestResult {
+  manifest?: Record<string, unknown>;
+  reason?: string;
+}
+
+function loadMainnetReplayManifest(batchId: string): ReplayManifestResult {
+  const candidates = [
+    process.env.TRUTHPASS_MAINNET_REPLAY_MANIFEST,
+    resolve(process.cwd(), "config", "bot-chain-mainnet.replay.json"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", "config", "bot-chain-mainnet.replay.json"),
+  ].filter((item): item is string => Boolean(item));
+  let foundPath = false;
+  for (const manifestPath of candidates) {
+    try {
+      const raw = readFileSync(manifestPath, "utf8");
+      foundPath = true;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed.batchId !== batchId) return { reason: "manifest_batch_mismatch" };
+      if (typeof parsed.schemaVersion !== "string" || !parsed.schemaVersion.startsWith("truthpass.mainnet.replay.")) {
+        return { reason: "manifest_schema_invalid" };
+      }
+      if (parsed.lifecycle !== "anchored") return { reason: "manifest_lifecycle_not_anchored" };
+      if (parsed.status !== "mainnet_receipts_verified") return { reason: "manifest_receipts_not_verified" };
+      return { manifest: parsed };
+    } catch (error) {
+      if (foundPath) return { reason: error instanceof SyntaxError ? "manifest_json_invalid" : "manifest_unreadable" };
+    }
+  }
+  return { reason: "manifest_not_found" };
+}
+
+function receiptFor(
+  manifest: Record<string, unknown> | undefined,
+  eventName: string,
+): Record<string, unknown> | null {
+  if (!manifest || !Array.isArray(manifest.events)) return null;
+  const event = manifest.events.find((item): item is Record<string, unknown> =>
+    Boolean(item && typeof item === "object" && (item as Record<string, unknown>).name === eventName),
+  );
+  if (!event) return null;
+  return {
+    txHash: event.txHash ?? null,
+    blockNumber: event.blockNumber ?? null,
+    explorerUrl: event.explorerUrl ?? null,
+    event: event.event ?? null,
+    receiptStatus: event.receiptStatus ?? null,
+    confirmations: event.confirmations ?? null,
+  };
+}
+
+export async function inspectBatch(batchId: string): Promise<Record<string, unknown>> {
+  const verification = await evaluateBatch(batchId);
+  const ranking = Array.isArray(verification.ranking) ? verification.ranking as Array<Record<string, unknown>> : [];
+  const selected = ranking.find((item) => item.serviceId === verification.selectedServiceId);
+  const evidence = verification.selectedEvidence && typeof verification.selectedEvidence === "object"
+    ? verification.selectedEvidence as Record<string, unknown>
+    : {};
+  const payload = evidence.payload && typeof evidence.payload === "object"
+    ? evidence.payload as Record<string, unknown>
+    : {};
+  const manifestResult = loadMainnetReplayManifest(batchId);
+  const manifest = manifestResult.manifest;
+  const receipts = {
+    evidence: receiptFor(manifest, "evidence"),
+    verification: receiptFor(manifest, "verification"),
+    purchase: receiptFor(manifest, "purchase"),
+    contribution: receiptFor(manifest, "contribution"),
+  };
+  const allReceiptsPresent = Object.values(receipts).every((item) =>
+    item && item.txHash && item.receiptStatus === 1,
+  );
+  const chainManifestReady = Boolean(manifest && allReceiptsPresent);
+  const jevDecision = verification.jevDecision && typeof verification.jevDecision === "object"
+    ? verification.jevDecision as Record<string, unknown>
+    : null;
+  const accepted = verification.status === "accepted" || verification.status === "accepted_with_scope";
+  const productionTime = evidence.productionTime ?? (makeTask(batchId) as Record<string, unknown>).productionTime;
+  return {
+    schemaVersion: "truthpass.cli.inspection.v1",
+    command: "inspect",
+    dataClass: verification.dataClass,
+    status: verification.status,
+    product: {
+      name: "高浓度鱼油软胶囊",
+      category: "营养保健品",
+      batchId,
+    },
+    batch: {
+      id: batchId,
+      batchId,
+      taskId: verification.taskId,
+      productionTime,
+      reportTime: evidence.reportTime ?? null,
+      source: payload.rawMaterialOrigin ?? verification.dataClass,
+      dataMode: payload.evidenceMode ?? verification.dataClass,
+    },
+    quality: {
+      epaDhaPercent: evidence.epaDhaPercent ?? null,
+      peroxideValue: evidence.peroxideValue ?? null,
+      totox: evidence.totox ?? null,
+      logisticsGapHours: evidence.logisticsGapHours ?? null,
+      coldChainGapHours: evidence.coldChainGapHours ?? null,
+    },
+    evidence: {
+      serviceId: verification.selectedServiceId ?? null,
+      serviceName: selected?.serviceName ?? null,
+      signer: selected?.signer ?? null,
+      evidenceHash: verification.evidenceHash ?? null,
+      hash: typeof verification.evidenceHash === "string"
+        ? (verification.evidenceHash.startsWith("0x") ? verification.evidenceHash : `0x${verification.evidenceHash}`)
+        : null,
+      mode: payload.evidenceMode ?? verification.dataClass,
+      sourceMode: payload.evidenceMode ?? verification.dataClass,
+      source: payload.rawMaterialOrigin ?? verification.dataClass,
+      reportBatchId: evidence.reportBatchId ?? null,
+    },
+    jev: {
+      provider: verification.jevProvider,
+      mode: verification.liveApiEnabled ? "live_with_safe_fallback" : "deterministic_fallback",
+      liveApiEnabled: verification.liveApiEnabled,
+      route: jevDecision?.decision ?? (accepted ? "route_to_rule_verifier" : "request_more_evidence"),
+      decision: jevDecision,
+      modelAssisted: jevDecision?.modelAssisted ?? false,
+    },
+    verification: {
+      status: verification.status,
+      score: verification.score,
+      policyId: verification.policyId,
+      policyVersion: verification.policyVersion,
+      verifierVersion: (verification.verificationResult as Record<string, unknown> | null)?.verifierVersion ?? null,
+      checks: (verification.verificationResult as Record<string, unknown> | null)?.checks ?? null,
+      reasons: verification.reasons,
+      missingCodes: (verification.verificationResult as Record<string, unknown> | null)?.missingCodes ?? [],
+      conflictCodes: (verification.verificationResult as Record<string, unknown> | null)?.conflictCodes ?? [],
+    },
+    chain: manifest
+      ? {
+          network: manifest.network ?? null,
+          chainId: manifest.chainId ?? null,
+          contractAddress: manifest.contractAddress ?? null,
+          runId: manifest.runId ?? null,
+          lifecycle: chainManifestReady ? manifest.lifecycle : "unavailable",
+          status: chainManifestReady ? manifest.status : "manifest_receipts_incomplete",
+          anchored: chainManifestReady,
+          evidenceRoot: (manifest.ids as Record<string, unknown> | undefined)?.evidenceRoot ?? null,
+          requestId: (manifest.ids as Record<string, unknown> | undefined)?.requestId ?? null,
+          verificationRequestId: (manifest.ids as Record<string, unknown> | undefined)?.verificationRequestId ?? null,
+          purchaseId: (manifest.ids as Record<string, unknown> | undefined)?.purchaseId ?? null,
+          contributionId: (manifest.ids as Record<string, unknown> | undefined)?.contributionId ?? null,
+          receipts,
+          integrityHash: manifest.integrityHash ?? null,
+          availabilityReason: chainManifestReady ? null : "manifest_receipts_incomplete",
+        }
+      : {
+          network: null,
+          chainId: null,
+          contractAddress: null,
+          runId: null,
+          lifecycle: "unavailable",
+          status: "manifest_unavailable",
+          anchored: false,
+          receipts,
+          availabilityReason: manifestResult.reason ?? "manifest_unavailable",
+        },
+    publicDataBoundary: {
+      rawReports: "off_chain",
+      personalData: "off_chain",
+      privateKeys: "off_chain",
+      notes: [
+        "链上只公开批次标识、证据哈希、验证结论和交易回执元数据。",
+        "原始检测文件、消费者身份、地址、支付信息和签名私钥不通过 CLI 输出。",
+        "dataClass=demo/synthetic 表示当前批次仍是演示数据，不能替代厂家真实产线证明。",
+      ],
+    },
+  };
+}
+
 export async function anchorPlan(batchId: string, network: "testnet" | "mainnet"): Promise<Record<string, unknown>> {
   const verification = await evaluateBatch(batchId);
   const rawEvidenceRoot = String(verification.evidenceHash ?? await sha256Hex(JSON.stringify(verification)));
@@ -350,6 +552,11 @@ function textFor(result: Record<string, unknown>): string {
   if (result.command === "explain") return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n${(result.reasons as string[]).join("；") || "当前演示规则未发现冲突。"}\n`;
   if (result.command === "recommend") return `批次 ${result.batchId}：${result.recommendation}\n${result.reason}\n下一步：${result.consumerNextAction}\n`;
   if (result.command === "order") return `批次 ${result.batchId}：${result.orderStatus}\n${result.reason}\n`;
+  if (result.command === "inspect") {
+    const chain = result.chain as Record<string, unknown>;
+    const verification = result.verification as Record<string, unknown>;
+    return `批次 ${result.batchId}：${verification.status}\n链上：${chain.lifecycle}（${chain.network ?? "unavailable"}）\n证据哈希：${(result.evidence as Record<string, unknown>).evidenceHash ?? "无"}\n`;
+  }
   return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n`;
 }
 
@@ -373,6 +580,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       result = await recommendBatch(parsed.batchId);
     } else if (parsed.command === "order") {
       result = await orderPlan(parsed.batchId);
+    } else if (parsed.command === "inspect") {
+      result = await inspectBatch(parsed.batchId);
     } else {
       result = await evaluateBatch(parsed.batchId);
       if (parsed.command === "explain") result = { ...result, command: "explain", explanation: textFor(result) };
