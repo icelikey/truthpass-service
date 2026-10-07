@@ -5,6 +5,7 @@ import {
   type BotChainConfig,
   type BotChainNetworkAlias,
 } from "./chain-config.js";
+import { createRpcFetch } from "./rpc-fetch.js";
 
 /** A small fetch-compatible type makes the JSON-RPC client easy to test. */
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -569,7 +570,7 @@ export class BotChainClient {
     if (!options.fetch && typeof globalFetch !== "function") {
       throw new BotChainError("No fetch implementation is available for BOT Chain RPC");
     }
-    this.fetchImpl = options.fetch ?? globalFetch.bind(globalThis);
+    this.fetchImpl = options.fetch ?? createRpcFetch({ timeoutMs: options.timeoutMs ?? 15_000 });
     this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 

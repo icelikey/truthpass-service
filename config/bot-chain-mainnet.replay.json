@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "truthpass.mainnet.replay.v2",
+  "status": "mainnet_receipts_verified",
+  "lifecycle": "anchored",
+  "network": "bot-mainnet",
+  "chainId": 677,
+  "contractAddress": "0x0033462bee153cb9DF12b5c447b9C282DbfbE877",
+  "deployerAddress": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+  "domainSeparator": "0xb0843104b533c579fb232c23f6c5a3d900ec0e507e85dec8d99be2cba9a2a8eb",
+  "batchId": "FO-2026-001",
+  "taskId": "task-fish-oil-2026-001",
+  "dataClass": "demo/synthetic",
+  "runId": "FO-2026-001-v1",
+  "ids": {
+    "requestId": "0xeeccdd53031b244279fb7047fb49444c660df34cde6d785640215720e3611419",
+    "evidenceRoot": "0x57b0f3ff45ae1acb067535fce735f913ae08478f7c66a99934f7b03642e64c8f",
+    "verificationRequestId": "0xf9cfaf0ad307f9257da50dbba54c43bc0aad99a5474f2b76f2a9ce75f0019003",
+    "purchaseId": "0x2049454dc7687d9d82e2b2067cf8dd1a3feb11771216a5830a8a7734cd884fbf",
+    "contributionId": "0xaf8fd9067d3ebef5e2a83279940271ceb9d74533ad74c0113c7a303d5daa3d7c"
+  },
+  "events": [
+    {
+      "name": "evidence",
+      "txHash": "0x3ff591a82f012eb05f9f6994aff2af0415c718097587654ebfe4f5c3382b4052",
+      "blockNumber": 25873873,
+      "explorerUrl": "https://scan.botchain.ai/tx/0x3ff591a82f012eb05f9f6994aff2af0415c718097587654ebfe4f5c3382b4052",
+      "event": "EvidenceAnchored",
+      "receiptStatus": 1,
+      "confirmations": 2
+    },
+    {
+      "name": "verification",
+      "txHash": "0x30736a25b354536354b0c7f318a47ed271a0ced6ebc5f4d201bc5990c2377144",
+      "blockNumber": 25873892,
+      "explorerUrl": "https://scan.botchain.ai/tx/0x30736a25b354536354b0c7f318a47ed271a0ced6ebc5f4d201bc5990c2377144",
+      "event": "VerificationRecorded",
+      "receiptStatus": 1,
+      "confirmations": 2
+    },
+    {
+      "name": "purchase",
+      "txHash": "0xad9ce28b3942b6f4257a2d0ee3bb74ce692916fa9d3ac782c2d2d875e7db6aca",
+      "blockNumber": 25873910,
+      "explorerUrl": "https://scan.botchain.ai/tx/0xad9ce28b3942b6f4257a2d0ee3bb74ce692916fa9d3ac782c2d2d875e7db6aca",
+      "event": "PurchaseRecorded",
+      "receiptStatus": 1,
+      "confirmations": 2
+    },
+    {
+      "name": "contribution",
+      "txHash": "0x3514623a2b24374ed8a4589a387745fbb15c4945e641daef52ffa1c7b5d89a8d",
+      "blockNumber": 25873923,
+      "explorerUrl": "https://scan.botchain.ai/tx/0x3514623a2b24374ed8a4589a387745fbb15c4945e641daef52ffa1c7b5d89a8d",
+      "event": "ContributionRecorded",
+      "receiptStatus": 1,
+      "confirmations": 2
+    }
+  ],
+  "recordedAt": "2026-10-07T16:17:38.302Z",
+  "note": "Public receipt metadata only. Private keys, consumer identity and raw evidence remain outside Git.",
+  "integrityHash": "0xb67251417fb5533986ac001bbd15c244fd3e7362bf9bd38ddc43c15f76534b56"
+}

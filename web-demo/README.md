@@ -1,10 +1,10 @@
 # 真验消费者网页演示
 
-> 页面版本：v0.8.0
-> 状态：现场演示原型，数据为 `demo/synthetic`  
-> 最近修改：2026-10-07
-> 修改摘要：与本地 replay、EvidenceEnvelope、JEV 决策门和 BOT Chain 锚定状态合同对齐。
-> 队友下一步：将 `truthpass replay --json` 的结果接入页面；真实 receipt 未确认时保持 `anchor_pending`。
+> 页面版本：v0.9.0
+> 状态：现场观察台，消费者 CLI/BFF 的可视化投影；示例批次为 `demo/synthetic`
+> 最近修改：2026-10-08
+> 修改摘要：网页通过 BFF 调用统一验证链，读取 BOT Chain 主网业务 receipt manifest，并动态展示推荐/反馈状态。
+> 队友下一步：接入真实 EvidenceEnvelope 和独立角色钱包；订单仍由消费者 Agent 调用 Checkout Adapter。
 
 ## 页面定位
 
@@ -12,7 +12,7 @@
 
 ## 当前交互
 
-1. 点击“让 Agent 验证这批鱼油”，观看 CLI 验证事件流；
+1. 点击“让 Agent 验证这批鱼油”，调用 BFF 的统一验证链并观看验证结果；
 2. 查看产品批次、指标、数据缺口和来源；
 3. 展开“链路观察”技术细节；
 4. 打开“评委观察台”查看三个服务的在线状态和本次履约结果；
@@ -28,7 +28,7 @@
 - `replay` 输出的 `anchor_pending` / `anchored` / `failed` 替换链上状态；
 - 服务排序数据替换观察台表格；
 - 消费者授权、购买和反馈接口替换本地状态；
-- 链上交易失败时仍展示链下验收结果和可重试状态。
+- 链上交易失败时仍展示链下验收结果和可重试状态；主网业务 receipt 未确认时保持 `anchor_pending`。
 
 页面不得自行实现另一套验收规则，也不得把 `accepted` 改写成“绝对真实”。
 JEV 只做结构化判别和路由，最终结果仍来自确定性 `Verifier`。当前页面仍使用 `demo/synthetic` 数据，真实交易未确认时不得显示“已上链”。

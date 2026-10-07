@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v0.8.5
-> 最近修改：2026-10-07
-> 本次修改：补充可信商品平台的未来愿景、白牌商家品牌成长和跨品类扩展路径；不改变当前已部署合约和测试网状态。
+> 项目文档版本：v0.9.0
+> 最近修改：2026-10-08
+> 本次修改：接入消费者 Agent CLI、BOT Chain 主网业务 receipt、公开回放 manifest，以及推荐和订单计划入口。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -39,7 +39,7 @@ lab-c：在线、签名有效、指标和冷链通过
 
 演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
 
-比赛网页只是现场观察台，不是产品主入口。完整的消费者 CLI、数据采集关联、链上分层、共建权益和评委展示叙事见 [docs/strategy-v0.4-consumer-cli.md](docs/strategy-v0.4-consumer-cli.md) 与 [docs/cli-contract.md](docs/cli-contract.md)。
+比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md)。
 
 ## 质量规则示例
 
@@ -64,6 +64,10 @@ npm run demo
 npm test
 npm run typecheck
 npm run truthpass -- replay --batch FO-2026-001 --json
+npm run truthpass -- verify --batch FO-2026-001 --json
+npm run truthpass -- recommend --batch FO-2026-001 --json
+npm run truthpass -- order --batch FO-2026-001 --json
+npm run web:server
 ```
 
 ## 目录
@@ -79,6 +83,8 @@ src/consumer.ts                    消费者授权、购买登记和反馈防刷
 src/replay.ts                      验证到消费者贡献的本地完整回放
 src/local-ledger.ts                可校验的本地追加账本（不是区块链替代品）
 src/chain.ts                       BOT Chain RPC、ABI、receipt 和事件校验
+src/rpc-fetch.ts                   Node RPC 代理适配（本机显式 TRUTHPASS_HTTPS_PROXY）
+src/web-server.ts                  网页观察台 BFF 和主网状态回读
 src/demo.ts                        鱼油端到端演示
 contracts/TruthPassEvidenceAnchor.sol 证据、验收、购买、贡献、争议和撤销合约
 examples/fish-oil-batch-task.json  鱼油任务样例
@@ -101,6 +107,8 @@ docs/chain-composition-v0.8.3.md 生产链下数据、Agent 与 BOT Chain 公共
 docs/deployment-v0.8.2.md         部署脚本、Faucet 和部署交接记录
 docs/private-chain-blueprint-v0.8.4.md BOT Chain 运作逻辑、私链职责、联盟链节点和公共检查点方案
 docs/future-vision-v0.8.5.md 可信商品平台愿景、白牌/新生商家品牌成长和跨品类扩展
+docs/release-v0.9.0-consumer-agent-mainnet.md 消费者 Agent、CLI、主网 receipt 和订单适配边界
+config/bot-chain-mainnet.replay.json 主网业务回放公开 receipt manifest
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
@@ -113,9 +121,9 @@ assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 - 交付验收：`verifyExecution`；
 - 履约记录：`FeedbackRecord`；
 - 消费者参与：`ConsumerParticipationRegistry`；
-- 链上锚定：`TruthPassEvidenceAnchor.sol` 和 `src/chain.ts`；真实 Bohr Testnet 部署与七事件回放记录见 [`config/bot-chain-testnet.deployed.json`](config/bot-chain-testnet.deployed.json)；
+- 链上锚定：`TruthPassEvidenceAnchor.sol` 和 `src/chain.ts`；BOT Chain 主网部署与四类业务 receipt 见 [`config/bot-chain-mainnet.deployed.json`](config/bot-chain-mainnet.deployed.json) 和 [`config/bot-chain-mainnet.replay.json`](config/bot-chain-mainnet.replay.json)；
 - 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
-ERC-8004 作为身份、信誉和验证模型的参考；当前仓库已在 BOT Chain Bohr Testnet 完成合约部署、角色回读和七事件生命周期回放。生产上线仍需把测试钱包角色拆分，并接入真实产线、实验室和设备签名。
+ERC-8004 作为身份、信誉和验证模型的参考；当前仓库已在 BOT Chain 主网完成合约部署、角色回读和 `evidence → verification → purchase → contribution` 四类业务 receipt 回放。当前回放仍是 `demo/synthetic`，生产上线仍需把演示钱包角色拆分，并接入真实产线、实验室和设备签名。
 
 JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。

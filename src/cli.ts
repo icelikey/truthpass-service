@@ -13,7 +13,7 @@ const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "anchor" | "replay" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "anchor" | "replay" | "help";
 
 interface NormalizedService {
   serviceId: string;
@@ -48,6 +48,8 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass discover --batch FO-2026-001 [--json]
   truthpass verify --batch FO-2026-001 [--json]
   truthpass explain --batch FO-2026-001 [--json]
+  truthpass recommend --batch FO-2026-001 [--json]
+  truthpass order --batch FO-2026-001 [--json]
   truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
   truthpass replay --batch FO-2026-001 [--json]
 
@@ -84,7 +86,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
     if (command) return { error: `只能指定一个命令，收到: ${arg}` };
-    if (!["doctor", "discover", "verify", "explain", "anchor", "replay", "help"].includes(arg)) {
+    if (!["doctor", "discover", "verify", "explain", "recommend", "order", "anchor", "replay", "help"].includes(arg)) {
       return { error: `未知命令: ${arg}` };
     }
     command = arg as Command;
@@ -243,6 +245,45 @@ export async function evaluateBatch(batchId: string): Promise<Record<string, unk
   };
 }
 
+async function recommendBatch(batchId: string): Promise<Record<string, unknown>> {
+  const verification = await evaluateBatch(batchId);
+  const accepted = verification.status === "accepted" || verification.status === "accepted_with_scope";
+  return {
+    schemaVersion: "truthpass.cli.recommendation.v1",
+    command: "recommend",
+    dataClass: verification.dataClass,
+    batchId,
+    product: "高浓度鱼油软胶囊",
+    recommendation: accepted ? "recommend" : "do_not_recommend",
+    reason: accepted ? "当前批次通过确定性规则验收，且存在可用检测服务。" : "当前批次没有满足公开验收规则，不向消费者推荐。",
+    selectedServiceId: verification.selectedServiceId ?? null,
+    verificationStatus: verification.status,
+    evidenceHash: verification.evidenceHash ?? null,
+    consumerNextAction: accepted ? "show_evidence_then_prepare_order" : "request_more_evidence",
+  };
+}
+
+async function orderPlan(batchId: string): Promise<Record<string, unknown>> {
+  const recommendation = await recommendBatch(batchId);
+  const accepted = recommendation.recommendation === "recommend";
+  return {
+    schemaVersion: "truthpass.cli.order-plan.v1",
+    command: "order",
+    dataClass: recommendation.dataClass,
+    batchId,
+    product: recommendation.product,
+    recommendation: recommendation.recommendation,
+    orderStatus: accepted ? "prepared_pending_checkout" : "blocked_by_verification",
+    purchaseCommitment: accepted ? "prepared_for_consumer_consent" : null,
+    checkoutAdapter: accepted ? "merchant_checkout_required" : null,
+    chainPurchaseRecord: accepted ? "prepared_pending_signed_purchase" : null,
+    evidenceHash: recommendation.evidenceHash,
+    reason: accepted
+      ? "真验只准备订单与购买承诺；付款、地址和履约由消费者 Agent 调用的商家适配器完成。"
+      : "未通过公开验收规则，订单不会继续。",
+  };
+}
+
 async function doctor(): Promise<Record<string, unknown>> {
   loadLocalEnv();
   const providerConfig = providerFromEnv();
@@ -307,6 +348,8 @@ function textFor(result: Record<string, unknown>): string {
     return `本地回放：${result.status}\n批次：${result.batchId}\n阶段：验证 ${stages.verification}，锚定 ${stages.evidenceAnchor}，购买 ${stages.purchase}，贡献 ${stages.contribution}，争议 ${stages.dispute}，替代 ${stages.supersede}\n账本：${ledger.valid ? "有效" : "无效"}（${ledger.eventCount} 个事件）\n不会发送交易。\n`;
   }
   if (result.command === "explain") return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n${(result.reasons as string[]).join("；") || "当前演示规则未发现冲突。"}\n`;
+  if (result.command === "recommend") return `批次 ${result.batchId}：${result.recommendation}\n${result.reason}\n下一步：${result.consumerNextAction}\n`;
+  if (result.command === "order") return `批次 ${result.batchId}：${result.orderStatus}\n${result.reason}\n`;
   return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n`;
 }
 
@@ -326,6 +369,10 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       result = await anchorPlan(parsed.batchId, parsed.network);
     } else if (parsed.command === "replay") {
       result = await replayFishOilFlow(parsed.batchId, parsed.network) as unknown as Record<string, unknown>;
+    } else if (parsed.command === "recommend") {
+      result = await recommendBatch(parsed.batchId);
+    } else if (parsed.command === "order") {
+      result = await orderPlan(parsed.batchId);
     } else {
       result = await evaluateBatch(parsed.batchId);
       if (parsed.command === "explain") result = { ...result, command: "explain", explanation: textFor(result) };

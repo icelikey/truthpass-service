@@ -20,7 +20,7 @@
           <a href="#co-build">消费者共建</a>
         </nav>
         <div class="top-actions">
-          <span class="demo-chip"><span class="pulse"></span>DEMO / SYNTHETIC</span>
+          <span class="demo-chip"><span class="pulse"></span><span data-runtime-status>MAINNET / PENDING</span></span>
           <button class="ghost-button" id="open-observer" type="button">评委观察台</button>
         </div>
       </header>
@@ -56,7 +56,7 @@
               <div class="cli-line"><span class="check">✓</span> JEV 输出结构化路由：证据范围可判别</div>
               <div class="cli-line"><span class="check">✓</span> 验收 EPA+DHA / 氧化 / 冷链证据</div>
               <div class="cli-line muted"><span class="waiting">◌</span> 等待消费者确认共建反馈…</div>
-              <div class="chat-bubble agent" id="agent-answer">这批鱼油按当前公开规则通过。检测报告、冷链记录和链上锚定均已找到；重金属数据尚未覆盖。</div>
+              <div class="chat-bubble agent" id="agent-answer">等待服务端读取验证结果；演示数据为 demo/synthetic，主网状态以 receipt 回读为准。</div>
             </div>
             <div class="terminal-foot"><span>JSON 输出 · schema v0.5.0 · JEV gate demo</span><button id="copy-command" type="button">复制 CLI 命令</button></div>
           </div>
@@ -89,7 +89,7 @@
 
             <article class="decision-card">
               <div class="decision-top"><span class="decision-icon">✓</span><span><small>真验 Agent 结论</small><strong id="decision-label">按当前规则通过</strong></span><span class="decision-arrow">↗</span></div>
-              <p id="decision-copy">基于第三方检测、冷链记录和链上证据锚定，当前未发现规则范围内的异常。</p>
+              <p id="decision-copy">等待服务端 Verifier 返回结果；网页不会把部署元数据当作业务已上链。</p>
               <div class="decision-divider"></div>
               <div class="source-summary"><span class="source-avatars"><b>检</b><b>冷</b><b>链</b><b>消</b></span><span>4 类来源已关联</span><button class="inline-link" id="view-sources" type="button">查看来源</button></div>
             </article>
@@ -145,9 +145,9 @@
       <p class="drawer-intro">网页只是同一条 CLI 验证链的可视化投影。每一步都可以回到事件、规则和哈希。</p>
       <div class="observer-row"><span>当前验证任务</span><strong>ver-FO-2026-001-001</strong></div>
       <div class="observer-row"><span>规则集</span><strong>fish-oil-freshness-v1</strong></div>
-      <div class="observer-row"><span>JEV 决策门</span><strong>route_to_rule · 0.94 · demo</strong></div>
-      <div class="observer-row"><span>证据根哈希</span><strong>0xb436…dca6</strong></div>
-      <div class="observer-row"><span>链上状态</span><strong class="green-text">待锚定 · 可重试</strong></div>
+      <div class="observer-row"><span>JEV 决策门</span><strong>结构化路由 · 服务端返回</strong></div>
+      <div class="observer-row"><span>证据根哈希</span><strong data-evidence-hash>等待验证</strong></div>
+      <div class="observer-row"><span>链上状态</span><strong class="amber-text" data-chain-status>读取主网状态…</strong></div>
       <div class="service-table"><div class="table-head"><span>服务</span><span>历史</span><span>当前</span><span>本次</span></div><div><span>lab-a</span><span>92</span><span class="amber-text">降级</span><span class="red-text">拒绝</span></div><div><span>lab-b</span><span>96</span><span class="red-text">离线</span><span>未调用</span></div><div><span>lab-c</span><span>88</span><span class="green-text">在线</span><span class="green-text">通过</span></div></div>
       <div class="drawer-boundary"><span>边界提醒</span><p>链上确认提交过的记录没有被悄悄改写；设备、实验室和生产方的现实真实性仍需要多源、复检和争议机制共同维护。</p></div>
     </aside>

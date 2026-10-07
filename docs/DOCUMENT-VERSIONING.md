@@ -1,11 +1,11 @@
 # 真验文档版本规范
 
-> 文档版本：v0.8.5
+> 文档版本：v0.9.0
 > 状态：当前生效
-> 最近修改：2026-10-07
-> 修改摘要：补充可信商品平台未来愿景、白牌商家品牌成长和跨品类扩展路径。
-> 影响范围：BOT Chain、ERC-8004、Agent 架构、鱼油 Demo、证据接入、JEV、合约、消费者权益、网页演示和代码评审
-> 队友下一步：读取公开部署配置接入 CLI/网页，并按生产要求拆分角色钱包。
+> 最近修改：2026-10-08
+> 修改摘要：记录消费者 Agent + CLI 交付入口、BOT Chain 主网四类业务 receipt、公开 replay manifest 和订单适配边界。
+> 影响范围：BOT Chain、CLI、消费者 Agent、鱼油 Demo、JEV、合约、网页 BFF、订单适配器
+> 队友下一步：接入真实签名 EvidenceEnvelope、拆分角色钱包，并实现商家 Checkout Adapter。
 
 ## 目的
 
@@ -60,7 +60,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.8.2 | 历史部署交接版本 | 安全部署脚本、余额门禁、部署后回读和 Faucet 阻塞记录 |
 | v0.8.3 | 历史测试网验收版本 | 真实合约地址、角色回读、七事件生命周期 receipt 和链上组合说明 |
 | v0.8.4 | 历史私链战略版本 | BOT Chain 运作逻辑、联盟链构筑边界、节点治理、链下数据范围和公共 checkpoint 方案 |
-| v0.8.5 | 当前未来愿景版本 | 跨品类扩展、白牌/新生商家品牌成长、公共信誉增长飞轮和路演表达 |
+| v0.8.5 | 历史战略版本 | 跨品类扩展、白牌/新生商家品牌成长、公共信誉增长飞轮和路演表达 |
+| v0.9.0 | 当前交付版本 | 消费者 Agent + CLI 入口、主网业务 receipt 回放、网页 BFF 回读、推荐与订单计划合同 |
 
 ## 变更日志
 
@@ -186,3 +187,11 @@ docs(v0.4.1): clarify evidence envelope fields
 - **商业影响**：定义低成本接入、标准证据卡、共建权益和信誉累积如何帮助新商家建立品牌；
 - **品类影响**：规划从鱼油扩展到营养、婴童、个护、宠物、家居和可验证服务；
 - **状态边界**：跨品类平台、品牌成长服务和长期商业飞轮均属于规划，当前比赛实现仍以鱼油 Demo 和 BOT Chain 测试网回放为准。
+
+### v0.9.0 — 2026-10-08
+
+- **新增代码**：`src/rpc-fetch.ts`、主网 replay manifest、CLI `recommend`/`order` 命令和网页 BFF 主网回读；
+- **主网结果**：Chain ID `677` 上完成 `EvidenceAnchored`、`VerificationRecorded`、`PurchaseRecorded`、`ContributionRecorded` 四类业务 receipt，公开清单见 `config/bot-chain-mainnet.replay.json`；
+- **交付入口**：消费者 Agent 或用户自有 Agent 安装 CLI 后可以查询批次、获得推荐，并生成需要商家 Checkout Adapter 承接的订单计划；
+- **网络适配**：本机可通过显式 `TRUTHPASS_HTTPS_PROXY` 访问主网 RPC，生产服务器应使用受管直接出口或代理；
+- **状态边界**：主网回放仍使用 `demo/synthetic` 数据，真实厂家/实验室/设备签名、角色隔离、支付和配送回调尚未完成。
