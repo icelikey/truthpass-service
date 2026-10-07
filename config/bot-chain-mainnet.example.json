@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "truthpass.chain-deployment.v0.8.5",
+  "status": "not_deployed",
+  "network": "bot-mainnet",
+  "chainId": 677,
+  "chainIdHex": "0x2a5",
+  "rpcUrl": "https://rpc.botchain.ai",
+  "explorerUrl": "https://scan.botchain.ai",
+  "contract": {
+    "name": "TruthPassEvidenceAnchor",
+    "address": "",
+    "deploymentTxHash": "",
+    "domainSeparator": ""
+  },
+  "roles": {
+    "defaultAdmin": "",
+    "evidenceWriter": "",
+    "verifier": "",
+    "purchaseWriter": "",
+    "contributionWriter": "",
+    "dispute": "",
+    "revoker": ""
+  },
+  "verification": {
+    "ethChainId": "pending",
+    "ethGetCode": "pending",
+    "deployedChainId": "pending",
+    "domainSeparatorReadback": "pending",
+    "roleReadback": "pending"
+  },
+  "notes": [
+    "Public metadata only. Never put private keys, seed phrases or API keys here.",
+    "Fill this file only after a mainnet receipt and readback have been verified.",
+    "Raw reports, IoT telemetry and consumer data remain off-chain."
+  ]
+}
