@@ -1,9 +1,9 @@
 # 真验文档版本规范
 
-> 文档版本：v0.8.3
+> 文档版本：v0.8.4
 > 状态：当前生效
 > 最近修改：2026-10-07
-> 修改摘要：完成 Bohr Testnet 部署、角色回读和鱼油七事件生命周期回放，补充链上组合说明。
+> 修改摘要：补充 BOT Chain 运作逻辑、私链/联盟链职责和公共 checkpoint 锚定方案。
 > 影响范围：BOT Chain、ERC-8004、Agent 架构、鱼油 Demo、证据接入、JEV、合约、消费者权益、网页演示和代码评审
 > 队友下一步：读取公开部署配置接入 CLI/网页，并按生产要求拆分角色钱包。
 
@@ -58,7 +58,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.8.0 | 当前完整目标实现 | EvidenceEnvelope、Ed25519 验签、JEV 安全决策门、完整 Chain Adapter、本地六事件回放和统一锚定状态 |
 | v0.8.1 | 历史配置交接版本 | Bohr Testnet 参数、部署回填模板、角色和 receipt 验收门禁 |
 | v0.8.2 | 历史部署交接版本 | 安全部署脚本、余额门禁、部署后回读和 Faucet 阻塞记录 |
-| v0.8.3 | 当前测试网验收版本 | 真实合约地址、角色回读、七事件生命周期 receipt 和链上组合说明 |
+| v0.8.3 | 历史测试网验收版本 | 真实合约地址、角色回读、七事件生命周期 receipt 和链上组合说明 |
+| v0.8.4 | 当前私链战略版本 | BOT Chain 运作逻辑、联盟链构筑边界、节点治理、链下数据范围和公共 checkpoint 方案 |
 
 ## 变更日志
 
@@ -168,3 +169,11 @@ docs(v0.4.1): clarify evidence envelope fields
 - **新增代码**：`scripts/grant-bot-chain-roles.mjs`、`scripts/replay-bot-chain.mjs` 及对应 npm 命令；
 - **新增文档**：`docs/chain-composition-v0.8.3.md`，说明链下生产数据、Agent、确定性 Verifier 与 BOT Chain 公共锚定层的边界；
 - **安全边界**：原始报告、IoT 明细和消费者隐私仍留在链下；任何真实业务上线前必须拆分角色钱包并完成设备签名、样品交接、隐私授权和争议流程。
+
+### v0.8.4 — 2026-10-07
+
+- **新增文档**：`docs/private-chain-blueprint-v0.8.4.md`；
+- **修改方向**：解释当前 BOT Chain 的交易/合约运作逻辑，并把未来私链定义为多方许可联盟链，而不是厂家单独控制的平行链；
+- **架构影响**：增加链下证据仓、联盟链内部事件账本、BOT Chain 公共 checkpoint 三者的职责边界；
+- **技术建议**：多方参与时优先评估 EVM 兼容的 Hyperledger Besu + QBFT，消费者通过 CLI/公开读接口查询，不运行验证节点；
+- **状态边界**：Besu 联盟链、checkpoint relayer、生产密钥隔离和真实多方节点目前均未实现；当前真实状态仍以 BOT Chain Bohr Testnet 七事件回放为准。
