@@ -15,7 +15,7 @@ export async function verifyServiceExecution(
     taskMatches: evidence.taskId === task.taskId,
     batchMatches: evidence.batchId === task.batchId && evidence.reportBatchId === task.batchId,
     reportAfterProduction: evidence.reportTime >= task.productionTime,
-    signatureValid: !task.acceptance.requireSignature || evidence.signatureValid,
+    signatureValid: task.acceptance.requireSignature === true && evidence.signatureValid === true,
   };
 
   const passed = Object.values(checks).filter(Boolean).length;

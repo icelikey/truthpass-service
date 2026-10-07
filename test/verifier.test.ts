@@ -44,6 +44,16 @@ test("rejects evidence for another batch", async () => {
   assert.match(result.reasons.join(" "), /批次/);
 });
 
+test("fails closed when task disables a required service signature", async () => {
+  const result = await verifyServiceExecution(
+    { ...task, acceptance: { ...task.acceptance, requireSignature: false } },
+    { ...evidence, signatureValid: false },
+  );
+
+  assert.equal(result.status, "rejected");
+  assert.equal(result.checks.signatureValid, false);
+});
+
 test("rejects fish-oil product evidence below quality thresholds", async () => {
   const result = await assessProductBatch(
     task,
