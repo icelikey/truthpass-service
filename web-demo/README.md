@@ -1,10 +1,10 @@
 # 真验消费者网页演示
 
-> 页面版本：v0.5.0  
+> 页面版本：v0.8.0
 > 状态：现场演示原型，数据为 `demo/synthetic`  
-> 最近修改：2026-10-06  
-> 修改摘要：新增消费者 Agent/CLI 入口、JEV 结构化判别节点、证据故事、链路观察台和消费者共建交互。  
-> 队友下一步：将静态数据替换成 CLI/API 返回值，接入 JEV adapter，保留同一套用户流程和状态。
+> 最近修改：2026-10-07
+> 修改摘要：与本地 replay、EvidenceEnvelope、JEV 决策门和 BOT Chain 锚定状态合同对齐。
+> 队友下一步：将 `truthpass replay --json` 的结果接入页面；真实 receipt 未确认时保持 `anchor_pending`。
 
 ## 页面定位
 
@@ -25,9 +25,10 @@
 - `VerificationResult` 替换页面中的静态结论；
 - `EvidenceEnvelope[]` 替换五个链路节点的静态说明；
 - `JevDecision` 替换 JEV 节点的静态枚举、置信度和缺口码；
+- `replay` 输出的 `anchor_pending` / `anchored` / `failed` 替换链上状态；
 - 服务排序数据替换观察台表格；
 - 消费者授权、购买和反馈接口替换本地状态；
 - 链上交易失败时仍展示链下验收结果和可重试状态。
 
 页面不得自行实现另一套验收规则，也不得把 `accepted` 改写成“绝对真实”。
-JEV 只做结构化判别和路由，最终结果仍来自确定性 `Verifier`；当前页面中的 JEV 是 `demo/synthetic` 适配器。
+JEV 只做结构化判别和路由，最终结果仍来自确定性 `Verifier`。当前页面仍使用 `demo/synthetic` 数据，真实交易未确认时不得显示“已上链”。

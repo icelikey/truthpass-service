@@ -28,6 +28,7 @@ test("CLI anchor is dry-run only and produces an idempotent plan", async () => {
   assert.equal(first.exitCode, 0);
   assert.deepEqual(first.value, second.value);
   assert.equal((first.value as Record<string, any>).status, "prepared_offline_not_submitted");
+  assert.equal((first.value as Record<string, any>).anchorStatus, "anchor_pending");
   const refused = await runCli(["anchor", "--batch", "FO-2026-001"]);
   assert.equal(refused.exitCode, 60);
 });

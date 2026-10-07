@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v0.5.0
+> 项目文档版本：v0.8.0
 > 最近修改：2026-10-06
-> 本次修改：新增 JEV 结构化决策门方案；网页展示消费者 Agent、JEV、确定性验收和链上锚定的同一条验证链。
+> 本次修改：补齐 EvidenceEnvelope、JEV 安全决策门、确定性验收、BOT Chain 交易适配器和本地完整回放。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -63,17 +63,24 @@ npm install
 npm run demo
 npm test
 npm run typecheck
+npm run truthpass -- replay --batch FO-2026-001 --json
 ```
 
 ## 目录
 
 ```text
 src/types.ts                       通用任务、证据和服务类型
+src/evidence.ts                    EvidenceEnvelope、规范化哈希和 Ed25519 验签
+src/jev/model.ts                   JEV 输入输出合同
+src/jev/context.ts                 JEV 安全决策门和确定性降级
 src/verifier.ts                    确定性鱼油验收规则
 src/registry.ts                    服务探测、排序和履约反馈
 src/consumer.ts                    消费者授权、购买登记和反馈防刷
+src/replay.ts                      验证到消费者贡献的本地完整回放
+src/local-ledger.ts                可校验的本地追加账本（不是区块链替代品）
+src/chain.ts                       BOT Chain RPC、ABI、receipt 和事件校验
 src/demo.ts                        鱼油端到端演示
-contracts/TrustRegistry.sol        服务信誉与消费者贡献事件合约草案
+contracts/TruthPassEvidenceAnchor.sol 证据、验收、购买、贡献、争议和撤销合约
 examples/fish-oil-batch-task.json  鱼油任务样例
 test/                              验收和消费者参与测试
 docs/fish-oil-development-plan.md  完整开发方案和分工
@@ -85,6 +92,8 @@ docs/strategy-v0.4-consumer-cli.md 消费者 CLI、链上结构、商业与展�
 docs/cli-contract.md               CLI 命令、JSON 输出和安全合同
 docs/DOCUMENT-VERSIONING.md        文档版本、修改说明和协作规则
 docs/jev-integration-v0.5.md       JEV 结构化决策门、类型合同和降级策略
+docs/target-development-v0.8.0.md 完整目标、完成标准和部署门禁
+docs/implementation-v0.8.0.md      本地完整回放和链上状态合同
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
@@ -97,9 +106,9 @@ assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 - 交付验收：`verifyExecution`；
 - 履约记录：`FeedbackRecord`；
 - 消费者参与：`ConsumerParticipationRegistry`；
-- 链上锚定：`TrustRegistry.sol`；
+- 链上锚定：`TruthPassEvidenceAnchor.sol` 和 `src/chain.ts`；
 - 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
-ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环，正式部署时再接入 BOT Chain 和注册表适配器。
+ERC-8004 作为身份、信誉和验证模型的参考；当前仓库已具备 BOT Chain 的合约和交易适配器，但测试网合约地址与真实交易仍需部署门禁确认。
 
 JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。

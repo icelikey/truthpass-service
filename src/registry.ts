@@ -1,5 +1,7 @@
 import { sha256Hex } from "./hash.js";
 import { verifyExecution } from "./verifier.js";
+import { buildJevState } from "./jev/context.js";
+import type { DecisionGate, JevDecision } from "./jev/model.js";
 import type {
   FeedbackRecord,
   ProbeResult,
@@ -18,6 +20,9 @@ export interface RankedService {
   service: ServiceCard;
   probe: ProbeResult;
   verification?: VerificationResult;
+  jevDecision?: JevDecision;
+  /** Only healthy, schema-valid services with a deterministic accepted result can be selected. */
+  eligible: boolean;
   score: number;
 }
 
@@ -29,7 +34,7 @@ export class ServiceRegistry {
     this.services.set(card.id, { card, adapter });
   }
 
-  async evaluate(task: TaskRequest): Promise<RankedService[]> {
+  async evaluate(task: TaskRequest, options: { decisionGate?: DecisionGate } = {}): Promise<RankedService[]> {
     const candidates = [...this.services.values()].filter(({ card }) =>
       card.kind === task.serviceKind && card.capabilities.includes(task.capability),
     );
@@ -38,8 +43,13 @@ export class ServiceRegistry {
     for (const candidate of candidates) {
       const probe = await candidate.adapter.probe(task);
       let verification: VerificationResult | undefined;
+      let jevDecision: JevDecision | undefined;
       if (probe.status !== "offline" && probe.capabilityMatch && probe.schemaValid) {
-        verification = await verifyExecution(task, await candidate.adapter.execute(task));
+        const evidence = await candidate.adapter.execute(task);
+        if (options.decisionGate) {
+          jevDecision = await options.decisionGate.decide(buildJevState(task, evidence));
+        }
+        verification = await verifyExecution(task, evidence, jevDecision ? { jevDecision } : undefined);
       }
 
       const liveScore = probe.status === "healthy" ? 100 : probe.status === "degraded" ? 55 : 0;
@@ -47,7 +57,12 @@ export class ServiceRegistry {
       const score = Math.round(
         candidate.card.historicalScore * 0.25 + liveScore * 0.2 + acceptanceScore * 0.55,
       );
-      ranked.push({ service: candidate.card, probe, verification, score });
+      const eligible =
+        probe.status !== "offline" &&
+        probe.capabilityMatch &&
+        probe.schemaValid &&
+        (verification?.status === "accepted" || verification?.status === "accepted_with_scope");
+      ranked.push({ service: candidate.card, probe, verification, jevDecision, eligible, score });
     }
 
     return ranked.sort((a, b) => b.score - a.score);

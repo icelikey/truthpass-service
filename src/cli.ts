@@ -3,13 +3,17 @@
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { sha256Hex } from "./hash.js";
+import type { VerificationResult } from "./types.js";
+import { replayFishOilFlow } from "./replay.js";
+import { SafeJevDecisionGate } from "./jev/context.js";
+import { loadLocalEnv, providerFromEnv } from "./jev/http-provider.js";
 
 const CLI_VERSION = "0.1.0";
 const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "anchor" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "anchor" | "replay" | "help";
 
 interface NormalizedService {
   serviceId: string;
@@ -45,6 +49,7 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass verify --batch FO-2026-001 [--json]
   truthpass explain --batch FO-2026-001 [--json]
   truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
+  truthpass replay --batch FO-2026-001 [--json]
 
 说明:
   verify 复用仓库中的 ServiceRegistry 和 Verifier，输出可审计结果。
@@ -79,7 +84,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
     if (command) return { error: `只能指定一个命令，收到: ${arg}` };
-    if (!["doctor", "discover", "verify", "explain", "anchor", "help"].includes(arg)) {
+    if (!["doctor", "discover", "verify", "explain", "anchor", "replay", "help"].includes(arg)) {
       return { error: `未知命令: ${arg}` };
     }
     command = arg as Command;
@@ -186,12 +191,15 @@ function demoServices(): Array<{ card: Record<string, unknown>; mode: "valid" | 
   ];
 }
 
-async function evaluateBatch(batchId: string): Promise<Record<string, unknown>> {
+export async function evaluateBatch(batchId: string): Promise<Record<string, unknown>> {
+  loadLocalEnv();
   const { ServiceRegistry } = await import("./registry.js") as { ServiceRegistry: new () => any };
   const registry = new ServiceRegistry();
   const task = makeTask(batchId);
   for (const { card, mode } of demoServices()) registry.register(card, adapterFor(card, mode));
-  const ranking = await registry.evaluate(task);
+  const providerConfig = providerFromEnv();
+  const decisionGate = new SafeJevDecisionGate({ provider: providerConfig.provider, modelId: providerConfig.source === "none" ? "deterministic-fallback" : providerConfig.source });
+  const ranking = await registry.evaluate(task, { decisionGate });
   const normalized: NormalizedService[] = ranking.map((item: any): NormalizedService => {
     const execution = item.execution ?? item.verification;
     const product = item.product;
@@ -209,6 +217,8 @@ async function evaluateBatch(batchId: string): Promise<Record<string, unknown>> 
     };
   });
   const selected = normalized.find((item) => item.eligible);
+  const selectedRanking = ranking.find((item: any) => item.service.id === selected?.serviceId);
+  const verificationResult = selectedRanking?.verification as VerificationResult | undefined;
   const status = selected ? (selected.productStatus === "accepted" || selected.productStatus === "not-evaluated" ? "accepted" : "accepted_with_scope") : "rejected";
   return {
     schemaVersion: "truthpass.cli.result.v1",
@@ -224,11 +234,18 @@ async function evaluateBatch(batchId: string): Promise<Record<string, unknown>> 
     reasons: selected?.reasons ?? ["没有找到当前可用且通过验收的服务"],
     ranking: normalized,
     evidenceHash: selected?.evidenceHash,
+    // This is the canonical deterministic result reused by replay, the
+    // future API and the web demo. Consumers should not reimplement checks.
+    verificationResult: verificationResult ?? null,
+    jevProvider: providerConfig.source,
+    liveApiEnabled: providerConfig.enabled,
     nextAction: status === "accepted" || status === "accepted_with_scope" ? "anchor --dry-run" : "review evidence and retry",
   };
 }
 
 async function doctor(): Promise<Record<string, unknown>> {
+  loadLocalEnv();
+  const providerConfig = providerFromEnv();
   return {
     schemaVersion: "truthpass.cli.doctor.v1",
     tool: "truthpass",
@@ -238,7 +255,13 @@ async function doctor(): Promise<Record<string, unknown>> {
     fixtureAvailable: true,
     authRequired: false,
     authSource: "not_required_for_fixture",
-    jev: { adapter: "not_configured", mode: "deterministic_demo_only" },
+    jev: {
+      adapter: providerConfig.source === "none" ? "not_configured" : `${providerConfig.source}-http`,
+      mode: providerConfig.enabled ? "live_with_safe_fallback" : "deterministic_demo_only",
+      configured: providerConfig.source !== "none",
+      enabled: providerConfig.enabled,
+      reason: providerConfig.reason,
+    },
     chain: {
       defaultNetwork: "bohr-testnet",
       rpcConfigured: true,
@@ -250,10 +273,12 @@ async function doctor(): Promise<Record<string, unknown>> {
   };
 }
 
-async function anchorPlan(batchId: string, network: "testnet" | "mainnet"): Promise<Record<string, unknown>> {
+export async function anchorPlan(batchId: string, network: "testnet" | "mainnet"): Promise<Record<string, unknown>> {
   const verification = await evaluateBatch(batchId);
-  const evidenceRoot = verification.evidenceHash ?? await sha256Hex(JSON.stringify(verification));
-  const requestId = await sha256Hex(`truthpass:${network}:${batchId}:${evidenceRoot}`);
+  const rawEvidenceRoot = String(verification.evidenceHash ?? await sha256Hex(JSON.stringify(verification)));
+  const evidenceRoot = rawEvidenceRoot.startsWith("0x") ? rawEvidenceRoot : `0x${rawEvidenceRoot}`;
+  const rawRequestId = await sha256Hex(`truthpass:${network}:${batchId}:${evidenceRoot}`);
+  const requestId = rawRequestId.startsWith("0x") ? rawRequestId : `0x${rawRequestId}`;
   return {
     schemaVersion: "truthpass.cli.anchor-plan.v1",
     command: "anchor",
@@ -261,6 +286,8 @@ async function anchorPlan(batchId: string, network: "testnet" | "mainnet"): Prom
     batchId,
     network: network === "testnet" ? "bohr-testnet" : "bot-mainnet",
     status: "prepared_offline_not_submitted",
+    anchorStatus: "anchor_pending",
+    lifecycle: "anchor_pending",
     requestId,
     evidenceRoot,
     verificationStatus: verification.status,
@@ -274,6 +301,11 @@ function textFor(result: Record<string, unknown>): string {
   if (result.command === "doctor") return `真验 CLI ${result.version}\nfixture: ${result.fixtureMode}\nJEV: ${((result.jev as Record<string, unknown>).mode)}\n链上: ${((result.chain as Record<string, unknown>).status)}\n`;
   if (result.command === "discover") return `批次 ${result.batchId} 的候选服务：\n${(result.services as Array<Record<string, unknown>>).map((item) => `- ${item.id} ${item.name} (${item.kind})`).join("\n")}\n`;
   if (result.command === "anchor") return `锚定计划已生成：${result.status}\n批次：${result.batchId}\n网络：${result.network}\nrequestId：${result.requestId}\n不会发送交易。\n`;
+  if (result.command === "replay") {
+    const stages = result.stages as Record<string, unknown>;
+    const ledger = result.ledger as Record<string, unknown>;
+    return `本地回放：${result.status}\n批次：${result.batchId}\n阶段：验证 ${stages.verification}，锚定 ${stages.evidenceAnchor}，购买 ${stages.purchase}，贡献 ${stages.contribution}，争议 ${stages.dispute}，替代 ${stages.supersede}\n账本：${ledger.valid ? "有效" : "无效"}（${ledger.eventCount} 个事件）\n不会发送交易。\n`;
+  }
   if (result.command === "explain") return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n${(result.reasons as string[]).join("；") || "当前演示规则未发现冲突。"}\n`;
   return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n`;
 }
@@ -292,11 +324,13 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     else if (parsed.command === "anchor") {
       if (!parsed.dryRun) return { exitCode: 60, value: { schemaVersion: "truthpass.cli.error.v1", code: "CHAIN_ANCHOR_DISABLED", message: "当前只允许 anchor --dry-run；真实提交尚未接入。" } };
       result = await anchorPlan(parsed.batchId, parsed.network);
+    } else if (parsed.command === "replay") {
+      result = await replayFishOilFlow(parsed.batchId, parsed.network) as unknown as Record<string, unknown>;
     } else {
       result = await evaluateBatch(parsed.batchId);
       if (parsed.command === "explain") result = { ...result, command: "explain", explanation: textFor(result) };
     }
-    const exitCode = result.status === "rejected" ? 10 : 0;
+    const exitCode = result.status === "rejected" ? 10 : result.status === "failed" ? 60 : 0;
     return { exitCode, value: result };
   } catch (error) {
     return { exitCode: 70, value: { schemaVersion: "truthpass.cli.error.v1", code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : String(error) } };
