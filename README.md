@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v0.8.4
+> 项目文档版本：v0.8.5
 > 最近修改：2026-10-07
-> 本次修改：补充 BOT Chain 运作逻辑和私链/联盟链构筑蓝图；不改变当前已部署合约和测试网状态。
+> 本次修改：补充可信商品平台的未来愿景、白牌商家品牌成长和跨品类扩展路径；不改变当前已部署合约和测试网状态。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -100,6 +100,7 @@ config/bot-chain-testnet.deployed.json 真实测试网地址、角色和生命�
 docs/chain-composition-v0.8.3.md 生产链下数据、Agent 与 BOT Chain 公共锚定层组合
 docs/deployment-v0.8.2.md         部署脚本、Faucet 和部署交接记录
 docs/private-chain-blueprint-v0.8.4.md BOT Chain 运作逻辑、私链职责、联盟链节点和公共检查点方案
+docs/future-vision-v0.8.5.md 可信商品平台愿景、白牌/新生商家品牌成长和跨品类扩展
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
