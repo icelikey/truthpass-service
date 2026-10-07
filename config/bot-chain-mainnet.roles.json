@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "truthpass.mainnet.roles.v0.8.5",
+  "status": "roles_receipt_verified",
+  "network": "bot-mainnet",
+  "chainId": 677,
+  "contractAddress": "0x0033462bee153cb9DF12b5c447b9C282DbfbE877",
+  "deployerAddress": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+  "singleWalletMode": true,
+  "receipts": [
+    {
+      "name": "EVIDENCE_WRITER_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0x00471c7c920d8666507c189d58fd86667fe70cc4c063a80346d05bd5d28d0913",
+      "status": "verified"
+    },
+    {
+      "name": "VERIFIER_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0xb712418def3abdff6c53ac5e6f396e0ba853085af9aa4e2eb7b38b99a93acbb7",
+      "status": "verified"
+    },
+    {
+      "name": "PURCHASE_WRITER_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0xd51ccfdf5b3fa910a672c2065f79574080f3277322307e2cebcd52a002842713",
+      "status": "verified"
+    },
+    {
+      "name": "CONTRIBUTION_WRITER_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0x068e9b6cbe8952a404c1bdd1b4f6f85de26a82e24069c3e8cf0f7a60a6e73932",
+      "status": "verified"
+    },
+    {
+      "name": "DISPUTE_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0xa59e90f5138f4fe8891f174c005660cc4d8e5aef793373291eb0e75d37470d3a",
+      "status": "verified"
+    },
+    {
+      "name": "REVOKER_ROLE",
+      "target": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+      "txHash": "0x424a126ce81c7e342a18be1f63f7d7f6b5b23a3bff2a5ec4c284b56a03682c69",
+      "status": "verified"
+    }
+  ],
+  "note": "Public role metadata only. Private keys stay outside Git."
+}
