@@ -103,6 +103,7 @@ body {
 .chip {
   font-size: 11px;
   letter-spacing: 1.2px;
+  margin-left: auto;
   color: var(--cyan-2);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -159,7 +160,7 @@ body {
   gap: 18px;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 14px 36px 44px;
+  padding: 14px 36px 24px;
   align-items: stretch;
   grid-auto-rows: minmax(660px, auto);
 }
@@ -735,8 +736,64 @@ body {
   box-shadow: 0 0 24px rgba(93, 213, 213, 0.4);
 }
 
+/* ================= 检测报告 ================= */
+.report-section {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 36px 0;
+  position: relative;
+  z-index: 1;
+}
+.report-section .panel {
+  margin: 0;
+}
+.report-section h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.report-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 6px;
+}
+.report-label { color: var(--muted); font-size: 13px; }
+.report-actions {
+  display: flex;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+.report-actions .join-btn { width: auto; }
+.report-preview {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(5, 13, 25, 0.4);
+}
+.report-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.report-preview-head strong { font-size: 15px; }
+.report-preview-meta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.report-preview-meta div { display: grid; gap: 4px; min-width: 0; }
+.report-preview-meta span { color: var(--muted); font-size: 12px; }
+.report-preview-meta strong { font-size: 16px; overflow-wrap: anywhere; }
+
 /* ================= 底部 · 消费者共建 ================= */
-.community { max-width: 1440px; margin: 0 auto; padding: 6px 36px 40px; position: relative; }
+.community { max-width: 1440px; margin: 0 auto; padding: 24px 36px 40px; position: relative; }
 
 .community-bar {
   display: flex;
@@ -949,6 +1006,7 @@ body {
   white-space: nowrap; transition: background .2s, border-color .2s;
 }
 .ghost-button:hover { background: rgba(93, 213, 213, 0.1); border-color: rgba(125, 232, 232, 0.4); }
+.topbar > .ghost-button:first-of-type { margin-left: auto; }
 
 /* ============ 观察台抽屉 ============ */
 .drawer-scrim { position: fixed; inset: 0; background: rgba(3, 8, 16, 0.6); z-index: 40; backdrop-filter: blur(2px); }
@@ -1012,6 +1070,69 @@ body {
 .join-btn.full span { display: block; }
 .join-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .consent-foot { color: var(--muted); font-size: 11px; margin: 8px 0 0; line-height: 1.5; text-align: center; }
+
+/* ============ 账号登录注册 ============ */
+.account { display: flex; align-items: center; gap: 8px; }
+.account-email { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
+.auth-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 360px; max-width: 92vw; z-index: 60;
+  background: rgba(10, 26, 46, 0.98); border: 1px solid var(--line);
+  border-radius: 16px; padding: 24px;
+  box-shadow: 0 24px 60px rgba(2, 8, 16, 0.6);
+}
+.auth-form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.auth-form label { display: grid; gap: 6px; }
+.auth-form label span { color: var(--muted); font-size: 12px; }
+.auth-form input {
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line);
+  border-radius: 10px; color: var(--text); padding: 10px 12px; font-size: 14px; outline: none;
+}
+.auth-form input:focus { border-color: var(--cyan); }
+.auth-error { color: var(--reject); font-size: 12.5px; margin: 0; }
+.auth-switch { background: none; border: none; color: var(--cyan-2); font-size: 13px; cursor: pointer; padding: 4px 0; }
+.history-modal { max-height: 80vh; overflow-y: auto; }
+.history-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.history-item {
+  border: 1px solid var(--line-soft); border-radius: 10px;
+  background: rgba(5, 13, 25, 0.4);
+}
+.history-item details > summary { list-style: none; cursor: pointer; }
+.history-item details > summary::-webkit-details-marker { display: none; }
+.history-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 14px;
+}
+.history-main { min-width: 0; }
+.history-main b { display: block; font-size: 14px; }
+.history-main span { color: var(--muted); font-size: 12px; }
+.history-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.history-time { color: var(--muted); font-size: 11px; }
+.history-detail {
+  border-top: 1px solid var(--line-soft); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.history-detail-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  font-size: 12px; color: var(--muted);
+}
+.history-detail-meta b { color: var(--text); font-weight: 600; }
+.history-detail-meta b.green-text { color: var(--ok); }
+.history-detail-meta b.red-text { color: var(--reject); }
+.history-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.history-metric {
+  border: 1px solid var(--line-soft); border-radius: 8px;
+  padding: 8px 10px; background: rgba(255, 255, 255, 0.025);
+}
+.history-metric .k { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.history-metric .v { font-size: 13px; color: var(--text); }
+.history-metric .v.pass { color: var(--ok); }
+.history-metric .v.fail { color: var(--reject); }
+.history-rules { display: flex; flex-direction: column; gap: 4px; }
+.history-rule { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); }
+.history-rule .ok { color: var(--ok); }
+.history-rule .no { color: var(--reject); }
+.history-hash { font-family: var(--font-num); font-size: 11px; color: var(--cyan-2); word-break: break-all; }
 
 /* ============ 骨架屏 ============ */
 .skeleton {
@@ -1077,9 +1198,9 @@ body {
   display: flex; flex-direction: column; gap: 12px;
 }
 .tech-item { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
-.tech-index {
+.tech-item .tech-index {
   flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line);
-  color: var(--cyan-2); display: grid; place-items: center; font-size: 10px; margin-top: 1px;
+  color: var(--cyan-2); display: grid; place-items: center; font-size: 10px; line-height: 1; margin-top: 1px;
 }
 .tech-item b { display: block; color: var(--text); font-size: 12.5px; font-weight: 600; }
 .tech-item span { display: block; color: var(--muted); font-size: 11px; }

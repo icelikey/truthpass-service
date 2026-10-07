@@ -122,6 +122,11 @@ const FISH_OIL_BATCHES: Record<string, { name: string; image: string; epaDha: nu
   "FO-2026-003": { name: "儿童 DHA 鱼油滴剂", image: "/assets/fish-oil-003.png", epaDha: 90, peroxide: 1.2, totox: 6, coldGap: 3, productionDate: "2026-03-15", origin: "阿拉斯加海域", passed: true, heavyMetals: { pb: 0.03, hg: 0.01, cd: 0.01, as: 0.08 } },
   "FO-2026-004": { name: "三文鱼油胶囊", image: "/assets/fish-oil-004.png", epaDha: 75, peroxide: 6.8, totox: 14, coldGap: 2.5, productionDate: "2026-04-02", origin: "智利海域", passed: false, heavyMetals: { pb: 0.04, hg: 0.03, cd: 0.05, as: 0.2 } },
   "FO-2026-005": { name: "南极磷虾油", image: "/assets/fish-oil-005.png", epaDha: 85, peroxide: 1.5, totox: 8, coldGap: 7, productionDate: "2026-05-20", origin: "南极海域", passed: false, heavyMetals: { pb: 0.05, hg: 0.02, cd: 0.18, as: 0.3 } },
+  "FO-2026-006": { name: "高浓度 Omega-3 软胶囊", image: "/assets/fish-oil-006.png", epaDha: 88, peroxide: 1.6, totox: 8, coldGap: 1.5, productionDate: "2026-06-10", origin: "挪威深海", passed: true, heavyMetals: { pb: 0.02, hg: 0.01, cd: 0.02, as: 0.12 } },
+  "FO-2026-007": { name: "深海鳕鱼肝油", image: "/assets/fish-oil-007.png", epaDha: 80, peroxide: 2.0, totox: 10, coldGap: 2, productionDate: "2026-06-18", origin: "北大西洋海域", passed: true, heavyMetals: { pb: 0.03, hg: 0.02, cd: 0.04, as: 0.18 } },
+  "FO-2026-008": { name: "孕妇 DHA 鱼油", image: "/assets/fish-oil-008.png", epaDha: 92, peroxide: 1.2, totox: 6, coldGap: 1, productionDate: "2026-07-02", origin: "阿拉斯加海域", passed: true, heavyMetals: { pb: 0.01, hg: 0.01, cd: 0.01, as: 0.06 } },
+  "FO-2026-009": { name: "鱼油凝胶软糖", image: "/assets/fish-oil-009.png", epaDha: 55, peroxide: 2.5, totox: 12, coldGap: 2.5, productionDate: "2026-07-15", origin: "南太平洋海域", passed: false, heavyMetals: { pb: 0.04, hg: 0.02, cd: 0.05, as: 0.2 } },
+  "FO-2026-010": { name: "高纯度磷虾油胶囊", image: "/assets/fish-oil-010.png", epaDha: 86, peroxide: 6.5, totox: 18, coldGap: 3, productionDate: "2026-07-28", origin: "南极海域", passed: false, heavyMetals: { pb: 0.05, hg: 0.03, cd: 0.15, as: 0.3 } },
 };
 
 function heavyMetalStatus(metals: HeavyMetals): "pass" | "fail" {
@@ -264,8 +269,12 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 function extractBatchId(text: string): string {
   const full = text.match(/([A-Z]{2,3}-\d{4}-\d{3})/i);
   if (full) return full[1].toUpperCase();
-  const short = text.match(/\b0*0?([1-5])\b/);
-  if (short && FISH_OIL_BATCHES[`FO-2026-00${short[1]}`]) return `FO-2026-00${short[1]}`;
+  const short = text.match(/\b0*(\d{1,2})\b/);
+  if (short) {
+    const n = parseInt(short[1], 10);
+    const id = `FO-2026-${String(n).padStart(3, "0")}`;
+    if (FISH_OIL_BATCHES[id]) return id;
+  }
   return "";
 }
 

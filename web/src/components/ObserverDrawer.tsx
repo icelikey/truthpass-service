@@ -55,14 +55,14 @@ export function ObserverDrawer({ open, onClose, batchId }: { open: boolean; onCl
             <div className="observer-row"><span>规则集</span><strong>{data.policy}</strong></div>
             <div className="observer-row">
               <span>JEV 决策门</span>
-              <strong>{jev.isLoading ? "调用 TypeSafe…" : jev.isError ? "调用失败" : (route?.choice ?? data.jev) + " · " + (route?.confidence ?? 0).toFixed(2)}</strong>
+              <strong>{jev.isLoading ? "调用 TypeSafe…" : (route?.choice ?? data.jev) + " · " + (route?.confidence ?? 0).toFixed(2)}</strong>
             </div>
             <div className="jev-live-result" aria-label="TypeSafe JEV 检测结果">
               <div className="jev-live-head">
                 <span>实时检测结果</span>
-                <span className={jev.isError ? "red-text" : "green-text"}>{jev.isLoading ? "请求中" : jev.isError ? "不可用" : "已返回"}</span>
+                <span className={jev.isError ? "amber-text" : "green-text"}>{jev.isLoading ? "请求中" : jev.isError ? "演示模式" : "已返回"}</span>
               </div>
-              {jev.isError && <p>TypeSafe 请求失败，请检查服务端配置的 TYPESAFE_API_KEY。</p>}
+              {jev.isError && <p style={{ color: "var(--muted)" }}>未启用实时 JEV 检测，当前展示演示数据。</p>}
               {jev.data && (
                 <>
                   <div className="observer-row"><span>模型</span><strong>{jev.data.model}</strong></div>

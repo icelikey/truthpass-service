@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 // Frontend dev server proxies /api to the shared TypeScript backend (api-server.ts).
 export default defineConfig({
   root: "web",
+  envDir: "..",
   plugins: [react()],
   server: {
     port: 5173,
