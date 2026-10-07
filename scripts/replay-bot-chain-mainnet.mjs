@@ -16,8 +16,8 @@ const ABI = [
   "function DEPLOYED_CHAIN_ID() view returns (uint256)",
   "function anchorEvidence(bytes32,bytes32,bytes32,bytes32,bytes32,uint8,uint256,bytes32) returns (bool)",
   "function recordVerification(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint8,uint8,uint256,bytes32) returns (bool)",
-  "event EvidenceAnchored(bytes32 indexed requestId,bytes32 indexed evidenceRoot,bytes32 indexed subjectHash,uint8 state,address writer)",
-  "event VerificationRecorded(bytes32 indexed requestId,bytes32 indexed evidenceRoot,bytes32 indexed taskHash,uint8 state,uint8 scope,address verifier)",
+  "event EvidenceAnchored(bytes32 indexed requestId,bytes32 indexed evidenceRoot,bytes32 indexed subjectHash,bytes32 schemaHash,bytes32 sourceHash,uint8 state,address writer)",
+  "event VerificationRecorded(bytes32 indexed requestId,bytes32 indexed evidenceRoot,bytes32 indexed taskHash,bytes32 policyHash,bytes32 verifierVersionHash,bytes32 resultHash,uint8 state,uint8 scope,address verifier)",
 ];
 
 function fail(message) { throw new Error(`[replay-bot-chain-mainnet] ${message}`); }
