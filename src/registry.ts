@@ -3,6 +3,7 @@ import { verifyExecution } from "./verifier.js";
 import { buildJevState } from "./jev/context.js";
 import type { DecisionGate, JevDecision } from "./jev/model.js";
 import type {
+  ExecutionEvidence,
   FeedbackRecord,
   ProbeResult,
   ServiceAdapter,
@@ -19,6 +20,8 @@ interface RegisteredService {
 export interface RankedService {
   service: ServiceCard;
   probe: ProbeResult;
+  /** The signed execution evidence used by the deterministic verifier. */
+  execution?: ExecutionEvidence;
   verification?: VerificationResult;
   jevDecision?: JevDecision;
   /** Only healthy, schema-valid services with a deterministic accepted result can be selected. */
@@ -42,14 +45,15 @@ export class ServiceRegistry {
     const ranked: RankedService[] = [];
     for (const candidate of candidates) {
       const probe = await candidate.adapter.probe(task);
+      let execution: ExecutionEvidence | undefined;
       let verification: VerificationResult | undefined;
       let jevDecision: JevDecision | undefined;
       if (probe.status !== "offline" && probe.capabilityMatch && probe.schemaValid) {
-        const evidence = await candidate.adapter.execute(task);
+        execution = await candidate.adapter.execute(task);
         if (options.decisionGate) {
-          jevDecision = await options.decisionGate.decide(buildJevState(task, evidence));
+          jevDecision = await options.decisionGate.decide(buildJevState(task, execution));
         }
-        verification = await verifyExecution(task, evidence, jevDecision ? { jevDecision } : undefined);
+        verification = await verifyExecution(task, execution, jevDecision ? { jevDecision } : undefined);
       }
 
       const liveScore = probe.status === "healthy" ? 100 : probe.status === "degraded" ? 55 : 0;
@@ -62,7 +66,7 @@ export class ServiceRegistry {
         probe.capabilityMatch &&
         probe.schemaValid &&
         (verification?.status === "accepted" || verification?.status === "accepted_with_scope");
-      ranked.push({ service: candidate.card, probe, verification, jevDecision, eligible, score });
+      ranked.push({ service: candidate.card, probe, execution, verification, jevDecision, eligible, score });
     }
 
     return ranked.sort((a, b) => b.score - a.score);

@@ -1,11 +1,11 @@
-# 真验 CLI 合同草案
+# 真验 CLI 合同
 
-> 文档版本：v0.4.0  
-> 状态：草案，等待 Agent/后端实现  
-> 最近修改：2026-10-06  
-> 修改摘要：定义消费者 Agent 的 CLI 命令、JSON 输出、退出码和安全边界。  
-> 影响范围：CLI、API、网页调用、自动化测试  
-> 队友下一步：实现命令解析和 schema 校验，并补充一条 CLI 回放测试。
+> 文档版本：v0.9.1
+> 状态：当前生效
+> 最近修改：2026-10-08
+> 修改摘要：补充面向消费者 Agent 的 `inspect` 综合查询合同，并对齐主网回执 manifest。
+> 影响范围：CLI、消费者 Agent、主网回执、网页观察台、自动化测试
+> 队友下一步：将 `demo/synthetic` 批次替换为带来源签名的现实 EvidenceEnvelope。
 
 ## 目标
 
@@ -18,11 +18,46 @@ discover        找商品、批次和候选服务
 probe           探测服务当前可用性和能力
 verify          执行确定性验收
 explain         按受众解释验收结果
+inspect         汇总商品、证据、验收、JEV 和主网回执
 reputation      查询服务履约历史和撤销
 consent         管理消费者最小授权
 purchase        绑定购买证明和批次
 feedback        提交一次性消费者反馈
 anchor          将证据或结果哈希锚定到链上
+```
+
+消费者 Agent 的推荐调用顺序是：
+
+```text
+truthpass inspect --batch FO-2026-001 --json
+truthpass recommend --batch FO-2026-001 --json
+truthpass order --batch FO-2026-001 --json
+```
+
+`inspect` 是只读总览接口。它把 `verify` 的确定性结论和公开主网 manifest 合并成一个机器可读对象，便于 Agent 在一次调用中回答“这是什么、为什么可信、哪些信息已经上链、下一步能做什么”。它不会读取私钥，也不会发起链上写入。
+
+`inspect` 的 `chain` 字段只引用公开回执元数据：Chain ID、合约地址、生命周期、四类业务交易哈希和 Explorer 链接。报告全文、图片、传感器明细和个人信息仍然不通过 CLI 默认输出。
+
+最小输出结构如下：
+
+```json
+{
+  "schemaVersion": "truthpass.cli.inspection.v1",
+  "command": "inspect",
+  "dataClass": "demo/synthetic",
+  "product": { "name": "高浓度鱼油软胶囊" },
+  "batch": { "id": "FO-2026-001", "batchId": "FO-2026-001" },
+  "verification": { "status": "accepted", "verifierVersion": "deterministic-verifier-v1" },
+  "evidence": { "evidenceHash": "0x...", "hash": "0x...", "mode": "demo/synthetic", "sourceMode": "demo/synthetic" },
+  "jev": { "provider": "none", "route": "route_to_rule_verifier", "mode": "deterministic_fallback" },
+  "chain": {
+    "network": "bot-mainnet",
+    "chainId": 677,
+    "lifecycle": "anchored",
+    "receipts": { "evidence": { "txHash": "0x..." } }
+  },
+  "publicDataBoundary": { "rawReports": "off_chain", "personalData": "off_chain", "privateKeys": "off_chain", "notes": ["链上只公开批次标识、证据哈希、验证结论和交易回执元数据", "原始检测文件、消费者身份和私钥不通过 CLI 输出", "demo/synthetic 不替代真实产线证明"] }
+}
 ```
 
 ## 退出码

@@ -1,9 +1,9 @@
 # 真验 v0.9.0：消费者 Agent 主网交付方案
 
-> 文档版本：v0.9.0
+> 文档版本：v0.9.1
 > 状态：当前交付说明（主网业务回放已确认；真实厂家数据接入仍是下一阶段）
 > 最近修改：2026-10-08
-> 修改摘要：把最新网页、消费者 CLI、JEV/确定性验收、BOT Chain 主网业务 receipt 和订单适配边界统一为一条交付链路。
+> 修改摘要：把 `inspect` 综合查询纳入消费者 Agent 交付链路，统一展示证据、验收、JEV 和主网回执。
 > 影响范围：消费者 Agent、CLI、网页观察台、BOT Chain、鱼油 Demo、订单适配器
 > 队友下一步：把 `demo/synthetic` 数据替换为带签名的厂家/实验室/设备 EvidenceEnvelope，并为购买与反馈接入独立角色钱包。
 
@@ -38,7 +38,10 @@ Agent 向用户解释证据、缺口、范围和链上回执
 ```powershell
 truthpass verify --batch FO-2026-001 --json
 truthpass recommend --batch FO-2026-001 --json
+truthpass inspect --batch FO-2026-001 --json
 ```
+
+`inspect` 是消费者 Agent 的只读总览命令。它聚合鱼油产品和批次、确定性 Verifier 结论、JEV 路由信息、公开证据哈希，以及 BOT Chain 主网四类业务 receipt。Agent 可以先用该命令向用户解释证据，再根据 `verification.status` 和 `chain.lifecycle` 决定是否调用 `recommend` 或 `order`。
 
 `verify` 返回批次、规则版本、候选服务排序、确定性验收结果和证据哈希。`recommend` 只在验收通过且存在当前可用服务时返回 `recommend`。JEV 只能决定路由、缺口和下一步动作，不能直接把自然语言输出当成通过。
 

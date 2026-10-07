@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v0.9.0
+> 项目文档版本：v0.9.1
 > 最近修改：2026-10-08
-> 本次修改：接入消费者 Agent CLI、BOT Chain 主网业务 receipt、公开回放 manifest，以及推荐和订单计划入口。
+> 本次修改：补充消费者 Agent 的 `inspect` 综合查询入口，聚合确定性验收、JEV 路由和 BOT Chain 主网回执。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -66,6 +66,7 @@ npm run typecheck
 npm run truthpass -- replay --batch FO-2026-001 --json
 npm run truthpass -- verify --batch FO-2026-001 --json
 npm run truthpass -- recommend --batch FO-2026-001 --json
+npm run truthpass -- inspect --batch FO-2026-001 --json
 npm run truthpass -- order --batch FO-2026-001 --json
 npm run web:server
 ```
@@ -108,6 +109,7 @@ docs/deployment-v0.8.2.md         部署脚本、Faucet 和部署交接记录
 docs/private-chain-blueprint-v0.8.4.md BOT Chain 运作逻辑、私链职责、联盟链节点和公共检查点方案
 docs/future-vision-v0.8.5.md 可信商品平台愿景、白牌/新生商家品牌成长和跨品类扩展
 docs/release-v0.9.0-consumer-agent-mainnet.md 消费者 Agent、CLI、主网 receipt 和订单适配边界
+examples/consumer-agent-cli.mjs 用户 Agent 通过 child_process 调用 CLI 的最小示例
 config/bot-chain-mainnet.replay.json 主网业务回放公开 receipt manifest
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图

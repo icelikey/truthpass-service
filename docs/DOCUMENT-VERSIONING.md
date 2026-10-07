@@ -61,7 +61,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.8.3 | 历史测试网验收版本 | 真实合约地址、角色回读、七事件生命周期 receipt 和链上组合说明 |
 | v0.8.4 | 历史私链战略版本 | BOT Chain 运作逻辑、联盟链构筑边界、节点治理、链下数据范围和公共 checkpoint 方案 |
 | v0.8.5 | 历史战略版本 | 跨品类扩展、白牌/新生商家品牌成长、公共信誉增长飞轮和路演表达 |
-| v0.9.0 | 当前交付版本 | 消费者 Agent + CLI 入口、主网业务 receipt 回放、网页 BFF 回读、推荐与订单计划合同 |
+| v0.9.0 | 历史交付版本 | 消费者 Agent + CLI 入口、主网业务 receipt 回放、网页 BFF 回读、推荐与订单计划合同 |
+| v0.9.1 | 当前交付版本 | 新增 `inspect` 综合查询，聚合确定性验收、JEV 路由和主网回执，提供 Agent 调用示例 |
 
 ## 变更日志
 
@@ -195,3 +196,11 @@ docs(v0.4.1): clarify evidence envelope fields
 - **交付入口**：消费者 Agent 或用户自有 Agent 安装 CLI 后可以查询批次、获得推荐，并生成需要商家 Checkout Adapter 承接的订单计划；
 - **网络适配**：本机可通过显式 `TRUTHPASS_HTTPS_PROXY` 访问主网 RPC，生产服务器应使用受管直接出口或代理；
 - **状态边界**：主网回放仍使用 `demo/synthetic` 数据，真实厂家/实验室/设备签名、角色隔离、支付和配送回调尚未完成。
+
+### v0.9.1 — 2026-10-08
+
+- **新增代码**：CLI `inspect` 综合查询和 `test/cli.test.ts` 结构化输出测试；
+- **新增示例**：`examples/consumer-agent-cli.mjs`，展示用户自己的 Agent 如何通过 `child_process` 调用 CLI；
+- **合同变化**：`docs/cli-contract.md` 增加 `truthpass.cli.inspection.v1`，明确公开主网回执与链下原始数据的边界；
+- **兼容性**：保留 `verify`、`recommend`、`order` 和 `replay` 原有命令，`inspect` 只读，不发起链上写入；
+- **队友下一步**：把 `demo/synthetic` 替换为带签名的厂家、实验室和设备 EvidenceEnvelope，并接入真实 Checkout Adapter。
