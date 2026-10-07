@@ -288,6 +288,7 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
           <p className="product-kicker">深海 · 可追溯 · 更安心</p>
           <h2 className="product-name">{product.name}</h2>
           <p className="product-batch">{product.batchId}</p>
+          <p className="product-source">数据来源：{product.dataSource === "postgres" ? "数据库登记" : "演示 fixtures"} · {product.dataMode ?? "demo/synthetic"}</p>
           <p className="product-tags">
             {product.supplyChainTags.map((tag) => (
               <span key={tag}>{tag}</span>

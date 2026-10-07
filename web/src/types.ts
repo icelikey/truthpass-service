@@ -31,6 +31,8 @@ export interface ProductBatch {
   category: string;
   origin: string;
   productionDate: string;
+  dataSource?: "postgres" | "fixtures";
+  dataMode?: "demo/synthetic" | "external";
   supplyChainTags: string[];
   imageUrl: string;
   verification: {

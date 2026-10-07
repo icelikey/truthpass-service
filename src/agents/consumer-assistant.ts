@@ -66,10 +66,10 @@ export function answerConsumerQuestion(question: string, snapshot: ConsumerEvide
 
   const facts = activeEvidence.map((item) => {
     const source = sourceLabels[item.sourceKind];
-    const trust = item.sourceKind === "manufacturer" ? "厂商自报" : signatureText(item.signature);
-    return evidenceLabels[item.kind] + "：" + source + "来源，" + trust + "（" + item.evidenceId + "）";
+    if (item.sourceKind === "manufacturer") return evidenceLabels[item.kind] + "由生产方提交，目前属于厂商自报信息。";
+    return evidenceLabels[item.kind] + "来自" + source + "，" + signatureText(item.signature) + "。";
   });
-  for (const item of revokedEvidence) facts.push(evidenceLabels[item.kind] + "：证据已撤销（" + item.evidenceId + "）");
+  for (const item of revokedEvidence) facts.push(evidenceLabels[item.kind] + "已撤销，目前不再作为有效依据。");
   for (const kind of missingKinds) facts.push(evidenceLabels[kind] + "：当前批次未登记相关证据");
 
   const uncertainties: string[] = [];

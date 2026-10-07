@@ -52,3 +52,10 @@ test("explains who submitted evidence without equating source identity with trut
   assert.ok(answer.headline.includes("厂商") && answer.headline.includes("第三方机构"));
   assert.match(answer.headline, /不等于记录内容已经独立验证/);
 });
+
+test("consumer facts are readable without leaking internal evidence IDs", () => {
+  const answer = answerConsumerQuestion("这批目前能确认什么？", snapshot);
+  assert.ok(answer.facts.some((fact) => fact.includes("第三方检测来自第三方机构")));
+  assert.ok(answer.facts.some((fact) => fact.includes("生产记录由生产方提交")));
+  assert.ok(answer.facts.every((fact) => !fact.includes("lab-001") && !fact.includes("factory-001")));
+});

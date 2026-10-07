@@ -141,6 +141,21 @@ function heavyMetalValue(metals: HeavyMetals): string {
 }
 
 function metricsFor(batchId: string) {
+  const dbBatch = repository.getBatch(batchId);
+  if (dbBatch) {
+    const records = repository.listEvidence(batchId);
+    const inspection = batchId === BATCH_ID ? inspectionEvidence.payload : [...records].reverse().find((item) => item.kind === "inspection")?.payload ?? {};
+    const coldChain = [...records].reverse().find((item) => item.kind === "cold_chain")?.payload ?? {};
+    const epa = numberValue(inspection.epaDhaPercent);
+    const peroxide = numberValue(inspection.peroxideValue);
+    const coldGap = numberValue(inspection.coldChainGapHours) ?? numberValue(coldChain.maxGapHours);
+    return [
+      { key: "epa-dha", icon: "fish", label: "EPA+DHA", value: epa === undefined ? "未登记" : String(epa) + "%", unit: "检测结果（占总脂肪酸）", bar: epa === undefined ? 0 : Math.min(100, epa), status: epa === undefined ? "missing" : epa >= 70 ? "pass" : "fail" },
+      { key: "peroxide", icon: "warning", label: "过氧化值", value: peroxide === undefined ? "未登记" : String(peroxide), unit: "meq/kg", bar: peroxide === undefined ? 0 : Math.min(100, Math.round((peroxide / 5) * 100)), status: peroxide === undefined ? "missing" : peroxide <= 5 ? "pass" : "fail" },
+      { key: "cold-chain", icon: "snowflake", label: "冷链", value: coldGap === undefined ? "未登记" : String(coldGap) + "小时", unit: "全程温度异常时长", bar: coldGap === undefined ? 0 : Math.min(100, Math.round((coldGap / 6) * 100)), status: coldGap === undefined ? "missing" : coldGap <= 6 ? "pass" : "fail" },
+      { key: "heavy-metal", icon: "alert", label: "重金属报告", value: "当前批次未登记", unit: "铅 / 汞 / 镉 / 砷", bar: 0, status: "missing" },
+    ];
+  }
   const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
   const hm = heavyMetalStatus(b.heavyMetals);
   return [
@@ -149,6 +164,10 @@ function metricsFor(batchId: string) {
     { key: "cold-chain", icon: "snowflake", label: "冷链", value: `${b.coldGap}小时`, unit: "全程温度异常时长", bar: Math.min(100, Math.round((b.coldGap / 6) * 100)), status: b.coldGap <= 6 ? "pass" : "fail" },
     { key: "heavy-metal", icon: "alert", label: "重金属报告", value: heavyMetalValue(b.heavyMetals), unit: "铅 / 汞 / 镉 / 砷", bar: hm === "pass" ? 15 : 85, status: hm },
   ];
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function journeyFor(batchId: string) {
@@ -351,7 +370,7 @@ async function consumerChat(batchId: string, question: string, res: ServerRespon
     evidence,
   });
   const lines = [
-    { cls: "cmd", text: "$ zhenyan ask --batch " + batchId },
+    { cls: "cmd", text: "正在读取批次 " + batchId + " 的登记证据" },
     { cls: "lead", text: context.product.name + " · " + batchId },
     { cls: "conclusion", text: card.headline },
     ...card.uncertainties.map((text) => ({ cls: "disclaimer", text })),
@@ -391,21 +410,32 @@ async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): P
   if (productMatch && req.method === "GET") {
     const batchId = productMatch[1];
     const b = FISH_OIL_BATCHES[batchId];
-    if (!b) {
+    const dbBatch = repository.getBatch(batchId);
+    const dbProduct = dbBatch ? repository.getProduct(dbBatch.productId) : undefined;
+    if (!b && !dbBatch) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
     }
+    const display = b ?? {
+      name: dbProduct?.name ?? "鱼油批次",
+      origin: "数据库已登记，原料来源待核实",
+      productionDate: dbBatch?.productionAt.slice(0, 10) ?? "未登记",
+      image: "/assets/fish-oil-product.png",
+      passed: false,
+    };
     sendJson(res, 200, {
       batchId,
-      name: b.name,
+      name: dbProduct?.name ?? display.name,
       category: "鱼油",
-      origin: b.origin,
-      productionDate: b.productionDate,
+      origin: display.origin,
+      productionDate: dbBatch?.productionAt.slice(0, 10) ?? display.productionDate,
+      dataSource: dbBatch ? "postgres" : "fixtures",
+      dataMode: dbBatch?.dataMode ?? "demo/synthetic",
       supplyChainTags: ["来自纯净海域", "全程冷链", "多重检测", "区块链存证"],
-      imageUrl: b.image,
+      imageUrl: display.image,
       verification: {
-        status: b.passed ? "accepted" : "rejected",
-        summary: b.passed ? "基于多源证据的综合判断" : "部分指标未达验收标准",
+        status: batchId === BATCH_ID ? (assessment.status === "accepted" ? "accepted" : "rejected") : (display.passed ? "accepted" : "rejected"),
+        summary: batchId === BATCH_ID ? "基于数据库登记证据和确定性规则" : (display.passed ? "基于演示数据的综合判断" : "部分指标未达验收标准"),
         scope: `${batchId} 批次及当前公开的规则 ${policy.version}`,
       },
       productionProcess: productionProcessFor(batchId),
