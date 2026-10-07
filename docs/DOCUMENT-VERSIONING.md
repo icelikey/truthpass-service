@@ -1,11 +1,11 @@
 # 真验文档版本规范
 
-> 文档版本：v0.8.1
+> 文档版本：v0.8.2
 > 状态：当前生效
 > 最近修改：2026-10-07
-> 修改摘要：补充 Bohr Testnet 安全配置模板和部署回填字段，明确未部署前的状态边界。
+> 修改摘要：新增 Bohr Testnet 安全部署脚本和 Faucet 阻塞记录，明确未部署前的状态边界。
 > 影响范围：BOT Chain、ERC-8004、Agent 架构、鱼油 Demo、证据接入、JEV、合约、消费者权益、网页演示和代码评审
-> 队友下一步：每次修改先更新元信息和变更日志，再提交代码或页面。
+> 队友下一步：为测试钱包领取 tBOT，运行部署脚本并回填真实公开 receipt。
 
 ## 目的
 
@@ -56,7 +56,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.7.0 | 当前链上接入基线 | BOT Chain 网络、ERC-8004 身份/验证、证据锚定、消费者贡献和测试网到主网方案 |
 | v0.7.1 | 当前交接版本 | TruthPassEvidenceAnchor 合约、角色/幂等/域校验、Chain Adapter ABI 对齐和队友回放清单 |
 | v0.8.0 | 当前完整目标实现 | EvidenceEnvelope、Ed25519 验签、JEV 安全决策门、完整 Chain Adapter、本地六事件回放和统一锚定状态 |
-| v0.8.1 | 当前配置交接版本 | Bohr Testnet 参数、部署回填模板、角色和 receipt 验收门禁 |
+| v0.8.1 | 历史配置交接版本 | Bohr Testnet 参数、部署回填模板、角色和 receipt 验收门禁 |
+| v0.8.2 | 当前部署交接版本 | 安全部署脚本、余额门禁、部署后回读和 Faucet 阻塞记录 |
 
 ## 变更日志
 
@@ -148,3 +149,12 @@ docs(v0.4.1): clarify evidence envelope fields
 - **安全边界**：模板不包含私钥、API Key、消费者数据、合约地址或虚构交易哈希；
 - **状态边界**：真实部署完成前，CLI 和网页继续使用 `offline_plan_only`、`prepared_offline_not_submitted` 或 `anchor_pending`；
 - **队友下一步**：完成部署、授予角色、回读域和 receipt，并把真实公开地址回填到模板。
+
+### v0.8.2 — 2026-10-07
+
+- **新增代码**：`scripts/deploy-bot-chain.mjs`，增加 `npm run deploy:bot-chain`；
+- **部署门禁**：只允许 Bohr Testnet Chain ID `968`，要求显式确认、非零余额和足够 gas；部署后回读 receipt、代码、`DEPLOYED_CHAIN_ID` 与 `DOMAIN_SEPARATOR`；
+- **安全边界**：私钥只从本地环境变量读取，输出和仓库均不包含私钥；临时钱包工具目录加入 Git 忽略；
+- **当前状态**：RPC 可达但测试钱包余额为零；官方 Faucet 在当前网络连接关闭/超时，尚未发送部署交易；
+- **新增文档**：`docs/deployment-v0.8.2.md`，记录命令、实测错误和领取 tBOT 后的交接步骤；
+- **验证结果**：`npm test` 35/35 通过，`npm run typecheck` 和脚本语法检查通过。

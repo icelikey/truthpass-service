@@ -13,12 +13,17 @@
     "cli": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "deploy:bot-chain": "node scripts/deploy-bot-chain.mjs",
     "demo:real-sourced": "tsx src/real-sourced-demo.ts",
     "demo:fish-oil-e2e": "tsx src/fish-oil-order-to-delivery-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "solc": "0.8.24",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
   }
 }

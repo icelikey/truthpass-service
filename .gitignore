@@ -10,3 +10,4 @@ configure-deepseek-key.ps1
 coverage/
 .playwright-mcp/
 .spec-workflow/
+.wallet-tools/
