@@ -58,6 +58,17 @@ test("consumer selection cannot create an unsupported fact", async () => {
   }), /只能选择证据卡/);
 });
 
+test("collaboration reports phase transitions as each agent settles", async () => {
+  const input = await setup();
+  const phases: string[] = [];
+  await runAgentCollaboration(input.production, input.inspection, "这批鱼油怎么样？", input.card, async (invocation) => {
+    if (invocation.role === "production") return { schemaVersion: "agent.output.v1", role: invocation.role, batchId: fishOilBatch.batchId, findings: [] };
+    if (invocation.role === "inspection") return { schemaVersion: "agent.output.v1", role: invocation.role, batchId: fishOilBatch.batchId, findings: [] };
+    return { schemaVersion: "agent.output.v1", role: invocation.role, batchId: fishOilBatch.batchId, selectedFactIds: ["F0"] };
+  }, (phase) => phases.push(phase.stage));
+  assert.deepEqual(phases, ["production_done", "inspection_done", "consumer_started", "consumer_done"]);
+});
+
 test("collaboration rejects cross-batch inputs before invoking any agent", async () => {
   const input = await setup();
   const otherBatch = structuredClone(input.inspection) as typeof input.inspection;

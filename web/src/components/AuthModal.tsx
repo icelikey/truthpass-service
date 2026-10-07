@@ -7,7 +7,7 @@ export function AuthModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onAuth: (mode: "signin" | "signup", email: string, password: string) => Promise<void>;
+  onAuth: (mode: "signin" | "signup", email: string, password: string) => Promise<boolean | void>;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -22,10 +22,15 @@ export function AuthModal({
     setError("");
     setBusy(true);
     try {
-      await onAuth(mode, email, password);
-      onClose();
+      const confirmationRequired = await onAuth(mode, email, password);
+      if (mode === "signup" && confirmationRequired) {
+        setError("注册成功，请检查邮箱并完成确认后再登录。");
+        setPassword("");
+      } else {
+        onClose();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "操作失败");
+      setError(readableAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -66,4 +71,14 @@ export function AuthModal({
       </div>
     </>
   );
+}
+
+function readableAuthError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/invalid login credentials/i.test(message)) return "账号或密码不正确；如果还没有账号，请先注册。";
+  if (/email not confirmed/i.test(message)) return "邮箱尚未确认，请先完成邮箱确认。";
+  if (/user already registered/i.test(message)) return "该邮箱已经注册，请直接登录。";
+  if (/password/i.test(message) && /weak|characters|length|least/i.test(message)) return "密码强度不足，请使用至少 6 位密码。";
+  if (/supabase 未配置/i.test(message)) return "登录服务尚未配置，请联系管理员。";
+  return "操作失败，请检查邮箱和密码后重试。";
 }

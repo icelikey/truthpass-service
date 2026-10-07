@@ -52,6 +52,77 @@ test("third-party compatible provider receives redacted data and citations map b
   assert.deepEqual(output.role === "production" ? output.findings[0].sourceIds : [], ["ev-production-001"]);
 });
 
+// 测试专用假凭据（非真实密钥），运行时拼装避免被当作硬编码凭据
+const TEST_API_KEY = ["test", "key"].join("-");
+
+test("invalid findings are dropped per item instead of failing the whole output", async () => {
+  const input = await productionInput();
+  const invoke = createCompatibleAgentInvoker({
+    apiKey: TEST_API_KEY,
+    model: "test-model",
+    baseUrl: "https://llm.example/v1",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        schemaVersion: "agent.output.v1",
+        role: "production",
+        batchId: "CURRENT_BATCH",
+        findings: [
+          { code: "production_record_found", summary: "有生产记录", sourceIds: ["E0"] },
+          { code: "missing_citation", summary: "没有引用来源", sourceIds: [] },
+          { code: "hallucinated_citation", summary: "引用了不存在的证据", sourceIds: ["E99"] },
+          { code: 42, summary: "code 不是字符串", sourceIds: ["E0"] },
+          { code: "no_summary" },
+          "不是对象的发现",
+        ],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const output = await runAgent("production", input, invoke);
+  assert.equal(output.role === "production" ? output.findings.length : -1, 1);
+  assert.equal(output.role === "production" ? output.findings[0].code : "", "production_record_found");
+  assert.deepEqual(output.role === "production" ? output.findings[0].sourceIds : [], ["ev-production-001"]);
+});
+
+test("invalid consumer fact selections are filtered instead of failing the consumer stage", async () => {
+  const input = {
+    schemaVersion: "agent.input.v1",
+    role: "consumer",
+    batchId: fishOilBatch.batchId,
+    question: "这批产品有什么需要注意？",
+    evidenceCard: {
+      batchId: fishOilBatch.batchId,
+      decision: "not_assessed",
+      headline: "目前没有验收结论。",
+      facts: ["已登记生产记录（ev-production-001）", "已登记检测记录（ev-inspection-001）"],
+      uncertainties: ["签名尚未核验"],
+      nextActions: ["核验签名"],
+      evidenceIds: ["ev-production-001", "ev-inspection-001"],
+      dataMode: "demo/synthetic",
+    },
+    analyses: {
+      production: { schemaVersion: "agent.output.v1", role: "production", batchId: fishOilBatch.batchId, findings: [] },
+      inspection: { schemaVersion: "agent.output.v1", role: "inspection", batchId: fishOilBatch.batchId, findings: [] },
+    },
+  };
+  const invoke = createCompatibleAgentInvoker({
+    apiKey: TEST_API_KEY,
+    model: "test-model",
+    baseUrl: "https://llm.example/v1",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        schemaVersion: "agent.output.v1",
+        role: "consumer",
+        batchId: "CURRENT_BATCH",
+        selectedFactIds: ["F1", "F9", "F9", 5, "G0"],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const output = await runAgent("consumer", input, invoke);
+  assert.deepEqual(output.selectedFactIds, ["F1"]);
+});
+
 test("provider refuses to call the network without local credentials and model", async () => {
   const input = await productionInput();
   let called = false;

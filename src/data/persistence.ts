@@ -85,17 +85,12 @@ export interface KnowledgeChunkRow {
   chunkText: string;
   metadata: Record<string, unknown>;
   concepts: string[];
+  keywords: string[];
 }
 
 /** 知识层专用读取：SQL 全部收口在本模块，调用方只传参数，不接触 SQL 文本。 */
 export async function selectKnowledgeChunks(concepts?: string[]): Promise<KnowledgeChunkRow[]> {
-  const result = await getPool().query(
-    `select id, source_table, source_id, title, chunk_text, metadata, concepts
-     from knowledge_chunks
-     where ($1::text[] is null or concepts && $1::text[])
-     order by id`,
-    [concepts && concepts.length > 0 ? concepts : null],
-  );
+  const result = await getPool().query("select id, source_table, source_id, title, chunk_text, metadata, concepts, keywords from knowledge_chunks where ($1::text[] is null or concepts && $1::text[]) order by id", [concepts && concepts.length > 0 ? concepts : null]);
   return result.rows.map((row) => ({
     id: Number(row.id),
     sourceTable: String(row.source_table),
@@ -104,6 +99,7 @@ export async function selectKnowledgeChunks(concepts?: string[]): Promise<Knowle
     chunkText: String(row.chunk_text),
     metadata: (row.metadata ?? {}) as Record<string, unknown>,
     concepts: (row.concepts ?? []) as string[],
+    keywords: (row.keywords ?? []) as string[],
   }));
 }
 

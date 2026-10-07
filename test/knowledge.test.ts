@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { numericGuard, explainRejection } from "../src/knowledge/explain.js";
-import { buildWikiAppendix } from "../src/knowledge/wiki.js";
+import { buildWikiAppendix, selectRelevantChunks } from "../src/knowledge/wiki.js";
 import type { KnowledgeChunk } from "../src/knowledge/wiki.js";
 
-function chunk(id: number, concepts: string[], title: string, chunkText?: string): KnowledgeChunk {
+function chunk(id: number, concepts: string[], title: string, chunkText?: string, keywords?: string[]): KnowledgeChunk {
   return {
     id,
     sourceTable: "standard_limits",
@@ -13,6 +13,7 @@ function chunk(id: number, concepts: string[], title: string, chunkText?: string
     chunkText: chunkText ?? "限值 5，TOTOX 上限 26，标准条目 " + id,
     metadata: {},
     concepts,
+    keywords: keywords ?? [],
   };
 }
 
@@ -110,4 +111,32 @@ test("wiki 附录带 K 编号与来源回链", () => {
   const appendix = buildWikiAppendix([KNOWLEDGE[0], KNOWLEDGE[2]]);
   assert.ok(appendix.includes("【K1】GOED 三限值（来源: standard_limits#1）"));
   assert.ok(appendix.includes("【K2】原料目录下限（来源: standard_limits#3）"));
+});
+
+// ---------- selectRelevantChunks：检索过滤不劣于整库注入 ----------
+
+test("selectRelevantChunks 命中关键词时只注入命中块（不补足，守卫更严）", () => {
+  const many = Array.from({ length: 12 }, (_, i) => chunk(i + 1, ["evidence"], "无关块 " + (i + 1)));
+  many[3] = chunk(4, ["potency"], "含量块", undefined, ["过氧化值", "标准"]);
+  const picked = selectRelevantChunks(many, "过氧化值标准是多少", 8);
+  assert.deepEqual(picked.map((c) => c.id), [4]);
+});
+
+test("selectRelevantChunks 多个命中按分数排序并截断 limit", () => {
+  const many = Array.from({ length: 12 }, (_, i) => chunk(i + 1, ["vitamin"], "无关块 " + (i + 1)));
+  many[0] = chunk(1, ["potency"], "块1", undefined, ["氧化"]); // 关键词 +3
+  many[5] = chunk(6, ["oxidation"], "块6", undefined, ["氧化"]); // 关键词 +3，index 靠后
+  const picked = selectRelevantChunks(many, "氧化", 2);
+  assert.deepEqual(picked.map((c) => c.id), [1, 6]);
+});
+
+test("selectRelevantChunks 零命中回退前 8 块", () => {
+  const many = Array.from({ length: 12 }, (_, i) => chunk(i + 1, ["evidence"], "无关块 " + (i + 1)));
+  const picked = selectRelevantChunks(many, "今天天气怎么样", 8);
+  assert.deepEqual(picked.map((c) => c.id), [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("selectRelevantChunks 不超过 limit 时整库原样返回", () => {
+  const few = Array.from({ length: 6 }, (_, i) => chunk(i + 1, ["evidence"], "块 " + (i + 1)));
+  assert.deepEqual(selectRelevantChunks(few, "随便问", 8), few);
 });

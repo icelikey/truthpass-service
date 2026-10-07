@@ -21,10 +21,11 @@ export function useAuth() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string): Promise<boolean> => {
     if (!supabase) throw new Error("Supabase 未配置");
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
+    return !data.session;
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
