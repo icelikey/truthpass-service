@@ -1,7 +1,7 @@
 # TruthPass 配置与测试网交接
 
 > 文档版本：v0.8.1  
-> 状态：当前交接版本  
+> 状态：历史配置模板  
 > 最近修改：2026-10-07  
 > 修改摘要：补充 Bohr Testnet 的安全配置模板和部署回填字段；不写入任何秘密或未确认地址。  
 > 影响范围：BOT Chain、CLI 交接、部署验收、JEV 本地配置  
@@ -18,7 +18,7 @@
 | 浏览器 | `https://scan.bohr.life` |
 | 合约 | `TruthPassEvidenceAnchor` |
 
-对应的公开模板位于 [`config/bot-chain-testnet.example.json`](../config/bot-chain-testnet.example.json)。
+部署前的公开模板位于 [`config/bot-chain-testnet.example.json`](../config/bot-chain-testnet.example.json)；真实测试网验收结果位于 [`config/bot-chain-testnet.deployed.json`](../config/bot-chain-testnet.deployed.json)。
 
 ## 当前未配置的字段
 

@@ -96,6 +96,9 @@ docs/target-development-v0.8.0.md 完整目标、完成标准和部署门禁
 docs/implementation-v0.8.0.md      本地完整回放和链上状态合同
 docs/configuration-v0.8.1.md       Bohr Testnet 配置和部署回填说明
 config/bot-chain-testnet.example.json 测试网公开配置模板
+config/bot-chain-testnet.deployed.json 真实测试网地址、角色和生命周期 receipt
+docs/chain-composition-v0.8.3.md 生产链下数据、Agent 与 BOT Chain 公共锚定层组合
+docs/deployment-v0.8.2.md         部署脚本、Faucet 和部署交接记录
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
@@ -108,9 +111,9 @@ assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 - 交付验收：`verifyExecution`；
 - 履约记录：`FeedbackRecord`；
 - 消费者参与：`ConsumerParticipationRegistry`；
-- 链上锚定：`TruthPassEvidenceAnchor.sol` 和 `src/chain.ts`；
+- 链上锚定：`TruthPassEvidenceAnchor.sol` 和 `src/chain.ts`；真实 Bohr Testnet 部署与七事件回放记录见 [`config/bot-chain-testnet.deployed.json`](config/bot-chain-testnet.deployed.json)；
 - 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
-ERC-8004 作为身份、信誉和验证模型的参考；当前仓库已具备 BOT Chain 的合约和交易适配器，但测试网合约地址与真实交易仍需部署门禁确认。
+ERC-8004 作为身份、信誉和验证模型的参考；当前仓库已在 BOT Chain Bohr Testnet 完成合约部署、角色回读和七事件生命周期回放。生产上线仍需把测试钱包角色拆分，并接入真实产线、实验室和设备签名。
 
 JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。
