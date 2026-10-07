@@ -41,6 +41,30 @@ export async function runCliVerify(repository: MemoryDataRepository, task: TaskR
   };
 }
 
+export interface CliInspectResult {
+  schemaVersion: "truthpass.cli.inspect.v1";
+  command: "inspect";
+  batchId: string;
+  stages: Array<{ name: string; status: "completed" | "pending"; detail: string }>;
+  verification: CliVerificationResult;
+}
+
+export async function runCliInspect(repository: MemoryDataRepository, task: TaskRequest, policy: { id: string; version: string }): Promise<CliInspectResult> {
+  const verification = await runCliVerify(repository, task, policy);
+  return {
+    schemaVersion: "truthpass.cli.inspect.v1",
+    command: "inspect",
+    batchId: task.batchId,
+    stages: [
+      { name: "读取数据库证据", status: "completed", detail: "已加载当前批次登记证据" },
+      { name: "确定性验收", status: verification.status === "missing_evidence" ? "pending" : "completed", detail: verification.status },
+      { name: "证据根哈希", status: "completed", detail: verification.evidenceRoot },
+      { name: "链上锚定", status: "pending", detail: "dry-run：未广播交易" },
+    ],
+    verification,
+  };
+}
+
 function toReference(item: { evidenceId: string; kind: string; sourceKind: string; status: string; dataMode: "demo/synthetic" | "external" }) {
   return { evidenceId: item.evidenceId, kind: item.kind, sourceKind: item.sourceKind, status: item.status, dataMode: item.dataMode };
 }

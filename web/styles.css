@@ -1197,6 +1197,10 @@ body {
   border-radius: 10px; background: rgba(5, 13, 25, 0.4);
   display: flex; flex-direction: column; gap: 12px;
 }
+.cli-observer { display: flex; flex-direction: column; gap: 8px; padding: 10px; margin-bottom: 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(5, 13, 25, 0.4); }
+.cli-observer b { color: var(--cyan-2); }
+.cli-stage { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.4; }
+.cli-stage code, .cli-observer small { color: var(--muted); overflow-wrap: anywhere; }
 .tech-item { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
 .tech-item .tech-index {
   flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line);

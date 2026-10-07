@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchEvidenceLink, fetchJourney } from "../api";
+import { fetchCliInspect, fetchEvidenceLink, fetchJourney } from "../api";
 import { ICON_URLS } from "../data";
 import type { VerifyState } from "../types";
 
@@ -17,6 +17,11 @@ export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId:
   const { data: techSteps, isLoading } = useQuery({
     queryKey: ["evidence", batchId],
     queryFn: () => fetchEvidenceLink(batchId),
+    enabled: state === "done",
+  });
+  const { data: cliInspect } = useQuery({
+    queryKey: ["cli-inspect", batchId],
+    queryFn: () => fetchCliInspect(batchId),
     enabled: state === "done",
   });
   const [showTech, setShowTech] = useState(false);
@@ -64,7 +69,13 @@ export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId:
           {isLoading ? (
             <p style={{ color: "var(--muted)" }}>加载中…</p>
           ) : (
-            (techSteps ?? []).map((s) => (
+            <>
+            {cliInspect && <div className="cli-observer">
+              <b>CLI 验证链</b>
+              {cliInspect.stages.map((stage) => <div className="cli-stage" key={stage.name}><span>{stage.status === "completed" ? "✓" : "○"} {stage.name}</span><code>{stage.detail}</code></div>)}
+              <small>证据根：{cliInspect.verification.evidenceRoot} · 链上：未请求（dry-run）</small>
+            </div>}
+            {(techSteps ?? []).map((s) => (
               <div className="tech-item" key={s.step}>
                 <span className="tech-index">{s.step}</span>
                 <div>
@@ -73,7 +84,8 @@ export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId:
                   <code>{s.hash}</code>
                 </div>
               </div>
-            ))
+            ))}
+            </>
           )}
         </div>
       )}

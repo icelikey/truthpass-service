@@ -22,6 +22,16 @@ export const fetchMetricDetail = (batchId: string, key: string) =>
   getJson<MetricDetail>(`/api/products/${batchId}/metrics/${key}`);
 export const fetchJevDetection = () => getJson<JevDetection>("/api/jev/detection");
 
+export interface CliInspectData {
+  schemaVersion: "truthpass.cli.inspect.v1";
+  command: "inspect";
+  batchId: string;
+  stages: Array<{ name: string; status: "completed" | "pending"; detail: string }>;
+  verification: { status: string; evidenceRoot: string; anchor: { status: string; submitted: false }; reasons: string[] };
+}
+
+export const fetchCliInspect = (batchId: string) => getJson<CliInspectData>(`/api/cli/inspect?batchId=${encodeURIComponent(batchId)}`);
+
 export async function postChat(
   question: string,
   batchId: string | null,

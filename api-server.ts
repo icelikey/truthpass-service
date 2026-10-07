@@ -25,6 +25,7 @@ import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from ".
 import { answerConsumerQuestion } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
 import { createCompatibleAgentInvoker } from "./src/agents/compatible-invoker.js";
+import { runCliInspect } from "./src/integrations/cli-verifier.js";
 import { buildJevContext, buildJevRoleView } from "./src/jev/context.js";
 import type { ServiceAdapter, ServiceCard, TaskRequest } from "./src/types.js";
 
@@ -396,6 +397,16 @@ async function consumerChat(batchId: string, question: string, res: ServerRespon
 // ---------- 路由 ----------
 async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const p = url.pathname;
+
+  if (p === "/api/cli/inspect" && req.method === "GET") {
+    const batchId = url.searchParams.get("batchId") || BATCH_ID;
+    try {
+      sendJson(res, 200, await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version }));
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
 
   if (p === "/api/agent/chat" && req.method === "POST") {
     const body = await readBody(req);
