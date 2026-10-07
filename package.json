@@ -18,6 +18,7 @@
     "deploy:bot-chain-mainnet": "node --env-file-if-exists=.env.local scripts/deploy-bot-chain-mainnet.mjs",
     "grant:bot-chain-mainnet-roles": "node --env-file-if-exists=.env.local scripts/grant-bot-chain-mainnet-roles.mjs",
     "replay:bot-chain-mainnet": "node --env-file-if-exists=.env.local scripts/replay-bot-chain-mainnet.mjs",
+    "protocol:server": "tsx src/protocol-server.ts",
     "replay:bot-chain": "node scripts/replay-bot-chain.mjs",
     "demo:real-sourced": "tsx src/real-sourced-demo.ts",
     "demo:fish-oil-e2e": "tsx src/fish-oil-order-to-delivery-demo.ts"
