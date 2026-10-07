@@ -22,6 +22,7 @@ export default function App() {
   const [batchId, setBatchId] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [focusTech, setFocusTech] = useState(false);
   const { user, signUp, signIn, signOut } = useAuth();
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -86,6 +87,10 @@ export default function App() {
       </div>
       <TopBar
         onOpenObserver={() => setObserverOpen(true)}
+        onOpenEvidence={() => {
+          setFocusTech(true);
+          document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
         userEmail={user?.email ?? null}
         onOpenAuth={() => setAuthOpen(true)}
         onOpenHistory={() => setHistoryOpen(true)}
@@ -100,7 +105,7 @@ export default function App() {
           batchId={batchId}
         />
         <ProductPanel state={verifyState} batchId={batchId ?? ""} />
-        <EvidencePanel state={verifyState} batchId={batchId ?? ""} />
+        <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} focusTech={focusTech} />
       </main>
       <ReportSection batchId={batchId} />
       <Community onToast={showToast} batchId={batchId} />

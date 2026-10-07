@@ -27,7 +27,7 @@ export interface CliInspectData {
   command: "inspect";
   batchId: string;
   stages: Array<{ name: string; status: "completed" | "pending"; detail: string }>;
-  verification: { status: string; evidenceRoot: string; anchor: { status: string; submitted: false; chainId?: number; contractAddress?: string }; reasons: string[] };
+  verification: { status: string; dataClass: string; policy: { id: string; version: string }; evidenceRoot: string; evidence: Array<{ evidenceId: string; kind: string; sourceKind: string; status: string; dataMode: string }>; assessment?: { score: number; checks: Record<string, boolean>; reasons: string[] }; anchor: { status: string; submitted: false; network?: string; chainId?: number; contractAddress?: string }; reasons: string[] };
 }
 
 export const fetchCliInspect = (batchId: string) => getJson<CliInspectData>(`/api/cli/inspect?batchId=${encodeURIComponent(batchId)}`);

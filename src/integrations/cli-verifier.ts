@@ -60,7 +60,7 @@ export async function runCliInspect(repository: MemoryDataRepository, task: Task
       { name: "读取数据库证据", status: "completed", detail: "已加载当前批次登记证据" },
       { name: "确定性验收", status: verification.status === "missing_evidence" ? "pending" : "completed", detail: verification.status },
       { name: "证据根哈希", status: "completed", detail: verification.evidenceRoot },
-      { name: "链上锚定", status: "pending", detail: "dry-run：未广播交易" },
+      { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
     ],
     verification,
   };

@@ -15,6 +15,6 @@ test("CLI inspect returns one auditable stage list without broadcasting a transa
     acceptance: { requireSignature: true, policyId: "fish-oil-quality", policyVersion: "v1" },
   }, { id: "fish-oil-quality", version: "v1" });
   assert.equal(result.command, "inspect");
-  assert.equal(result.stages.at(-1)?.detail, "dry-run：未广播交易");
+  assert.equal(result.stages.at(-1)?.detail, "dry-run：未广播交易，需外部签名");
   assert.equal(result.verification.anchor.submitted, false);
 });

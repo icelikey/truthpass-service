@@ -8,7 +8,7 @@ function formatTime(iso: string): string {
   return iso.replace("T", " ").slice(0, 16);
 }
 
-export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId: string }) {
+export function EvidencePanel({ state, batchId, focusTech = false }: { state: VerifyState; batchId: string; focusTech?: boolean }) {
   const { data: journey } = useQuery({
     queryKey: ["journey", batchId],
     queryFn: () => fetchJourney(batchId),
@@ -24,7 +24,8 @@ export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId:
     queryFn: () => fetchCliInspect(batchId),
     enabled: state === "done",
   });
-  const [showTech, setShowTech] = useState(false);
+  const [showTech, setShowTech] = useState(focusTech);
+  const [techView, setTechView] = useState<"inspect" | "envelope" | "assessment" | "anchor">("inspect");
 
   if (state !== "done") {
     return (
@@ -71,9 +72,22 @@ export function EvidencePanel({ state, batchId }: { state: VerifyState; batchId:
           ) : (
             <>
             {cliInspect && <div className="cli-observer">
-              <b>CLI 验证链</b>
-              {cliInspect.stages.map((stage) => <div className="cli-stage" key={stage.name}><span>{stage.status === "completed" ? "✓" : "○"} {stage.name}</span><code>{stage.detail}</code></div>)}
-              <small>证据根：{cliInspect.verification.evidenceRoot} · 链上：未请求（dry-run）</small>
+              <b>CLI 技术观察台</b>
+              <small>以下为后端生成的结构化命令视图，不执行浏览器本机 shell。</small>
+              <div className="cli-actions">
+                <button type="button" onClick={() => setTechView("envelope")}>查看证据 Envelope</button>
+                <button type="button" onClick={() => setTechView("assessment")}>查看验收 JSON</button>
+                <button type="button" onClick={() => setTechView("anchor")}>生成链上锚定计划</button>
+              </div>
+              <code className="cli-command">$ truthpass inspect --batch {cliInspect.batchId}</code>
+              {techView === "inspect" && cliInspect.stages.map((stage, index) => <div className="cli-stage cli-stage-detail" key={stage.name}>
+                <span><strong>[{index + 1}/{cliInspect.stages.length}]</strong> {stage.status === "completed" ? "✓" : "○"} {stage.name}</span>
+                <code>{stage.detail}</code>
+              </div>)}
+              {techView === "envelope" && <div className="cli-section"><strong>Evidence Envelope</strong><span>root: {cliInspect.verification.evidenceRoot}</span><span>events: {cliInspect.verification.evidence.length}</span><span>status: {cliInspect.verification.status}</span>{cliInspect.verification.evidence.map((item) => <span key={item.evidenceId}>{item.kind} · {item.sourceKind} · {item.status}</span>)}</div>}
+              {techView === "assessment" && <div className="cli-section"><strong>确定性验收 JSON</strong><code>{JSON.stringify({ status: cliInspect.verification.status, policy: cliInspect.verification.policy, assessment: cliInspect.verification.assessment ?? null, reasons: cliInspect.verification.reasons }, null, 2)}</code></div>}
+              {techView === "anchor" && <div className="cli-section"><strong>BOT Chain 锚定计划</strong><span>mode: dry-run</span><span>network: {cliInspect.verification.anchor.network ?? "bot-mainnet"}</span><span>status: {cliInspect.verification.anchor.status}</span><span>chainId: {cliInspect.verification.anchor.chainId ?? "-"}</span><span>submitted: false · 未广播交易，需外部签名</span></div>}
+              <div className="cli-section"><strong>Agent 协作</strong><span>✓ production agent</span><span>✓ inspection agent</span><span>✓ consumer agent</span></div>
             </div>}
             {(techSteps ?? []).map((s) => (
               <div className="tech-item" key={s.step}>

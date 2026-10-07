@@ -1199,8 +1199,16 @@ body {
 }
 .cli-observer { display: flex; flex-direction: column; gap: 8px; padding: 10px; margin-bottom: 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(5, 13, 25, 0.4); }
 .cli-observer b { color: var(--cyan-2); }
+.cli-command { display: block; margin: 8px 0 12px; color: var(--text); font-size: 12px; }
+.cli-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.cli-actions button { border: 1px solid var(--line-soft); border-radius: 6px; padding: 5px 8px; background: rgba(255,255,255,.04); color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.cli-actions button:hover { border-color: var(--cyan-2); color: var(--cyan-2); }
 .cli-stage { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.4; }
+.cli-stage-detail { flex-direction: column; align-items: flex-start; padding: 5px 0; }
+.cli-stage-detail strong { color: var(--cyan-2); }
 .cli-stage code, .cli-observer small { color: var(--muted); overflow-wrap: anywhere; }
+.cli-section { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 11px; }
+.cli-section strong { color: var(--text); font-size: 12px; }
 .tech-item { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
 .tech-item .tech-index {
   flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line);

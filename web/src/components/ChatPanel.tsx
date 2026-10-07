@@ -22,6 +22,12 @@ const QUICK_PROMPTS = [
   { label: "数据来源", q: "这些证据来自谁？" },
 ];
 
+const CHAT_SUGGESTIONS = [
+  { label: "查 FO-2026-001", value: "查询批次 FO-2026-001" },
+  { label: "问证据缺口", value: "这批还缺什么证据？" },
+  { label: "问签名状态", value: "检测报告的签名能核验吗？" },
+];
+
 function extractBatchId(text: string): string | null {
   const full = text.match(/([A-Z]{2,3}-\d{4}-\d{3})/i);
   if (full) return full[1].toUpperCase();
@@ -168,6 +174,14 @@ export function ChatPanel({
       </div>
 
       <div className="chat-quick">
+        <div className="quick-group">
+          <span className="chat-quick-label">快捷提问：</span>
+          {CHAT_SUGGESTIONS.map((item) => (
+            <button key={item.label} onClick={() => runVerify(item.value, batchId ?? undefined)} disabled={busy}>
+              {item.label}
+            </button>
+          ))}
+        </div>
         <div className="quick-group">
           <span className="chat-quick-label">商品：</span>
           <button

@@ -1,11 +1,13 @@
 export function TopBar({
   onOpenObserver,
+  onOpenEvidence,
   userEmail,
   onOpenAuth,
   onOpenHistory,
   onSignOut,
 }: {
   onOpenObserver: () => void;
+  onOpenEvidence: () => void;
   userEmail: string | null;
   onOpenAuth: () => void;
   onOpenHistory: () => void;
@@ -20,6 +22,9 @@ export function TopBar({
       <span className="brand-tagline">看见真实的供应链 · 让好产品被信任</span>
       <button className="ghost-button" type="button" onClick={onOpenObserver}>
         评委观察台
+      </button>
+      <button className="ghost-button" type="button" onClick={onOpenEvidence}>
+        CLI / BotChain
       </button>
       {userEmail ? (
         <div className="account">
