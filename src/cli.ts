@@ -1,0 +1,318 @@
+#!/usr/bin/env node
+
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { sha256Hex } from "./hash.js";
+
+const CLI_VERSION = "0.1.0";
+const DEMO_BATCH_ID = "FO-2026-001";
+const DEMO_TASK_ID = "task-fish-oil-2026-001";
+
+type OutputMode = "text" | "json";
+type Command = "doctor" | "discover" | "verify" | "explain" | "anchor" | "help";
+
+interface NormalizedService {
+  serviceId: string;
+  serviceName: string;
+  liveStatus: string;
+  eligible: boolean;
+  score: number;
+  executionStatus: string;
+  productStatus: string;
+  reasons: string[];
+  evidenceHash?: string;
+}
+
+interface ParsedArgs {
+  command: Command;
+  json: boolean;
+  batchId: string;
+  network: "testnet" | "mainnet";
+  dryRun: boolean;
+  help: boolean;
+}
+
+export interface CliResult {
+  exitCode: number;
+  value: Record<string, unknown> | string;
+}
+
+const HELP = `真验 TruthPass CLI ${CLI_VERSION}
+
+用法:
+  truthpass doctor [--json]
+  truthpass discover --batch FO-2026-001 [--json]
+  truthpass verify --batch FO-2026-001 [--json]
+  truthpass explain --batch FO-2026-001 [--json]
+  truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
+
+说明:
+  verify 复用仓库中的 ServiceRegistry 和 Verifier，输出可审计结果。
+  anchor 当前只生成离线锚定计划；没有 --dry-run 时不会提交交易。
+  --json 输出稳定 JSON；错误也使用机器可读结构，且不包含密钥。
+`;
+
+function parseArgs(argv: string[]): ParsedArgs | { error: string } {
+  let command: Command | undefined;
+  let json = false;
+  let batchId = DEMO_BATCH_ID;
+  let network: "testnet" | "mainnet" = "testnet";
+  let dryRun = false;
+  let help = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--json") { json = true; continue; }
+    if (arg === "--dry-run") { dryRun = true; continue; }
+    if (arg === "--help" || arg === "-h") { help = true; continue; }
+    if (arg === "--batch") {
+      const value = argv[++index];
+      if (!value) return { error: "--batch 需要一个批次 ID" };
+      batchId = value;
+      continue;
+    }
+    if (arg === "--network") {
+      const value = argv[++index];
+      if (value !== "testnet" && value !== "mainnet") return { error: "--network 只能是 testnet 或 mainnet" };
+      network = value;
+      continue;
+    }
+    if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
+    if (command) return { error: `只能指定一个命令，收到: ${arg}` };
+    if (!["doctor", "discover", "verify", "explain", "anchor", "help"].includes(arg)) {
+      return { error: `未知命令: ${arg}` };
+    }
+    command = arg as Command;
+  }
+
+  return { command: help ? "help" : command ?? "help", json, batchId, network, dryRun, help };
+}
+
+function makeTask(batchId: string): Record<string, unknown> {
+  return {
+    taskId: DEMO_TASK_ID,
+    serviceKind: "lab",
+    capability: "fish-oil-batch-quality-check",
+    batchId,
+    productionTime: "2026-10-06T08:00:00Z",
+    acceptance: {
+      requireSignature: true,
+      // The policy fields are used by the current main branch. The threshold
+      // fields keep the CLI compatible with the original local demo runtime.
+      policyId: "fish-oil-quality",
+      policyVersion: "v1",
+      maxLogisticsGapHours: 6,
+      minEpaDhaPercent: 70,
+      maxPeroxideValue: 5,
+      maxTotox: 20,
+      requireColdChain: true,
+    },
+  };
+}
+
+function adapterFor(card: Record<string, unknown>, mode: "valid" | "wrong-batch" | "offline") {
+  return {
+    async probe() {
+      if (mode === "offline") {
+        return {
+          serviceId: card.id,
+          status: "offline",
+          latencyMs: 0,
+          capabilityMatch: false,
+          schemaValid: false,
+          checkedAt: "2026-10-06T12:00:00Z",
+          reason: "连接超时",
+        };
+      }
+      return {
+        serviceId: card.id,
+        status: mode === "valid" ? "healthy" : "degraded",
+        latencyMs: mode === "valid" ? 420 : 980,
+        capabilityMatch: true,
+        schemaValid: true,
+        checkedAt: "2026-10-06T12:00:00Z",
+      };
+    },
+    async execute(task: Record<string, any>) {
+      return {
+        serviceId: card.id,
+        taskId: task.taskId,
+        batchId: task.batchId,
+        reportBatchId: mode === "wrong-batch" ? "FO-2026-000" : task.batchId,
+        productionTime: task.productionTime,
+        reportTime: "2026-10-06T10:20:00Z",
+        logisticsGapHours: mode === "valid" ? 2 : 4,
+        signatureValid: mode === "valid",
+        epaDhaPercent: mode === "valid" ? 78 : 61,
+        peroxideValue: mode === "valid" ? 2.1 : 7.2,
+        totox: mode === "valid" ? 11 : 26,
+        coldChainGapHours: mode === "valid" ? 2 : 11,
+        payload: {
+          taskId: task.taskId,
+          reportBatchId: mode === "wrong-batch" ? "FO-2026-000" : task.batchId,
+          product: "高浓度鱼油软胶囊",
+          rawMaterialOrigin: "demo/synthetic",
+          evidenceMode: "demo/synthetic",
+          signatureValid: mode === "valid",
+        },
+      };
+    },
+  };
+}
+
+function demoServices(): Array<{ card: Record<string, unknown>; mode: "valid" | "wrong-batch" | "offline" }> {
+  return [
+    {
+      card: {
+        id: "lab-a", name: "山野检测服务", kind: "lab", endpoint: "https://example.test/lab-a",
+        capabilities: ["fish-oil-batch-quality-check"], signer: "0x1111...aaaa", historicalScore: 92, feedbackCount: 14,
+      },
+      mode: "wrong-batch",
+    },
+    {
+      card: {
+        id: "lab-b", name: "快速检测服务", kind: "lab", endpoint: "https://example.test/lab-b",
+        capabilities: ["fish-oil-batch-quality-check"], signer: "0x2222...bbbb", historicalScore: 96, feedbackCount: 9,
+      },
+      mode: "offline",
+    },
+    {
+      card: {
+        id: "lab-c", name: "可信实验室", kind: "lab", endpoint: "https://example.test/lab-c",
+        capabilities: ["fish-oil-batch-quality-check"], signer: "0x3333...cccc", historicalScore: 88, feedbackCount: 21,
+      },
+      mode: "valid",
+    },
+  ];
+}
+
+async function evaluateBatch(batchId: string): Promise<Record<string, unknown>> {
+  const { ServiceRegistry } = await import("./registry.js") as { ServiceRegistry: new () => any };
+  const registry = new ServiceRegistry();
+  const task = makeTask(batchId);
+  for (const { card, mode } of demoServices()) registry.register(card, adapterFor(card, mode));
+  const ranking = await registry.evaluate(task);
+  const normalized: NormalizedService[] = ranking.map((item: any): NormalizedService => {
+    const execution = item.execution ?? item.verification;
+    const product = item.product;
+    const eligible = item.eligible ?? execution?.status === "accepted";
+    return {
+      serviceId: item.service.id,
+      serviceName: item.service.name,
+      liveStatus: item.probe.status,
+      eligible,
+      score: item.score,
+      executionStatus: execution?.status ?? "not-executed",
+      productStatus: product?.status ?? "not-evaluated",
+      reasons: [...(execution?.reasons ?? []), ...(product?.reasons ?? []), ...(item.probe.reason ? [item.probe.reason] : [])],
+      evidenceHash: execution?.evidenceHash,
+    };
+  });
+  const selected = normalized.find((item) => item.eligible);
+  const status = selected ? (selected.productStatus === "accepted" || selected.productStatus === "not-evaluated" ? "accepted" : "accepted_with_scope") : "rejected";
+  return {
+    schemaVersion: "truthpass.cli.result.v1",
+    command: "verify",
+    dataClass: "demo/synthetic",
+    batchId,
+    taskId: DEMO_TASK_ID,
+    policyId: "fish-oil-quality",
+    policyVersion: "v1",
+    status,
+    score: selected?.score ?? 0,
+    selectedServiceId: selected?.serviceId,
+    reasons: selected?.reasons ?? ["没有找到当前可用且通过验收的服务"],
+    ranking: normalized,
+    evidenceHash: selected?.evidenceHash,
+    nextAction: status === "accepted" || status === "accepted_with_scope" ? "anchor --dry-run" : "review evidence and retry",
+  };
+}
+
+async function doctor(): Promise<Record<string, unknown>> {
+  return {
+    schemaVersion: "truthpass.cli.doctor.v1",
+    tool: "truthpass",
+    version: CLI_VERSION,
+    node: process.version,
+    fixtureMode: "demo/synthetic",
+    fixtureAvailable: true,
+    authRequired: false,
+    authSource: "not_required_for_fixture",
+    jev: { adapter: "not_configured", mode: "deterministic_demo_only" },
+    chain: {
+      defaultNetwork: "bohr-testnet",
+      rpcConfigured: true,
+      contractConfigured: false,
+      submissionEnabled: false,
+      status: "offline_plan_only",
+    },
+    warnings: ["当前 CLI 使用合成鱼油数据；anchor 仅支持 dry-run，不会发送交易。"],
+  };
+}
+
+async function anchorPlan(batchId: string, network: "testnet" | "mainnet"): Promise<Record<string, unknown>> {
+  const verification = await evaluateBatch(batchId);
+  const evidenceRoot = verification.evidenceHash ?? await sha256Hex(JSON.stringify(verification));
+  const requestId = await sha256Hex(`truthpass:${network}:${batchId}:${evidenceRoot}`);
+  return {
+    schemaVersion: "truthpass.cli.anchor-plan.v1",
+    command: "anchor",
+    dataClass: "demo/synthetic",
+    batchId,
+    network: network === "testnet" ? "bohr-testnet" : "bot-mainnet",
+    status: "prepared_offline_not_submitted",
+    requestId,
+    evidenceRoot,
+    verificationStatus: verification.status,
+    contractAddress: null,
+    txHash: null,
+    reason: "尚未配置已部署合约和签名钱包；本命令只生成可审计计划。",
+  };
+}
+
+function textFor(result: Record<string, unknown>): string {
+  if (result.command === "doctor") return `真验 CLI ${result.version}\nfixture: ${result.fixtureMode}\nJEV: ${((result.jev as Record<string, unknown>).mode)}\n链上: ${((result.chain as Record<string, unknown>).status)}\n`;
+  if (result.command === "discover") return `批次 ${result.batchId} 的候选服务：\n${(result.services as Array<Record<string, unknown>>).map((item) => `- ${item.id} ${item.name} (${item.kind})`).join("\n")}\n`;
+  if (result.command === "anchor") return `锚定计划已生成：${result.status}\n批次：${result.batchId}\n网络：${result.network}\nrequestId：${result.requestId}\n不会发送交易。\n`;
+  if (result.command === "explain") return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n${(result.reasons as string[]).join("；") || "当前演示规则未发现冲突。"}\n`;
+  return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n`;
+}
+
+export async function runCli(argv: string[]): Promise<CliResult> {
+  const parsed = parseArgs(argv);
+  if ("error" in parsed) return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "INVALID_INPUT", message: parsed.error } };
+  if (parsed.command === "help") return { exitCode: 0, value: HELP };
+  if (parsed.command !== "doctor" && parsed.batchId !== DEMO_BATCH_ID) {
+    return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "BATCH_NOT_FOUND", message: `当前演示只提供 ${DEMO_BATCH_ID}` } };
+  }
+  try {
+    let result: Record<string, unknown>;
+    if (parsed.command === "doctor") result = await doctor();
+    else if (parsed.command === "discover") result = { schemaVersion: "truthpass.cli.discovery.v1", command: "discover", dataClass: "demo/synthetic", batchId: parsed.batchId, services: demoServices().map(({ card }) => card) };
+    else if (parsed.command === "anchor") {
+      if (!parsed.dryRun) return { exitCode: 60, value: { schemaVersion: "truthpass.cli.error.v1", code: "CHAIN_ANCHOR_DISABLED", message: "当前只允许 anchor --dry-run；真实提交尚未接入。" } };
+      result = await anchorPlan(parsed.batchId, parsed.network);
+    } else {
+      result = await evaluateBatch(parsed.batchId);
+      if (parsed.command === "explain") result = { ...result, command: "explain", explanation: textFor(result) };
+    }
+    const exitCode = result.status === "rejected" ? 10 : 0;
+    return { exitCode, value: result };
+  } catch (error) {
+    return { exitCode: 70, value: { schemaVersion: "truthpass.cli.error.v1", code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function main(): Promise<void> {
+  const parsed = parseArgs(process.argv.slice(2));
+  const result = await runCli(process.argv.slice(2));
+  if (typeof result.value === "string") process.stdout.write(result.value);
+  else {
+    const json = parsed && !("error" in parsed) && parsed.json;
+    process.stdout.write(json ? JSON.stringify(result.value, null, 2) + "\n" : textFor(result.value));
+  }
+  process.exitCode = result.exitCode;
+}
+
+const entry = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
+if (entry === import.meta.url) await main();

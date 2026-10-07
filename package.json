@@ -4,8 +4,13 @@
   "private": true,
   "type": "module",
   "description": "真验 Zhenyan: service reliability and public reputation layer for white-label commerce Agents.",
+  "bin": {
+    "truthpass": "bin/truthpass.mjs"
+  },
   "scripts": {
     "demo": "tsx src/demo.ts",
+    "truthpass": "tsx src/cli.ts",
+    "cli": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "demo:real-sourced": "tsx src/real-sourced-demo.ts",
