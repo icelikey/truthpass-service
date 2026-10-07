@@ -82,11 +82,11 @@ export function ChatPanel({
     if (bid) {
       onBatch(bid);
       onStart();
-      await ask(question);
+      await ask(question, bid);
       onDone();
     } else {
       // 随意对话：只对话，不触发验证状态，中间框保持待检测
-      await ask(question);
+      await ask(question, "");
     }
   };
 

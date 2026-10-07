@@ -425,16 +425,10 @@ async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): P
     const batchId = extractBatchId(last);
     const agentOk = await streamAgent(res, batchId, last);
     if (agentOk) return true;
-    const intent = detectIntent(last);
-    let script: Array<{ cls: string; text: string }>;
-    if (intent === "default") {
-      script = buildVerifyScript(batchId || BATCH_ID);
-    } else if (intent === "unsupported") {
-      script = [{ cls: "plain", text: "当前 demo 仅支持鱼油，先按鱼油演示。" }, ...buildVerifyScript(batchId || BATCH_ID)];
-    } else {
-      script = chatScripts[intent] || chatScripts.fallback;
-    }
-    streamChat(res, intent, script);
+    streamChat(res, "fallback", [
+      { cls: "plain", text: "抱歉，Agent 对话服务暂不可用。" },
+      { cls: "plain", text: "请检查服务端是否配置了 DEEPSEEK_API_KEY，以及能否连接 DeepSeek API。" },
+    ]);
     return true;
   }
 

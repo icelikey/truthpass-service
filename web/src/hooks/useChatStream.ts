@@ -22,7 +22,7 @@ export function useChatStream() {
   }, []);
 
   const ask = useCallback(
-    async (question: string) => {
+    async (question: string, batchId = "") => {
       const text = question.trim();
       if (!text) return;
 
@@ -38,6 +38,7 @@ export function useChatStream() {
       try {
         await postChat(
           text,
+          batchId,
           (event) => {
             if (event.kind === "begin") {
               patch(agentId, (m) => ({ ...m, lines: [] }));

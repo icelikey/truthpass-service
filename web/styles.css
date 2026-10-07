@@ -103,6 +103,7 @@ body {
 .chip {
   font-size: 11px;
   letter-spacing: 1.2px;
+  margin-left: auto;
   color: var(--cyan-2);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -159,7 +160,7 @@ body {
   gap: 18px;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 14px 36px 44px;
+  padding: 14px 36px 24px;
   align-items: stretch;
   grid-auto-rows: minmax(660px, auto);
 }
@@ -735,8 +736,64 @@ body {
   box-shadow: 0 0 24px rgba(93, 213, 213, 0.4);
 }
 
+/* ================= 检测报告 ================= */
+.report-section {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 36px 0;
+  position: relative;
+  z-index: 1;
+}
+.report-section .panel {
+  margin: 0;
+}
+.report-section h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.report-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 6px;
+}
+.report-label { color: var(--muted); font-size: 13px; }
+.report-actions {
+  display: flex;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+.report-actions .join-btn { width: auto; }
+.report-preview {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(5, 13, 25, 0.4);
+}
+.report-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.report-preview-head strong { font-size: 15px; }
+.report-preview-meta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.report-preview-meta div { display: grid; gap: 4px; min-width: 0; }
+.report-preview-meta span { color: var(--muted); font-size: 12px; }
+.report-preview-meta strong { font-size: 16px; overflow-wrap: anywhere; }
+
 /* ================= 底部 · 消费者共建 ================= */
-.community { max-width: 1440px; margin: 0 auto; padding: 6px 36px 40px; position: relative; }
+.community { max-width: 1440px; margin: 0 auto; padding: 24px 36px 40px; position: relative; }
 
 .community-bar {
   display: flex;

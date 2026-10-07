@@ -5,11 +5,12 @@
   "type": "module",
   "description": "真验 Zhenyan: service reliability and public reputation layer for white-label commerce Agents.",
   "scripts": {
+    "start": "npm run build && node --env-file-if-exists=.env --import=tsx api-server.ts",
     "demo": "node --env-file-if-exists=.env --import=tsx src/demo.ts",
     "test": "node --env-file-if-exists=.env --import=tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm test && npm run typecheck",
-"testbench:tools": "node --env-file-if-exists=.env --import=tsx src/tools/testbench-server.ts",
+    "testbench:tools": "node --env-file-if-exists=.env --import=tsx src/tools/testbench-server.ts",
     "api": "node --env-file-if-exists=.env --import=tsx api-server.ts",
     "dev": "vite",
     "build": "tsc -p tsconfig.web.json --noEmit && vite build",
@@ -18,6 +19,8 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.16",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "nodemailer": "^10.0.15",
     "pg": "^8.23.1",
     "react": "^18.3.1",

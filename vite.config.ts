@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 // Frontend dev server proxies /api to the zero-dependency Node backend (server.mjs).
 export default defineConfig({
   root: "web",
+  envDir: "..",
   plugins: [react()],
   server: {
     port: 5173,

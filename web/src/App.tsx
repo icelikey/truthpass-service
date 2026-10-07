@@ -6,6 +6,7 @@ import { Hero } from "./components/Hero";
 import { ModalProvider } from "./components/ModalContext";
 import { ObserverDrawer } from "./components/ObserverDrawer";
 import { ProductPanel } from "./components/ProductPanel";
+import { ReportSection } from "./components/ReportSection";
 import { TopBar } from "./components/TopBar";
 import type { VerifyState } from "./types";
 
@@ -40,6 +41,7 @@ export default function App() {
         <ProductPanel state={verifyState} batchId={batchId ?? ""} />
         <EvidencePanel state={verifyState} batchId={batchId ?? ""} />
       </main>
+      <ReportSection batchId={batchId} />
       <Community onToast={showToast} batchId={batchId} />
       <ObserverDrawer open={observerOpen} onClose={() => setObserverOpen(false)} batchId={batchId} />
       {toast && (
