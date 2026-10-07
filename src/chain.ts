@@ -71,7 +71,8 @@ export interface EvidenceAnchorInput {
   contractAddress?: string;
 }
 
-export type EvidenceState = 1 | 2 | 3 | 4 | 5 | 6;
+/** States accepted by `anchorEvidence`; 5/6 are revision states, not anchors. */
+export type EvidenceState = 1 | 2 | 3 | 4;
 
 /** Input for TruthPassEvidenceAnchor.sol's production eight-argument ABI. */
 export interface TruthPassEvidenceAnchorInput {
@@ -201,8 +202,8 @@ export function encodeTruthPassEvidenceAnchorCalldata(
   input: TruthPassEvidenceAnchorInput,
   chainId: number,
 ): string {
-  if (!Number.isInteger(input.state) || input.state < 1 || input.state > 6) {
-    throw new BotChainError("state must be one of the TruthPass evidence states 1..6");
+  if (!Number.isInteger(input.state) || input.state < 1 || input.state > 4) {
+    throw new BotChainError("state must be one of the TruthPass anchor states 1..4");
   }
   return [
     TRUTHPASS_ANCHOR_EVIDENCE_SELECTOR,
