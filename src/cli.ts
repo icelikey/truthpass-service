@@ -415,11 +415,14 @@ export async function inspectBatch(batchId: string): Promise<Record<string, unkn
     ? verification.jevDecision as Record<string, unknown>
     : null;
   const accepted = verification.status === "accepted" || verification.status === "accepted_with_scope";
+  const rawPolicyHash = await sha256Hex(`${String(verification.policyId ?? "")}:${String(verification.policyVersion ?? "")}`);
+  const policyHash = rawPolicyHash.startsWith("0x") ? rawPolicyHash : `0x${rawPolicyHash}`;
   const productionTime = evidence.productionTime ?? (makeTask(batchId) as Record<string, unknown>).productionTime;
   return {
     schemaVersion: "truthpass.cli.inspection.v1",
     command: "inspect",
     dataClass: verification.dataClass,
+    policyHash,
     status: verification.status,
     product: {
       name: "高浓度鱼油软胶囊",
@@ -468,6 +471,7 @@ export async function inspectBatch(batchId: string): Promise<Record<string, unkn
       score: verification.score,
       policyId: verification.policyId,
       policyVersion: verification.policyVersion,
+      policyHash,
       verifierVersion: (verification.verificationResult as Record<string, unknown> | null)?.verifierVersion ?? null,
       checks: (verification.verificationResult as Record<string, unknown> | null)?.checks ?? null,
       reasons: verification.reasons,

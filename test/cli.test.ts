@@ -48,6 +48,7 @@ test("CLI inspect returns consumer-agent product, JEV, and mainnet receipt data"
   const value = result.value as Record<string, any>;
   assert.equal(value.schemaVersion, "truthpass.cli.inspection.v1");
   assert.equal(value.command, "inspect");
+  assert.match(value.policyHash, /^0x[0-9a-f]{64}$/);
   assert.equal(value.status, "accepted");
   assert.equal(value.product.name, "高浓度鱼油软胶囊");
   assert.equal(value.batch.id, "FO-2026-001");
