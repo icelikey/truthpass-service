@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "truthpass.chain-deployment.v0.8.1",
+  "status": "not_deployed",
+  "network": "bohr-testnet",
+  "chainId": 968,
+  "chainIdHex": "0x3c8",
+  "rpcUrl": "https://rpc.bohr.life",
+  "explorerUrl": "https://scan.bohr.life",
+  "contract": {
+    "name": "TruthPassEvidenceAnchor",
+    "address": null,
+    "deploymentTxHash": null,
+    "domainSeparator": null
+  },
+  "roles": {
+    "defaultAdmin": null,
+    "evidenceWriter": null,
+    "verifier": null,
+    "purchaseWriter": null,
+    "contributionWriter": null,
+    "dispute": null,
+    "revoker": null
+  },
+  "verification": {
+    "ethChainId": "pending",
+    "ethGetCode": "pending",
+    "domainSeparatorReadback": "pending",
+    "roleReadback": "pending",
+    "firstLifecycleReceipt": null
+  },
+  "notes": [
+    "This is a public handoff template; null values are intentional until deployment.",
+    "Never place private keys, API keys, seed phrases, or raw consumer data in this file.",
+    "The CLI remains dry-run only until a deployed contract and receipt verification are configured."
+  ]
+}

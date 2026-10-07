@@ -1,9 +1,9 @@
 # 真验文档版本规范
 
-> 文档版本：v0.7.1
+> 文档版本：v0.8.1
 > 状态：当前生效
 > 最近修改：2026-10-07
-> 修改摘要：补齐 TruthPassEvidenceAnchor 合约交接和与合约 ABI 一致的 BOT Chain 客户端接入约定。
+> 修改摘要：补充 Bohr Testnet 安全配置模板和部署回填字段，明确未部署前的状态边界。
 > 影响范围：BOT Chain、ERC-8004、Agent 架构、鱼油 Demo、证据接入、JEV、合约、消费者权益、网页演示和代码评审
 > 队友下一步：每次修改先更新元信息和变更日志，再提交代码或页面。
 
@@ -21,7 +21,7 @@ v<主版本>.<次版本>.<修订号>
 - **次版本**：新增一个完整模块、接口合同或演示流程；
 - **修订号**：文字、示例、链接、阈值说明或排版修正，不改变合同。
 
-当前主线：**v0.7.1 消费者 CLI + JEV 决策门 + BOT Chain 链上接入基线**。
+当前主线：**v0.8.1 本地完整回放 + BOT Chain 测试网配置交接基线**。
 
 ## 每次更新必须写什么
 
@@ -56,6 +56,7 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.7.0 | 当前链上接入基线 | BOT Chain 网络、ERC-8004 身份/验证、证据锚定、消费者贡献和测试网到主网方案 |
 | v0.7.1 | 当前交接版本 | TruthPassEvidenceAnchor 合约、角色/幂等/域校验、Chain Adapter ABI 对齐和队友回放清单 |
 | v0.8.0 | 当前完整目标实现 | EvidenceEnvelope、Ed25519 验签、JEV 安全决策门、完整 Chain Adapter、本地六事件回放和统一锚定状态 |
+| v0.8.1 | 当前配置交接版本 | Bohr Testnet 参数、部署回填模板、角色和 receipt 验收门禁 |
 
 ## 变更日志
 
@@ -139,3 +140,11 @@ docs(v0.4.1): clarify evidence envelope fields
 - **CLI 影响**：新增 `truthpass replay`，统一复用 `VerificationResult`，本地回放明确 `anchor_pending`，没有真实 receipt 不显示 `anchored`；
 - **验证证据**：`npm test` 31/31 通过，`npm run typecheck` 通过；Solidity `TruthPassEvidenceAnchor.sol` 使用 solc 0.8.24 编译通过；
 - **部署门禁**：仍需在 Bohr Testnet 配置真实合约地址、角色钱包和交易哈希，当前不把本地账本根当作区块哈希。
+
+### v0.8.1 — 2026-10-07
+
+- **新增配置**：`config/bot-chain-testnet.example.json`、`docs/configuration-v0.8.1.md`；
+- **修改方向**：将已确认的 Bohr Testnet 参数和未确认的部署字段分开，形成可交接的公开模板；
+- **安全边界**：模板不包含私钥、API Key、消费者数据、合约地址或虚构交易哈希；
+- **状态边界**：真实部署完成前，CLI 和网页继续使用 `offline_plan_only`、`prepared_offline_not_submitted` 或 `anchor_pending`；
+- **队友下一步**：完成部署、授予角色、回读域和 receipt，并把真实公开地址回填到模板。

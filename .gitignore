@@ -3,6 +3,7 @@ dist/
 .env
 .env.*
 !.env.example
+configure-deepseek-key.ps1
 .DS_Store
 .idea/
 .vscode/
