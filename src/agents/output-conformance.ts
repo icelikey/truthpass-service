@@ -12,7 +12,7 @@ export interface OutputConformanceOptions {
 
 export function conformOutputToContract(value: unknown, options: OutputConformanceOptions): { invalidFactIds: number } {
   let invalidFactIds = 0;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { invalidFactIds };
   const output = value as Record<string, unknown>;
   if (Array.isArray(output.findings)) {
     const validSourceIds = new Set(options.sourceIds);
