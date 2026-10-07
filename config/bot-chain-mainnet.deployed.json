@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "truthpass.chain-deployment.v0.8.5",
+  "status": "deployed_mainnet_receipt_verified",
+  "network": "bot-mainnet",
+  "chainId": 677,
+  "chainIdHex": "0x2a5",
+  "rpcUrl": "https://rpc.botchain.ai",
+  "explorerUrl": "https://scan.botchain.ai",
+  "contract": {
+    "name": "TruthPassEvidenceAnchor",
+    "address": "0x0033462bee153cb9DF12b5c447b9C282DbfbE877",
+    "deploymentTxHash": "0xbc9bfe2b4a78fbf95d7795a5a67f14402cb9b8e0c6cf406d7ab39be3a65442b6",
+    "deploymentBlockNumber": 25861690,
+    "domainSeparator": "0xb0843104b533c579fb232c23f6c5a3d900ec0e507e85dec8d99be2cba9a2a8eb"
+  },
+  "deployerAddress": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+  "verification": {
+    "ethChainId": "verified",
+    "ethGetCode": "verified",
+    "deployedChainId": "verified",
+    "domainSeparatorReadback": "verified",
+    "confirmations": 2
+  },
+  "note": "Public metadata only. Private keys and raw consumer data stay outside Git."
+}
