@@ -14,6 +14,8 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "deploy:bot-chain": "node scripts/deploy-bot-chain.mjs",
+    "grant:bot-chain-roles": "node scripts/grant-bot-chain-roles.mjs",
+    "replay:bot-chain": "node scripts/replay-bot-chain.mjs",
     "demo:real-sourced": "tsx src/real-sourced-demo.ts",
     "demo:fish-oil-e2e": "tsx src/fish-oil-order-to-delivery-demo.ts"
   },

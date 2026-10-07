@@ -1,11 +1,11 @@
 # 真验文档版本规范
 
-> 文档版本：v0.8.2
+> 文档版本：v0.8.3
 > 状态：当前生效
 > 最近修改：2026-10-07
-> 修改摘要：新增 Bohr Testnet 安全部署脚本和 Faucet 阻塞记录，明确未部署前的状态边界。
+> 修改摘要：完成 Bohr Testnet 部署、角色回读和鱼油七事件生命周期回放，补充链上组合说明。
 > 影响范围：BOT Chain、ERC-8004、Agent 架构、鱼油 Demo、证据接入、JEV、合约、消费者权益、网页演示和代码评审
-> 队友下一步：为测试钱包领取 tBOT，运行部署脚本并回填真实公开 receipt。
+> 队友下一步：读取公开部署配置接入 CLI/网页，并按生产要求拆分角色钱包。
 
 ## 目的
 
@@ -57,7 +57,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.7.1 | 当前交接版本 | TruthPassEvidenceAnchor 合约、角色/幂等/域校验、Chain Adapter ABI 对齐和队友回放清单 |
 | v0.8.0 | 当前完整目标实现 | EvidenceEnvelope、Ed25519 验签、JEV 安全决策门、完整 Chain Adapter、本地六事件回放和统一锚定状态 |
 | v0.8.1 | 历史配置交接版本 | Bohr Testnet 参数、部署回填模板、角色和 receipt 验收门禁 |
-| v0.8.2 | 当前部署交接版本 | 安全部署脚本、余额门禁、部署后回读和 Faucet 阻塞记录 |
+| v0.8.2 | 历史部署交接版本 | 安全部署脚本、余额门禁、部署后回读和 Faucet 阻塞记录 |
+| v0.8.3 | 当前测试网验收版本 | 真实合约地址、角色回读、七事件生命周期 receipt 和链上组合说明 |
 
 ## 变更日志
 
@@ -158,3 +159,12 @@ docs(v0.4.1): clarify evidence envelope fields
 - **当前状态**：RPC 可达但测试钱包余额为零；官方 Faucet 在当前网络连接关闭/超时，尚未发送部署交易；
 - **新增文档**：`docs/deployment-v0.8.2.md`，记录命令、实测错误和领取 tBOT 后的交接步骤；
 - **验证结果**：`npm test` 35/35 通过，`npm run typecheck` 和脚本语法检查通过。
+
+### v0.8.3 — 2026-10-07
+
+- **真实链上结果**：在 BOT Chain Bohr Testnet（Chain ID `968`）部署 `TruthPassEvidenceAnchor`，合约地址和部署交易写入 `config/bot-chain-testnet.deployed.json`；
+- **角色验收**：六类业务角色完成 `hasRole` 回读；测试钱包暂时同持角色，仅用于测试网回放；
+- **生命周期回放**：真实提交并验证 `EvidenceAnchored`、`VerificationRecorded`、`PurchaseRecorded`、`ContributionRecorded`、`DisputeRaised`、替代证据和 `RecordRevokedOrSuperseded` 七类事件；
+- **新增代码**：`scripts/grant-bot-chain-roles.mjs`、`scripts/replay-bot-chain.mjs` 及对应 npm 命令；
+- **新增文档**：`docs/chain-composition-v0.8.3.md`，说明链下生产数据、Agent、确定性 Verifier 与 BOT Chain 公共锚定层的边界；
+- **安全边界**：原始报告、IoT 明细和消费者隐私仍留在链下；任何真实业务上线前必须拆分角色钱包并完成设备签名、样品交接、隐私授权和争议流程。

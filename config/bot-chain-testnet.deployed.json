@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "truthpass.chain-deployment.v0.8.3",
+  "status": "deployed_roles_and_lifecycle_verified",
+  "network": "bohr-testnet",
+  "chainId": 968,
+  "chainIdHex": "0x3c8",
+  "rpcUrl": "https://rpc.bohr.life",
+  "explorerUrl": "https://scan.bohr.life",
+  "contract": {
+    "name": "TruthPassEvidenceAnchor",
+    "address": "0xCc836EF2606a1E75473D3E5e6fa2E6fBF4F0478e",
+    "deploymentTxHash": "0x8c15490a325061857ca473c62e5baaaac348010d18b9951303e2c1e67867c419",
+    "deploymentBlockNumber": 26008937,
+    "domainSeparator": "0x25e4fa7cac79d84f78c683664be60bb7dd82dd4237be19591e9d0db8a56d0033"
+  },
+  "roles": {
+    "defaultAdmin": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "evidenceWriter": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "verifier": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "purchaseWriter": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "contributionWriter": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "dispute": "0x2eBd8467735EE3534be6add92f3D7231BA693c08",
+    "revoker": "0x2eBd8467735EE3534be6add92f3D7231BA693c08"
+  },
+  "verification": {
+    "ethChainId": "verified",
+    "ethGetCode": "verified",
+    "domainSeparatorReadback": "verified",
+    "roleReadback": "verified",
+    "deploymentReceipt": {
+      "status": "0x1",
+      "blockNumber": 26008937,
+      "explorerUrl": "https://scan.bohr.life/tx/0x8c15490a325061857ca473c62e5baaaac348010d18b9951303e2c1e67867c419"
+    },
+    "lifecycleReceipts": [
+      {
+        "name": "evidence",
+        "txHash": "0x0880f5e9e27975b9ecd058978d5f1bd69640799a0aa71fe1eac4151eca680f5c",
+        "blockNumber": 26009923,
+        "event": "EvidenceAnchored",
+        "explorerUrl": "https://scan.bohr.life/tx/0x0880f5e9e27975b9ecd058978d5f1bd69640799a0aa71fe1eac4151eca680f5c"
+      },
+      {
+        "name": "verification",
+        "txHash": "0x61836e98072c8330c6cc395c3629da3c9439c01d056238b54d07e39ad2059136",
+        "blockNumber": 26009927,
+        "event": "VerificationRecorded",
+        "explorerUrl": "https://scan.bohr.life/tx/0x61836e98072c8330c6cc395c3629da3c9439c01d056238b54d07e39ad2059136"
+      },
+      {
+        "name": "purchase",
+        "txHash": "0x41b80254aec6e7e27ee17b3d789ee7acad722ffe1eeb5b91eab0da0e184fc68a",
+        "blockNumber": 26009935,
+        "event": "PurchaseRecorded",
+        "explorerUrl": "https://scan.bohr.life/tx/0x41b80254aec6e7e27ee17b3d789ee7acad722ffe1eeb5b91eab0da0e184fc68a"
+      },
+      {
+        "name": "contribution",
+        "txHash": "0x29e67b97cbf84d28ac2095330bef9fcaf23a6cdb8b1024e31c2d06b61911aff5",
+        "blockNumber": 26009943,
+        "event": "ContributionRecorded",
+        "explorerUrl": "https://scan.bohr.life/tx/0x29e67b97cbf84d28ac2095330bef9fcaf23a6cdb8b1024e31c2d06b61911aff5"
+      },
+      {
+        "name": "dispute",
+        "txHash": "0xfddb8f156a2514332ec28f94a9125b344744fbb4aba4877043ed9a7953f26a8a",
+        "blockNumber": 26009953,
+        "event": "DisputeRaised",
+        "explorerUrl": "https://scan.bohr.life/tx/0xfddb8f156a2514332ec28f94a9125b344744fbb4aba4877043ed9a7953f26a8a"
+      },
+      {
+        "name": "replacement_evidence",
+        "txHash": "0x5b273a19c3f035ff1659026a0a385a5c552af5205fafd1f84c4c5a3e03ac86d8",
+        "blockNumber": 26009961,
+        "event": "EvidenceAnchored",
+        "explorerUrl": "https://scan.bohr.life/tx/0x5b273a19c3f035ff1659026a0a385a5c552af5205fafd1f84c4c5a3e03ac86d8"
+      },
+      {
+        "name": "supersede",
+        "txHash": "0x9df7515c4cb9c80a915937d2298e4ef6927a0055ce443f4f7423d8d0e0d41cec",
+        "blockNumber": 26009969,
+        "event": "RecordRevokedOrSuperseded",
+        "explorerUrl": "https://scan.bohr.life/tx/0x9df7515c4cb9c80a915937d2298e4ef6927a0055ce443f4f7423d8d0e0d41cec"
+      }
+    ]
+  },
+  "notes": [
+    "This file contains public testnet deployment metadata only.",
+    "The same test wallet currently holds all roles for the demo replay; production must split admin, evidence, verifier, purchase, contribution, dispute and revoker keys.",
+    "Raw production reports, IoT telemetry and consumer data remain off-chain; only commitments and workflow events are anchored here."
+  ]
+}
