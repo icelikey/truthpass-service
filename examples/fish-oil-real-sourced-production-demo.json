@@ -1,0 +1,547 @@
+{
+  "datasetId": "truthpass-fish-oil-real-sourced-demo-v1",
+  "datasetVersion": "1.0.0",
+  "status": "simulated_publicly_sourced",
+  "generatedAt": "2026-10-07T12:00:00+08:00",
+  "disclaimer": "本数据集不是任何真实厂家的生产记录。生产批号、时间、设备、传感器读数和检测结果均为模拟值；公开来源只用于约束流程、检测项目、单位、方法和示例范围。",
+  "sourceBasis": [
+    {
+      "sourceId": "goed-monograph-2021",
+      "url": "https://goedomega3.com/storage/app/media/technical%20reports/GOED%20Monograph%20-%202021%2003%2015.pdf",
+      "sourceType": "industry_quality_monograph",
+      "retrievedAt": "2026-10-07",
+      "usedFor": [
+        "PV <= 5 meq/kg",
+        "p-Anisidine <= 20",
+        "TOTOX = 2 * PV + p-Anisidine <= 26",
+        "Pb < 0.05 mg/kg, Cd < 0.1 mg/kg, Hg < 0.1 mg/kg, inorganic As < 0.1 mg/kg",
+        "third-party laboratory should use validated methods and internationally recognized accreditation such as ISO/IEC 17025",
+        "EPA/DHA result expression in mg/g after method-specific correction"
+      ]
+    },
+    {
+      "sourceId": "codex-fish-oils",
+      "url": "https://www.fao.org/fao-who-codexalimentarius/codex-texts/all-standards/en/",
+      "sourceType": "international_standard_index",
+      "retrievedAt": "2026-10-07",
+      "usedFor": [
+        "CXS 329-2017 Standard for Fish Oils is a standards reference",
+        "fatty acid composition and oxidation measurements should be tied to a declared method and unit"
+      ]
+    },
+    {
+      "sourceId": "ecfr-menhaden-oil",
+      "url": "https://www.law.cornell.edu/cfr/text/21/184.1472",
+      "sourceType": "regulatory_reference_mirror",
+      "retrievedAt": "2026-10-07",
+      "usedFor": [
+        "cooking and pressing to produce crude oil",
+        "storage/winterization, optional degumming, neutralization, bleaching and deodorization as a documented production sequence",
+        "process sequence reference only; not a universal specification for this demo product"
+      ]
+    },
+    {
+      "sourceId": "bioflux-refining-study",
+      "url": "https://bioflux.com.ro/docs/2021.3111-3118.pdf",
+      "sourceType": "open_academic_paper",
+      "retrievedAt": "2026-10-07",
+      "usedFor": [
+        "degumming, neutralization, bleaching and deodorization stages",
+        "example simulated operating ranges: 70 C degumming, 65 C neutralization, 40 C bleaching under nitrogen, 95-97 C vacuum deodorization",
+        "GC fatty-acid analysis and AOCS acid-value method as method examples"
+      ]
+    },
+    {
+      "sourceId": "jfhc-traceability",
+      "url": "https://www.jhfc.or.jp/en/downloads/fishoil-traceability",
+      "sourceType": "industry_traceability_overview",
+      "retrievedAt": "2026-10-07",
+      "usedFor": [
+        "anchovy-derived crude oil and downstream refining/concentration context",
+        "molecular-form and contamination-control fields",
+        "nitrogen or carbon-dioxide flushing and tocopherol stabilization as modeled process events"
+      ]
+    }
+  ],
+  "productSpec": {
+    "productId": "FO-PROD-HC-TG-01",
+    "productName": "高浓度鱼油软胶囊（模拟产品）",
+    "rawMaterialSpecies": "Peruvian anchovy",
+    "rawMaterialOrigin": "Peru / simulated origin label",
+    "molecularForm": "triglyceride_concentrate",
+    "targetEpaDhaPercent": 70,
+    "targetDailyServingMg": 1000,
+    "packaging": "opaque softgel bottle with nitrogen flush",
+    "policyId": "fish-oil-quality-demo-v1",
+    "policyNote": "EPA+DHA >= 70% is a demo product specification, not a universal legal threshold."
+  },
+  "batch": {
+    "batchId": "FO-DEMO-2026-1007",
+    "rawMaterialBatchId": "RM-PA-261005-01",
+    "intermediateBatchIds": [
+      "CRUDE-PA-261005-01",
+      "REFINED-PA-261006-01",
+      "CONC-PA-261006-01",
+      "BLEND-PA-261006-01"
+    ],
+    "finishedGoodsBatchId": "FG-PA-261006-01",
+    "productionWindow": {
+      "start": "2026-10-06T08:00:00Z",
+      "end": "2026-10-06T16:30:00Z"
+    },
+    "simulatedScale": {
+      "rawFishInputKg": 120000,
+      "crudeOilOutputKg": 8200,
+      "concentrateOutputKg": 3100,
+      "finishedSoftgels": 1240000
+    },
+    "sourceClass": "simulated_publicly_sourced"
+  },
+  "events": [
+    {
+      "eventId": "evt-raw-receive-001",
+      "eventType": "raw_material_received",
+      "subject": "RM-PA-261005-01",
+      "observedAt": "2026-10-05T04:10:00Z",
+      "issuer": {
+        "type": "supplier",
+        "id": "supplier-anchovy-demo"
+      },
+      "deviceId": "temp-probe-receiving-01",
+      "simulated": true,
+      "payload": {
+        "species": "Peruvian anchovy",
+        "supplierLot": "PA-261005-A",
+        "catchArea": "FAO 87 / simulated label",
+        "receivedWeightKg": 120000,
+        "temperatureC": 2.8,
+        "sensory": "fresh_frozen_fish_like",
+        "quarantineStatus": "released_for_processing"
+      },
+      "sourceBasis": [
+        "ecfr-menhaden-oil",
+        "jfhc-traceability"
+      ]
+    },
+    {
+      "eventId": "evt-cook-press-001",
+      "eventType": "wet_rendering",
+      "subject": "CRUDE-PA-261005-01",
+      "parentRefs": [
+        "RM-PA-261005-01"
+      ],
+      "observedAt": "2026-10-06T08:10:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "cooker-press-line-01",
+      "simulated": true,
+      "payload": {
+        "steamCookTemperatureC": 92,
+        "steamCookDurationMin": 18,
+        "pressLiquorCentrifugeRpm": 3200,
+        "crudeOilOutputKg": 8200,
+        "crudeOilTemperatureC": 58.4,
+        "waterSeparation": "centrifugal"
+      },
+      "sourceBasis": [
+        "ecfr-menhaden-oil",
+        "bioflux-refining-study"
+      ]
+    },
+    {
+      "eventId": "evt-degum-001",
+      "eventType": "degumming",
+      "subject": "REFINED-PA-261006-01",
+      "parentRefs": [
+        "CRUDE-PA-261005-01"
+      ],
+      "observedAt": "2026-10-06T08:45:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "degumming-tank-01",
+      "simulated": true,
+      "payload": {
+        "phosphoricAcidAdditionPercent": 1.0,
+        "temperatureC": 70,
+        "durationMin": 20,
+        "centrifugeRpm": 4000,
+        "phospholipidRemoval": "simulated_pass"
+      },
+      "sourceBasis": [
+        "bioflux-refining-study"
+      ]
+    },
+    {
+      "eventId": "evt-neutralize-001",
+      "eventType": "neutralization",
+      "subject": "REFINED-PA-261006-01",
+      "parentRefs": [
+        "evt-degum-001"
+      ],
+      "observedAt": "2026-10-06T09:20:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "neutralization-tank-01",
+      "simulated": true,
+      "payload": {
+        "naohConcentrationM": 1.0,
+        "temperatureC": 65,
+        "durationMin": 20,
+        "endpointPh": 7.0,
+        "washCycles": 3,
+        "vacuumDryingTemperatureC": 50
+      },
+      "sourceBasis": [
+        "bioflux-refining-study"
+      ]
+    },
+    {
+      "eventId": "evt-bleach-001",
+      "eventType": "bleaching",
+      "subject": "REFINED-PA-261006-01",
+      "parentRefs": [
+        "evt-neutralize-001"
+      ],
+      "observedAt": "2026-10-06T10:15:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "bleaching-tank-01",
+      "simulated": true,
+      "payload": {
+        "adsorbentDosePercent": 4.0,
+        "activatedCarbonFraction": 0.0113,
+        "temperatureC": 40,
+        "durationMin": 40,
+        "inertGas": "N2",
+        "filtrationStatus": "simulated_pass"
+      },
+      "sourceBasis": [
+        "bioflux-refining-study"
+      ]
+    },
+    {
+      "eventId": "evt-deodorize-001",
+      "eventType": "deodorization",
+      "subject": "REFINED-PA-261006-01",
+      "parentRefs": [
+        "evt-bleach-001"
+      ],
+      "observedAt": "2026-10-06T11:30:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "deodorizer-vacuum-01",
+      "simulated": true,
+      "payload": {
+        "temperatureC": 96,
+        "durationMin": 60,
+        "pressureKPaAbs": 0.8,
+        "steamStripping": true,
+        "sensoryAfter": "bland_mild_fish_like"
+      },
+      "sourceBasis": [
+        "bioflux-refining-study",
+        "ecfr-menhaden-oil"
+      ]
+    },
+    {
+      "eventId": "evt-concentrate-001",
+      "eventType": "molecular_distillation_concentration",
+      "subject": "CONC-PA-261006-01",
+      "parentRefs": [
+        "REFINED-PA-261006-01"
+      ],
+      "observedAt": "2026-10-06T12:30:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "short-path-distillation-01",
+      "simulated": true,
+      "payload": {
+        "route": "molecular_distillation",
+        "vacuumKPaAbs": 0.12,
+        "feedTemperatureC": 118,
+        "epaDhaEnrichmentPercent": 73.0,
+        "contaminantRemovalClaim": "requires_independent_lab_confirmation"
+      },
+      "sourceBasis": [
+        "jfhc-traceability"
+      ]
+    },
+    {
+      "eventId": "evt-stabilize-fill-001",
+      "eventType": "stabilization_and_filling",
+      "subject": "BLEND-PA-261006-01",
+      "parentRefs": [
+        "CONC-PA-261006-01"
+      ],
+      "observedAt": "2026-10-06T13:40:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "equipmentId": "softgel-line-01",
+      "simulated": true,
+      "payload": {
+        "tocopherolAdded": true,
+        "nitrogenFlush": true,
+        "fillWeightMgTarget": 1000,
+        "fillWeightMgMean": 1006,
+        "fillWeightRsdPercent": 1.8,
+        "leakTest": "simulated_pass"
+      },
+      "sourceBasis": [
+        "jfhc-traceability"
+      ]
+    },
+    {
+      "eventId": "evt-pack-warehouse-001",
+      "eventType": "packaging_and_warehouse",
+      "subject": "FG-PA-261006-01",
+      "parentRefs": [
+        "BLEND-PA-261006-01"
+      ],
+      "observedAt": "2026-10-06T15:10:00Z",
+      "issuer": {
+        "type": "factory",
+        "id": "factory-demo-01"
+      },
+      "deviceId": "warehouse-sensor-01",
+      "simulated": true,
+      "payload": {
+        "packageCode": "TP-FO-261006-01",
+        "warehouseZone": "A-03",
+        "temperatureCMean": 18.4,
+        "temperatureCMax": 22.1,
+        "relativeHumidityPercent": 48,
+        "lightExposure": "opaque_packaging",
+        "labelBatchMatch": true
+      },
+      "sourceBasis": [
+        "jfhc-traceability"
+      ]
+    },
+    {
+      "eventId": "evt-logistics-001",
+      "eventType": "cold_chain_transport",
+      "subject": "FG-PA-261006-01",
+      "parentRefs": [
+        "evt-pack-warehouse-001"
+      ],
+      "observedAt": "2026-10-07T04:20:00Z",
+      "issuer": {
+        "type": "carrier",
+        "id": "carrier-demo-01"
+      },
+      "deviceId": "logger-truck-07",
+      "simulated": true,
+      "payload": {
+        "shipmentId": "SHIP-TP-261007-01",
+        "handoverCount": 2,
+        "temperatureCMin": 2.4,
+        "temperatureCMax": 7.1,
+        "temperatureGapHours": 1.2,
+        "gpsTrace": "simulated",
+        "sealIntact": true,
+        "deliveryStatus": "delivered"
+      },
+      "sourceBasis": [
+        "jfhc-traceability"
+      ]
+    }
+  ],
+  "laboratoryReport": {
+    "reportId": "COA-TP-FO-261006-01",
+    "sampleId": "S-FO-261006-01",
+    "batchId": "FG-PA-261006-01",
+    "laboratory": {
+      "id": "lab-demo-17025",
+      "name": "模拟 ISO/IEC 17025 实验室",
+      "accreditation": "simulated_claim_requires_verification",
+      "signatureValid": true
+    },
+    "analysisDate": "2026-10-07T06:30:00Z",
+    "simulated": true,
+    "results": {
+      "epaPercent": 39.5,
+      "dhaPercent": 33.5,
+      "epaDhaPercent": 73.0,
+      "peroxideValueMeqO2PerKg": 2.1,
+      "pAnisidineValue": 11.8,
+      "totox": 16.0,
+      "leadMgPerKg": 0.01,
+      "cadmiumMgPerKg": 0.02,
+      "mercuryMgPerKg": 0.03,
+      "inorganicArsenicMgPerKg": 0.01,
+      "totalDioxinsPgwhoTeqPerG": 1.1,
+      "totalPcbMgPerKg": 0.02,
+      "appearance": "clear_pale_yellow",
+      "odor": "bland_mild_fish_like"
+    },
+    "methods": {
+      "fattyAcids": "GC method; method ID simulated and must be replaced by lab method record",
+      "peroxideValue": "AOCS Cd 8b-90",
+      "pAnisidineValue": "AOCS Cd 18-90",
+      "contaminants": "matrix-validated method; exact method ID not supplied in this demo"
+    },
+    "sourceBasis": [
+      "goed-monograph-2021",
+      "codex-fish-oils",
+      "jfhc-traceability"
+    ]
+  },
+  "verifierFixture": {
+    "task": {
+      "taskId": "task-fish-oil-real-sourced-demo-001",
+      "serviceKind": "lab",
+      "capability": "fish-oil-batch-quality-check",
+      "batchId": "FG-PA-261006-01",
+      "productionTime": "2026-10-06T08:00:00Z",
+      "acceptance": {
+        "requireSignature": true,
+        "maxLogisticsGapHours": 6,
+        "minEpaDhaPercent": 70,
+        "maxPeroxideValue": 5,
+        "maxTotox": 26,
+        "requireColdChain": true
+      }
+    },
+    "evidence": {
+      "serviceId": "lab-demo-17025",
+      "taskId": "task-fish-oil-real-sourced-demo-001",
+      "batchId": "FG-PA-261006-01",
+      "reportBatchId": "FG-PA-261006-01",
+      "productionTime": "2026-10-06T08:00:00Z",
+      "reportTime": "2026-10-07T06:30:00Z",
+      "logisticsGapHours": 1.2,
+      "signatureValid": true,
+      "epaDhaPercent": 73.0,
+      "peroxideValue": 2.1,
+      "totox": 16.0,
+      "coldChainGapHours": 1.2,
+      "payload": {
+        "datasetId": "truthpass-fish-oil-real-sourced-demo-v1",
+        "sourceMode": "simulated_publicly_sourced",
+        "reportId": "COA-TP-FO-261006-01",
+        "pAnisidineValue": 11.8,
+        "heavyMetals": {
+          "leadMgPerKg": 0.01,
+          "cadmiumMgPerKg": 0.02,
+          "mercuryMgPerKg": 0.03,
+          "inorganicArsenicMgPerKg": 0.01
+        },
+        "contaminants": {
+          "totalDioxinsPgwhoTeqPerG": 1.1,
+          "totalPcbMgPerKg": 0.02
+        },
+        "uncovered": [
+          "real laboratory identity and accreditation",
+          "raw chromatograms and instrument audit trail",
+          "actual device signatures and calibration certificates",
+          "regulatory disposition for a real market"
+        ]
+      }
+    }
+  },
+  "demoScenarios": [
+    {
+      "scenarioId": "pass",
+      "description": "公开资料约束下的模拟正常批次",
+      "mutations": [],
+      "expectedStatus": "accepted"
+    },
+    {
+      "scenarioId": "wrong_batch",
+      "description": "报告属于另一个批次",
+      "mutations": {
+        "evidence.reportBatchId": "FG-PA-261005-99"
+      },
+      "expectedStatus": "rejected",
+      "expectedReasonIncludes": "批次"
+    },
+    {
+      "scenarioId": "oxidation_failure",
+      "description": "氧化指标超过产品演示 policy",
+      "mutations": {
+        "evidence.peroxideValue": 6.2,
+        "evidence.totox": 29.0
+      },
+      "expectedStatus": "rejected",
+      "expectedReasonIncludes": [
+        "过氧化值",
+        "TOTOX"
+      ]
+    },
+    {
+      "scenarioId": "missing_cold_chain",
+      "description": "没有可用冷链证据",
+      "mutations": {
+        "evidence.coldChainGapHours": 7.0
+      },
+      "expectedStatus": "rejected",
+      "expectedReasonIncludes": "冷链"
+    },
+    {
+      "scenarioId": "scope_limited",
+      "description": "核心指标通过，但重金属/污染物未纳入本次 policy",
+      "mutations": {
+        "task.acceptance.requireColdChain": false,
+        "evidence.coldChainGapHours": 0
+      },
+      "expectedStatus": "accepted",
+      "expectedNote": "当前 Verifier 只输出 accepted；消费者层应额外显示 uncovered 字段并避免绝对安全表述。"
+    }
+  ],
+  "verifierCoverage": {
+    "coveredByCurrentVerifier": [
+      "taskId",
+      "batchId",
+      "reportBatchId",
+      "reportTimeAfterProduction",
+      "signatureValid",
+      "logisticsGapHours",
+      "epaDhaPercent",
+      "peroxideValue",
+      "totox",
+      "coldChainGapHours"
+    ],
+    "presentButNotCheckedByCurrentVerifier": [
+      "pAnisidineValue",
+      "leadMgPerKg",
+      "cadmiumMgPerKg",
+      "mercuryMgPerKg",
+      "inorganicArsenicMgPerKg",
+      "totalDioxinsPgwhoTeqPerG",
+      "totalPcbMgPerKg",
+      "method accreditation",
+      "sample chain-of-custody",
+      "equipment calibration",
+      "batch graph continuity"
+    ],
+    "interpretation": "Current verifier can exercise the demo acceptance path, but acceptance does not mean the full public-source quality envelope has been verified."
+  },
+  "publicReferenceSamples": [
+    {
+      "sourceId": "arcticmed-public-coa",
+      "url": "https://arcticmed.com/en/pages/certifikat",
+      "sourceType": "public_coa_page",
+      "retrievedAt": "2026-10-07",
+      "observedFields": {
+        "epaDhaMgPerG": 502,
+        "minimumMgPerG": 500
+      },
+      "usedFor": "公开 COA 数值范围的 sanity reference only，不复制为本模拟批次的检测结果",
+      "limitations": "页面公开字段有限，未作为本批次的批次证明或实验室认证"
+    }
+  ]
+}
