@@ -1,11 +1,11 @@
 # 真验 CLI 合同草案
 
-> 文档版本：v0.4.0  
-> 状态：草案，等待 Agent/后端实现  
-> 最近修改：2026-10-06  
-> 修改摘要：定义消费者 Agent 的 CLI 命令、JSON 输出、退出码和安全边界。  
+> 文档版本：v0.5.0  
+> 状态：首批命令已实现；链上提交仍为 dry-run  
+> 最近修改：2026-10-07  
+> 修改摘要：落地 doctor、discover、verify、explain 与 anchor dry-run，并保持固定 JSON、退出码和安全边界。  
 > 影响范围：CLI、API、网页调用、自动化测试  
-> 队友下一步：实现命令解析和 schema 校验，并补充一条 CLI 回放测试。
+> 队友下一步：接入真实 JEV、BOT Chain receipt/event 回读后，再开放真实 anchor 写入。
 
 ## 目标
 
