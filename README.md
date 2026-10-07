@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v0.8.0
-> 最近修改：2026-10-06
-> 本次修改：补齐 EvidenceEnvelope、JEV 安全决策门、确定性验收、BOT Chain 交易适配器和本地完整回放。
+> 项目文档版本：v0.8.1
+> 最近修改：2026-10-07
+> 本次修改：补充 Bohr Testnet 安全配置模板和真实部署回填边界；不写入秘密或未确认链上地址。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -94,6 +94,8 @@ docs/DOCUMENT-VERSIONING.md        文档版本、修改说明和协作规则
 docs/jev-integration-v0.5.md       JEV 结构化决策门、类型合同和降级策略
 docs/target-development-v0.8.0.md 完整目标、完成标准和部署门禁
 docs/implementation-v0.8.0.md      本地完整回放和链上状态合同
+docs/configuration-v0.8.1.md       Bohr Testnet 配置和部署回填说明
+config/bot-chain-testnet.example.json 测试网公开配置模板
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图
 assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
 ```
