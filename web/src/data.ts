@@ -53,6 +53,11 @@ export const FISH_OIL_BATCH_DATA: Record<string, FishOilBatchData> = {
   "FO-2026-003": { name: "儿童 DHA 鱼油滴剂", origin: "阿拉斯加海域", productionDate: "2026-03-15", epaDha: 90, peroxide: 1.2, totox: 6, coldGap: 3, passed: true, heavyMetals: { pb: 0.03, hg: 0.01, cd: 0.01, as: 0.08 } },
   "FO-2026-004": { name: "三文鱼油胶囊", origin: "智利海域", productionDate: "2026-04-02", epaDha: 75, peroxide: 6.8, totox: 14, coldGap: 2.5, passed: false, heavyMetals: { pb: 0.04, hg: 0.03, cd: 0.05, as: 0.2 } },
   "FO-2026-005": { name: "南极磷虾油", origin: "南极海域", productionDate: "2026-05-20", epaDha: 85, peroxide: 1.5, totox: 8, coldGap: 7, passed: false, heavyMetals: { pb: 0.05, hg: 0.02, cd: 0.18, as: 0.3 } },
+  "FO-2026-006": { name: "高浓度 Omega-3 软胶囊", origin: "挪威深海", productionDate: "2026-06-10", epaDha: 88, peroxide: 1.6, totox: 8, coldGap: 1.5, passed: true, heavyMetals: { pb: 0.02, hg: 0.01, cd: 0.02, as: 0.12 } },
+  "FO-2026-007": { name: "深海鳕鱼肝油", origin: "北大西洋海域", productionDate: "2026-06-18", epaDha: 80, peroxide: 2.0, totox: 10, coldGap: 2, passed: true, heavyMetals: { pb: 0.03, hg: 0.02, cd: 0.04, as: 0.18 } },
+  "FO-2026-008": { name: "孕妇 DHA 鱼油", origin: "阿拉斯加海域", productionDate: "2026-07-02", epaDha: 92, peroxide: 1.2, totox: 6, coldGap: 1, passed: true, heavyMetals: { pb: 0.01, hg: 0.01, cd: 0.01, as: 0.06 } },
+  "FO-2026-009": { name: "鱼油凝胶软糖", origin: "南太平洋海域", productionDate: "2026-07-15", epaDha: 55, peroxide: 2.5, totox: 12, coldGap: 2.5, passed: false, heavyMetals: { pb: 0.04, hg: 0.02, cd: 0.05, as: 0.2 } },
+  "FO-2026-010": { name: "高纯度磷虾油胶囊", origin: "南极海域", productionDate: "2026-07-28", epaDha: 86, peroxide: 6.5, totox: 18, coldGap: 3, passed: false, heavyMetals: { pb: 0.05, hg: 0.03, cd: 0.15, as: 0.3 } },
 };
 
 export interface ObserverService {

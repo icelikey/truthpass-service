@@ -8,13 +8,21 @@ const FISH_OIL_BATCHES = [
   { id: "FO-2026-003", name: "儿童 DHA 鱼油滴剂" },
   { id: "FO-2026-004", name: "三文鱼油胶囊" },
   { id: "FO-2026-005", name: "南极磷虾油" },
+  { id: "FO-2026-006", name: "高浓度 Omega-3 软胶囊" },
+  { id: "FO-2026-007", name: "深海鳕鱼肝油" },
+  { id: "FO-2026-008", name: "孕妇 DHA 鱼油" },
+  { id: "FO-2026-009", name: "鱼油凝胶软糖" },
+  { id: "FO-2026-010", name: "高纯度磷虾油胶囊" },
 ];
 
 function extractBatchId(text: string): string | null {
   const full = text.match(/([A-Z]{2,3}-\d{4}-\d{3})/i);
   if (full) return full[1].toUpperCase();
-  const short = text.match(/\b0*0?([1-5])\b/);
-  if (short) return `FO-2026-00${short[1]}`;
+  const short = text.match(/\b0*(\d{1,2})\b/);
+  if (short) {
+    const n = parseInt(short[1], 10);
+    if (n >= 1 && n <= 10) return `FO-2026-${String(n).padStart(3, "0")}`;
+  }
   return null;
 }
 
