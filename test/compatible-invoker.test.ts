@@ -84,7 +84,7 @@ test("invalid findings are dropped per item instead of failing the whole output"
   assert.deepEqual(output.role === "production" ? output.findings[0].sourceIds : [], ["ev-production-001"]);
 });
 
-test("invalid consumer fact selections are filtered instead of failing the consumer stage", async () => {
+test("invalid consumer fact selections reject the consumer stage", async () => {
   const input = {
     schemaVersion: "agent.input.v1",
     role: "consumer",
@@ -119,8 +119,7 @@ test("invalid consumer fact selections are filtered instead of failing the consu
     }), { status: 200 }),
   });
 
-  const output = await runAgent("consumer", input, invoke);
-  assert.deepEqual(output.selectedFactIds, ["F1"]);
+  await assert.rejects(runAgent("consumer", input, invoke), /只能选择证据卡中已登记的事实 ID/);
 });
 
 test("provider refuses to call the network without local credentials and model", async () => {

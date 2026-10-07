@@ -10,7 +10,8 @@ export interface OutputConformanceOptions {
   factCount?: number;
 }
 
-export function conformOutputToContract(value: unknown, options: OutputConformanceOptions): void {
+export function conformOutputToContract(value: unknown, options: OutputConformanceOptions): { invalidFactIds: number } {
+  let invalidFactIds = 0;
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const output = value as Record<string, unknown>;
   if (Array.isArray(output.findings)) {
@@ -27,10 +28,12 @@ export function conformOutputToContract(value: unknown, options: OutputConforman
     const before = output.selectedFactIds.length;
     const kept = [...new Set(output.selectedFactIds.filter((id): id is string => isValidFactId(id, factCount)))].slice(0, 30);
     if (kept.length !== before) {
+      invalidFactIds = before - kept.length;
       console.warn("[agent] 过滤 " + (before - kept.length) + " 个无效事实引用（共 " + before + " 个）");
     }
     output.selectedFactIds = kept;
   }
+  return { invalidFactIds };
 }
 
 function isValidFinding(item: unknown, validSourceIds: Set<string>): boolean {

@@ -1,6 +1,7 @@
 import { canonicalJson } from "../data/canonical.js";
 import { getAgentToolAllowlist, type AgentToolName } from "../tools/truthpass-tools.js";
 import { parseAgentInput, parseAgentOutput, type AgentInput, type AgentOutput, type AgentRole } from "./contracts.js";
+import { conformOutputToContract } from "./output-conformance.js";
 
 const roleGuidance: Record<AgentRole, string> = {
   production: [
@@ -68,11 +69,21 @@ export function runAgent(role: "inspection", rawInput: unknown, invoke: AgentInv
 export function runAgent(role: "consumer", rawInput: unknown, invoke: AgentInvoker): Promise<Extract<AgentOutput, { role: "consumer" }>>;
 export async function runAgent(role: AgentRole, rawInput: unknown, invoke: AgentInvoker): Promise<AgentOutput> {
   const input = parseAgentInput(role, rawInput);
-  const output = await invoke({
+  const rawOutput = await invoke({
     role,
     systemPrompt: systemPrompt(role),
     input: JSON.parse(canonicalJson(input)) as AgentInput,
     allowedTools: role === "consumer" ? [] : getAgentToolAllowlist(role),
   });
+  const output = structuredClone(rawOutput);
+  const conformance = conformOutputToContract(output, {
+    sourceIds: input.role === "consumer"
+      ? [...input.evidenceCard.evidenceIds, ...input.analyses.production.findings.flatMap((finding) => finding.sourceIds), ...input.analyses.inspection.findings.flatMap((finding) => finding.sourceIds)]
+      : input.view.context.evidence.map((item) => item.evidenceId),
+    factCount: input.role === "consumer" ? input.evidenceCard.facts.length : undefined,
+  });
+  if (role === "consumer" && conformance.invalidFactIds > 0) {
+    throw new Error("只能选择证据卡中已登记的事实 ID");
+  }
   return parseAgentOutput(role, input, output);
 }
