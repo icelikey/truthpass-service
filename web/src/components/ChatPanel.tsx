@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useChatStream, type ChatMessage } from "../hooks/useChatStream";
+import { postIotSimulation, type IotSimulationMode } from "../api";
 import type { ChatLine } from "../types";
 
 const FISH_OIL_BATCHES = [
@@ -89,6 +90,7 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [batchOpen, setBatchOpen] = useState(false);
   const [listening, setListening] = useState(false);
+  const [iotBusy, setIotBusy] = useState(false);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
@@ -110,6 +112,21 @@ export function ChatPanel({
     } else {
       // 随意对话：只对话，不触发验证状态，中间框保持待检测
       await ask(question, "");
+    }
+  };
+
+  const simulateIot = async (mode: IotSimulationMode) => {
+    const target = batchId ?? "FO-2026-001";
+    if (busy || iotBusy) return;
+    setIotBusy(true);
+    try {
+      const result = await postIotSimulation(target, mode);
+      await ask(`已上传 IoT 模拟数据：${mode}`, target);
+      void result;
+    } catch (error) {
+      console.error("IoT 模拟上传失败", error);
+    } finally {
+      setIotBusy(false);
     }
   };
 
@@ -225,6 +242,12 @@ export function ChatPanel({
               {prompt.label}
             </button>
           ))}
+        </div>
+        <div className="quick-group">
+          <span className="chat-quick-label">IoT 模拟：</span>
+          <button onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
+          <button onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
+          <button onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
         </div>
       </div>
 

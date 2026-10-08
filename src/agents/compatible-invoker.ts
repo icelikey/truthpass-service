@@ -28,7 +28,7 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
     const response = await fetchImpl(completionsEndpoint(baseUrl), {
       method: "POST",
       headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(15_000),
       body: JSON.stringify({
         model,
         messages: [

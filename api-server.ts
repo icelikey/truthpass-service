@@ -311,7 +311,7 @@ function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: st
     }
     const line = script[i++];
     res.write("data: " + JSON.stringify({ kind: "line", cls: line.cls, text: line.text }) + "\n\n");
-    setTimeout(next, line.cls === "conclusion" ? 260 : 210);
+    setTimeout(next, 0);
   };
   next();
 }
@@ -405,6 +405,33 @@ async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): P
     } catch (error) {
       sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
     }
+    return true;
+  }
+
+  if (p === "/api/simulator/iot" && req.method === "POST") {
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
+    const mode = body.mode === "cold_chain_gap" || body.mode === "device_offline" ? body.mode : "normal";
+    if (!batchId || !repository.getBatch(batchId)) {
+      sendJson(res, 400, { error: "批次不存在" });
+      return true;
+    }
+    const now = new Date().toISOString();
+    const suffix = now.replace(/[^0-9]/g, "");
+    const payload = {
+      deviceId: "iot-simulator-001", sequence: Number.isSafeInteger(body.sequence) ? body.sequence : Date.now(),
+      temperatureC: mode === "cold_chain_gap" ? 18.5 : mode === "device_offline" ? null : 4.2,
+      humidityPercent: mode === "device_offline" ? null : 61,
+      latitude: mode === "device_offline" ? null : 35.6812,
+      longitude: mode === "device_offline" ? null : 139.7671,
+      offline: mode === "device_offline", maxGapHours: mode === "cold_chain_gap" ? 6 : 0,
+      simulationMode: mode, evidenceMode: "demo/synthetic",
+    };
+    const evidence = await repository.addEvidence({
+      schemaVersion: "evidence.v1", evidenceId: `iot-${batchId}-${suffix}`, batchId, kind: "cold_chain",
+      issuerId: payload.deviceId, sourceKind: "platform_device", occurredAt: now, dataMode: "demo/synthetic", payload,
+    });
+    sendJson(res, 201, { ok: true, persisted: false, evidenceId: evidence.evidenceId, batchId, mode, payloadHash: evidence.payloadHash, message: "模拟 IoT 数据已写入证据仓库，标记为 demo/synthetic" });
     return true;
   }
 
