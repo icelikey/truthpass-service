@@ -334,13 +334,51 @@ async function streamChatWithReply(
   res.end();
 }
 
+async function freeChatReply(question: string): Promise<Array<{ cls: string; text: string }>> {
+  const apiKey = process.env.AGENT_API_KEY;
+  const model = process.env.AGENT_MODEL;
+  if (!apiKey || !model) return [];
+  const baseUrl = (process.env.AGENT_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "你是 TruthPass 鱼油助手，也是随产品交付的服用助理。请简洁友好地回答用户，可补充鱼油通用知识，不要编造检测值或疗效承诺；用户想溯源时，请让ta提供批次号（001-010）。纯文本，不要 Markdown，不超过 5 句。",
+          },
+          { role: "user", content: question },
+        ],
+        temperature: 0.2,
+      }),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+    const content = data.choices?.[0]?.message?.content;
+    return typeof content === "string" && content.trim() ? [{ cls: "plain", text: content.trim() }] : [];
+  } catch {
+    return [];
+  }
+}
+
 async function consumerChat(batchId: string, question: string, res: ServerResponse): Promise<void> {
   if (!batchId) {
     const available = Object.keys(FISH_OIL_BATCHES).filter((id) => repository.getBatch(id));
-    const reply = available.length
-      ? "请提供鱼油批次号。我能读取已登记的批次：" + available.join("、") + "。"
-      : "请提供商品名和批次号，我会先检查系统是否登记了对应证据。";
-    streamChat(res, "consumer_query", [{ cls: "conclusion", text: reply }]);
+    const fallback = [
+      {
+        cls: "plain",
+        text: available.length
+          ? "我是你的 TruthPass 鱼油助手。需要补货、查询批次或了解鱼油知识时告诉我即可，溯源请提供批次号（001-010）。"
+          : "请提供商品名和批次号，我会先检查系统是否登记了对应证据。",
+      },
+    ];
+    const reply = freeChatReply(question).then((lines) => (lines.length ? lines : fallback));
+    await streamChatWithReply(res, "consumer_query", [], reply);
     return;
   }
 

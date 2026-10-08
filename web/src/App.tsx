@@ -25,6 +25,7 @@ export default function App() {
   const [focusTech, setFocusTech] = useState(false);
   const { user, signUp, signIn, signOut } = useAuth();
   const toastTimer = useRef<number | undefined>(undefined);
+  const inQueryMode = !!batchId;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -97,18 +98,18 @@ export default function App() {
         onSignOut={signOut}
       />
       <Hero />
-      <main className="layout">
+      <main className={inQueryMode ? "layout" : "assistant-only"}>
         <ChatPanel
           onStart={() => setVerifyState("running")}
           onDone={handleDone}
           onBatch={(id) => setBatchId(id)}
           batchId={batchId}
         />
-        <ProductPanel state={verifyState} batchId={batchId ?? ""} />
-        <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} focusTech={focusTech} />
+        {inQueryMode && <ProductPanel state={verifyState} batchId={batchId ?? ""} />}
+        {inQueryMode && <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} focusTech={focusTech} />}
       </main>
-      <ReportSection batchId={batchId} />
-      <Community onToast={showToast} batchId={batchId} />
+      {inQueryMode && <ReportSection batchId={batchId} />}
+      {inQueryMode && <Community onToast={showToast} batchId={batchId} />}
       <ObserverDrawer open={observerOpen} onClose={() => setObserverOpen(false)} batchId={batchId} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuth={handleAuth} />
       <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
