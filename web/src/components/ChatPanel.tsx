@@ -269,7 +269,7 @@ export function ChatPanel({
 
       <div className="chat-quick">
         <div className="quick-group">
-          <span className="chat-quick-label">批次：</span>
+          <span className="chat-quick-label">批次查询：</span>
           <div className="batch-select">
             <button className="batch-trigger" type="button" onClick={() => setBatchOpen((v) => !v)} disabled={busy}>
               选择批次 <span aria-hidden="true">▾</span>
