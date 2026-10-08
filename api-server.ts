@@ -366,6 +366,64 @@ async function freeChatReply(question: string): Promise<Array<{ cls: string; tex
   }
 }
 
+async function demoConsumerChat(
+  batchId: string,
+  b: (typeof FISH_OIL_BATCHES)[string],
+  question: string,
+  res: ServerResponse,
+): Promise<void> {
+  const apiKey = process.env.AGENT_API_KEY;
+  const model = process.env.AGENT_MODEL;
+  const baseUrl = (process.env.AGENT_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
+  const system = [
+    "你是 TruthPass 鱼油助手。请只依据下面的 demo 批次数据回答消费者问题，不要编造检测值或疗效承诺。",
+    `批次号：${batchId}`,
+    `商品：${b.name}`,
+    `产地：${b.origin}`,
+    `生产日期：${b.productionDate}`,
+    `验收结论：${b.passed ? "通过当前规则" : "未通过当前规则"}`,
+    `EPA+DHA：${b.epaDha}%（门槛 ≥70%）`,
+    `过氧化值：${b.peroxide} meq/kg（门槛 ≤5）`,
+    `冷链中断：${b.coldGap} 小时（门槛 ≤6）`,
+    "纯文本，不要 Markdown，不超过 5 句。",
+  ].join("\n");
+  const fallback = [
+    {
+      cls: "conclusion",
+      text: b.passed
+        ? `${b.name}（${batchId}）按当前规则通过验收。`
+        : `${b.name}（${batchId}）未通过验收，存在不达标指标。`,
+    },
+  ];
+  let reply: Promise<Array<{ cls: string; text: string }>> = Promise.resolve(fallback);
+  if (apiKey && model) {
+    reply = fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: question },
+        ],
+        temperature: 0.2,
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) return fallback;
+        const data = (await r.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+        const content = data.choices?.[0]?.message?.content;
+        return typeof content === "string" && content.trim()
+          ? [{ cls: "plain", text: content.trim() }]
+          : fallback;
+      })
+      .catch(() => fallback);
+  }
+  await streamChatWithReply(res, "consumer_evidence", [], reply);
+}
+
 async function consumerChat(batchId: string, question: string, res: ServerResponse): Promise<void> {
   if (!batchId) {
     const available = Object.keys(FISH_OIL_BATCHES).filter((id) => repository.getBatch(id));
@@ -382,54 +440,12 @@ async function consumerChat(batchId: string, question: string, res: ServerRespon
     return;
   }
 
-  const batch = repository.getBatch(batchId);
-  if (!batch || !FISH_OIL_BATCHES[batchId]) {
+  const b = FISH_OIL_BATCHES[batchId];
+  if (!b) {
     streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "系统没有找到批次 " + batchId + " 的已登记证据，不会用其他批次的数据代替。" }]);
     return;
   }
-
-  const context = buildJevContext(repository, batchId);
-  const evidence = repository.listEvidence(batchId).map((item) => ({
-    evidenceId: item.evidenceId,
-    kind: item.kind,
-    issuerId: item.issuerId,
-    sourceKind: item.sourceKind,
-    status: item.status,
-    dataMode: item.dataMode,
-    signature: item.attestation ? "not_checked" as const : "missing" as const,
-  }));
-  const decision = batchId === BATCH_ID
-    ? assessment.status === "accepted" ? "accepted" as const : assessment.status === "rejected" ? "rejected" as const : "not_assessed" as const
-    : "not_assessed" as const;
-  const card = answerConsumerQuestion(question, {
-    batchId,
-    dataMode: batch.dataMode,
-    decision,
-    decisionReasons: batchId === BATCH_ID ? assessment.reasons : [],
-    evidence,
-  });
-  const lines = [
-    { cls: "cmd", text: "正在读取批次 " + batchId + " 的登记证据" },
-    { cls: "lead", text: context.product.name + " · " + batchId },
-    { cls: "conclusion", text: card.headline },
-    ...card.uncertainties.map((text) => ({ cls: "disclaimer", text })),
-    ...card.nextActions.map((text) => ({ cls: "conclusion", text: "建议：" + text })),
-  ];
-
-  if (!process.env.AGENT_API_KEY || !process.env.AGENT_MODEL) {
-    streamChat(res, "consumer_evidence", [...lines, ...card.facts.map((text) => ({ cls: "plain", text })), { cls: "disclaimer", text: "StepFun 未配置；以上为根据登记证据和代码结果生成的说明。" }]);
-    return;
-  }
-
-  const productionInput = { schemaVersion: "agent.input.v1", role: "production", view: buildJevRoleView(context, "production") };
-  const inspectionInput = { schemaVersion: "agent.input.v1", role: "inspection", view: buildJevRoleView(context, "inspection"), policy };
-  const modelReply = runAgentCollaboration(productionInput, inspectionInput, question, card, invokeAgent)
-    .then((result) => renderConsumerFacts(card, result.consumer.selectedFactIds).map((text) => ({ cls: "plain", text })))
-    .catch((error: unknown) => {
-      console.error("[agent] consumer collaboration unavailable:", error instanceof Error ? error.message : "unknown error");
-      return [{ cls: "disclaimer", text: "StepFun 暂不可用；以上仍是根据登记证据和代码结果生成的证据卡说明。" }];
-    });
-  await streamChatWithReply(res, "consumer_evidence", [...lines, { cls: "plain", text: "消费者 Agent 正在从证据卡中选择与问题相关的登记事实；模型不能新增事实。" }], modelReply);
+  await demoConsumerChat(batchId, b, question, res);
 }
 
 // ---------- 路由 ----------
@@ -438,6 +454,34 @@ async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): P
 
   if (p === "/api/cli/inspect" && req.method === "GET") {
     const batchId = url.searchParams.get("batchId") || BATCH_ID;
+    const demoBatch = FISH_OIL_BATCHES[batchId];
+    if (demoBatch && !repository.getBatch(batchId)) {
+      sendJson(res, 200, {
+        schemaVersion: "truthpass.cli.inspect.v1",
+        command: "inspect",
+        batchId,
+        stages: [
+          { name: "读取批次数据", status: "completed", detail: "demo/synthetic 批次数据" },
+          { name: "确定性验收", status: "completed", detail: demoBatch.passed ? "accepted" : "rejected" },
+          { name: "证据根哈希", status: "completed", detail: evidenceHash(`${batchId}:root`) },
+          { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
+        ],
+        verification: {
+          schemaVersion: "truthpass.cli.verify.v1",
+          dataClass: "demo/synthetic",
+          command: "verify",
+          batchId,
+          status: demoBatch.passed ? "accepted" : "rejected",
+          policy: { id: policy.policyId, version: policy.version },
+          evidenceRoot: evidenceHash(`${batchId}:root`),
+          evidence: [],
+          assessment: demoBatch.passed ? undefined : { score: 89, checks: {}, reasons: ["部分指标未达验收标准"] },
+          anchor: { status: "anchor_pending", submitted: false, network: "bot-mainnet", chainId: 677, contractAddress: "0xDemo…" },
+          reasons: demoBatch.passed ? [] : ["部分指标未达验收标准"],
+        },
+      });
+      return true;
+    }
     try {
       sendJson(res, 200, await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version }));
     } catch (error) {

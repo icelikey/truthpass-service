@@ -89,8 +89,12 @@ export default function App() {
       <TopBar
         onOpenObserver={() => setObserverOpen(true)}
         onOpenEvidence={() => {
+          if (!batchId) setBatchId("FO-2026-001");
+          setVerifyState("done");
           setFocusTech(true);
-          document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          setTimeout(() => {
+            document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 150);
         }}
         userEmail={user?.email ?? null}
         onOpenAuth={() => setAuthOpen(true)}

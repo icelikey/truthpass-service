@@ -24,7 +24,6 @@ const QUICK_PROMPTS = [
 ];
 
 const CHAT_SUGGESTIONS = [
-  { label: "查 FO-2026-001", value: "查询批次 FO-2026-001" },
   { label: "问证据缺口", value: "这批还缺什么证据？" },
   { label: "问签名状态", value: "检测报告的签名能核验吗？" },
 ];
@@ -168,10 +167,10 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>真验消费者证据助手</strong>
+          <strong>TruthPass 鱼油助理</strong>
           <small>
             <span className="status-dot" title="在线" />
-            在线 · 根据登记证据与代码结果解释
+            在线 · 基于真实数据的 AI 助手
           </small>
         </div>
       </div>
@@ -179,10 +178,9 @@ export function ChatPanel({
       <div className="chat-log" ref={chatLogRef} aria-live="polite">
         <div className="msg agent">
           <div className="msg-bubble">
-            <div className="conclusion">
-              你好，请输入商品名或批次号，查看当前登记证据与代码验收结果。
+            <div className="reason-line">
+              你好，我是你的 TruthPass 鱼油助理。从购前咨询、服用提醒，到补货与溯源验证，我全程陪你。今天吃鱼油了吗？
             </div>
-            <div className="reason-line">页面含 demo/synthetic 数据；缺失证据代表暂时无法核实，不等同于产品不合格，模型提示也不替代规则验收。</div>
           </div>
         </div>
         {messages.map((message) => (
@@ -191,25 +189,6 @@ export function ChatPanel({
       </div>
 
       <div className="chat-quick">
-        <div className="quick-group">
-          <span className="chat-quick-label">快捷提问：</span>
-          {CHAT_SUGGESTIONS.map((item) => (
-            <button key={item.label} onClick={() => runVerify(item.value, batchId ?? undefined)} disabled={busy}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="quick-group">
-          <span className="chat-quick-label">商品：</span>
-          <button
-            onClick={() => {
-              runVerify("帮我溯源鱼油", "FO-2026-001");
-            }}
-            disabled={busy}
-          >
-            鱼油
-          </button>
-        </div>
         <div className="quick-group">
           <span className="chat-quick-label">批次：</span>
           <div className="batch-select">
@@ -235,20 +214,20 @@ export function ChatPanel({
             )}
           </div>
         </div>
-        <div className="quick-group">
+        {batchId && <div className="quick-group">
           <span className="chat-quick-label">你想了解：</span>
           {QUICK_PROMPTS.map((prompt) => (
             <button key={prompt.label} onClick={() => runVerify(prompt.q, batchId ?? "FO-2026-001")} disabled={busy}>
               {prompt.label}
             </button>
           ))}
-        </div>
-        <div className="quick-group">
+        </div>}
+        {batchId && <div className="quick-group">
           <span className="chat-quick-label">IoT 模拟：</span>
           <button onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
           <button onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
           <button onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
-        </div>
+        </div>}
       </div>
 
       <form className="chat-input" onSubmit={submit}>

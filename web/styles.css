@@ -155,6 +155,8 @@ body {
 
 /* ================= 三栏 ================= */
 .layout {
+  position: relative;
+  z-index: 20;
   display: grid;
   grid-template-columns: minmax(300px, 22%) minmax(0, 52%) minmax(280px, 26%);
   gap: 18px;
@@ -204,7 +206,7 @@ body {
 }
 
 /* ================= 左栏 · Agent 对话 ================= */
-.chat-panel { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; contain: layout size; }
+.chat-panel { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: visible; position: relative; z-index: 50; }
 .assistant-only {
   display: flex;
   flex-direction: column;
@@ -1243,10 +1245,11 @@ body {
 }
 .batch-trigger:hover { background: rgba(93, 213, 213, 0.1); border-color: var(--cyan); }
 .batch-menu {
-  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 100;
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 100;
   min-width: 230px; background: var(--panel-strong); border: 1px solid var(--line);
   border-radius: 12px; padding: 6px; box-shadow: 0 12px 30px rgba(2, 8, 16, 0.6);
   display: flex; flex-direction: column; gap: 2px;
+  max-height: 360px; overflow-y: auto;
 }
 .batch-menu button {
   display: flex; align-items: baseline; gap: 9px; text-align: left;
