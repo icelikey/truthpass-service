@@ -1,122 +1,119 @@
-# 真验 Zhenyan：鱼油批次公共信誉 Demo
+# TruthPass（真验）
 
-> 项目文档版本：v0.5.0
-> 最近修改：2026-10-06
-> 本次修改：新增 JEV 结构化决策门方案；网页展示消费者 Agent、JEV、确定性验收和链上锚定的同一条验证链。
+> 让真实被看见，让信任不再靠嘴说，而靠一条真正可验证的证据链。
 
-真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
+TruthPass 正在构建一种新的生产与消费范式：消费者不再只是购买商品、被动接受结果，而是通过自己的 Agent，真正介入产品的生产、检测、交接与售后全过程。
 
-## 解决的问题
+当前以 **鱼油** 作为第一个 Demo 品类，跑通「AI 对话 → 推荐补货 → 溯源验证 → 链上锚定 → 消费者共建 → 检测报告」的完整闭环。未来可扩展到食品、保健品、农产品、药品与制造业等一切需要质量信任的供应链场景。
 
-消费者看到“高浓度鱼油”“深海原料”“无腥味”等宣传时，很难同时确认：标签含量是否兑现、鱼油是否氧化、冷链是否中断、报告是否对应当前批次、检测服务此刻是否可用。链上身份和历史评分也不能自动证明服务当前可用或数据真实。
+## 项目介绍
 
-真验把问题拆成四步：
+过去，生产者掌握数据，消费者只能相信品牌；当质量发生争议时，消费者既看不懂检测数据，也无法确认数据是否真实。
 
-1. **发现**：根据鱼油批次任务寻找检测和冷链服务；
-2. **探测**：检查端点在线、能力匹配、返回格式和签名；
-3. **验收**：用规则核对批次、时间、EPA+DHA、过氧化值、TOTOX、冷链和签名；
-4. **沉淀**：记录服务履约反馈，消费者购买后提交经过授权的体验反馈，供后续 Agent 查询。
+TruthPass 通过 **AI Agent + 物联网 + 区块链** 三重技术，把传感器、实验室、物流和消费者反馈连接成一条可验证的证据链：
 
-## Demo 闭环
+- 设备产生真实数据；
+- Agent 负责理解、验真与解释；
+- 确定性规则负责质量判断；
+- 区块链记录证据来源、批次关系、验证结果与责任交接。
+
+消费者最终看到的，不再是一堆难以理解的检测指标，而是一份**可追溯、可复核、持续更新**的产品可信报告。
+
+## 最终交付形态
+
+一个自有 Agent 安装 CLI 后，即可完成「查询 → 推荐 → 下单」：
 
 ```text
-消费者 Agent 通过 CLI 查询 FO-2026-001
-        ↓
-真验发现三个实验室服务
-        ↓
-lab-a：在线但批次错、签名无效、指标不达标
-lab-b：当前离线
-lab-c：在线、签名有效、指标和冷链通过
-        ↓
-确定性 Verifier 选择 lab-c
-        ↓
-生成证据卡和任务履约反馈
-        ↓
-消费者授权 Agent 登记购买并提交“包装/气味/批次可查”反馈
-        ↓
-反馈哈希和贡献事件可锚定到 BOT Chain
+truthpass inspect --batch FO-2026-001 --json
+truthpass recommend --batch FO-2026-001 --json
+truthpass order --batch FO-2026-001 --json
 ```
 
-演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
+`inspect` 是只读总览接口，把确定性验收结论和公开主网回执合并成一个机器可读对象。网页观察台是这条能力链的可视化展示，与 CLI 共用同一套任务、验收与证据模型。
 
-比赛网页只是现场观察台，不是产品主入口。完整的消费者 CLI、数据采集关联、链上分层、共建权益和评委展示叙事见 [docs/strategy-v0.4-consumer-cli.md](docs/strategy-v0.4-consumer-cli.md) 与 [docs/cli-contract.md](docs/cli-contract.md)。
+## 已实现能力
 
-## 质量规则示例
+### 前端（`web/`）
 
-当前演示任务使用以下验收条件：
+- **TruthPass 鱼油助理**：接入 DeepSeek 上下文对话，支持语音输入与“思考中”提示。
+- **全周期服务**：开场关心服用，用户说“补货/推荐/快吃完”时主动给出补货建议，卡片带专业知识，点击“补货”直接下单。
+- **溯源验证**：初始只显示对话；触发批次查询后才展开三栏工作台（对话 + 产品卡 + 证据链路）。
+- **多批次**：`FO-2026-001` 至 `010` 共 10 个批次，含未通过验收批次。
+- **产品旅程与证据链路**：设备采集 → Agent 关联 → JEV 判别 → 规则验收 → 链上锚定，可展开技术详情。
+- **CLI 技术观察台**：展示 `inspect` 命令视图、证据 Envelope、确定性验收 JSON 与链上锚定计划。
+- **评委观察台**：服务排名、JEV、证据根哈希与链上状态。
+- **检测报告**：一键导出 PDF。
+- **消费者共建**：授权后的质量反馈。
+- **账号与记录**：Supabase 登录注册；「我的记录」分开验证记录与补货记录，可一键清除。
+- **IoT 模拟**：批次确定后可模拟正常温度 / 冷链异常 / 设备离线。
 
-| 指标 | 示例门槛 |
-| --- | ---: |
-| EPA+DHA 总含量 | ≥ 70% |
-| 过氧化值 | ≤ 5 |
-| TOTOX | ≤ 20 |
-| 冷链中断 | ≤ 6 小时 |
-| 报告批次 | 必须等于商品批次 |
-| 检测签名 | 必须有效 |
+### CLI（`src/cli.ts`）
 
-大模型只负责把自然语言采购意图拆成任务和解释结果；通过、拒绝、评分和防重复由代码规则决定。
+```text
+discover  probe  verify  explain  inspect  recommend  order
+reputation  consent  purchase  feedback  anchor  replay
+```
+
+CLI 可脚本化、可审计、可离线回放，是 Agent 接入真验的第一接口。
+
+### 区块链（`contracts/` 与 `config/`）
+
+- BOT Chain 主网接入与回执 manifest；
+- 证据锚定合约与信誉/贡献事件合约；
+- 链上只存批次标识、证据哈希、验证结论与交易回执元数据，原始报告与个人信息留在链下。
+
+## 技术架构
+
+| 层级 | 作用 |
+| --- | --- |
+| 物联网 / 设备 | 产生真实的温度、湿度、检测与物流数据 |
+| AI Agent | 理解、验真、解释，把数据翻译成人话 |
+| 确定性规则引擎 | 不掺水的质量判断，通过/拒绝由代码决定 |
+| 区块链 | 记录证据来源、批次关系、验证结果与责任交接 |
+| CLI | Agent 的第一接口，可脚本化、可审计 |
+| Web 观察台 | 同一条验证链的可视化展示 |
+
+## 核心规则
+
+- 大模型只负责理解与解释；通过 / 拒绝、评分与防重复由确定性代码规则决定。
+- 链上只存结果，不存隐私。
+- 所有 `demo/synthetic` 数据仅用于路演与联调，不代表真实供应链证明。
 
 ## 运行
 
 ```bash
 npm install
-npm run demo
+cp .env.example .env   # 配置 AGENT_*（DeepSeek 或 StepFun）、Supabase、SMTP 等
+
+# 一键启动：构建前端 + 启动对接层，访问 http://localhost:4173
+npm run start
+
+# 开发模式：API（4173）+ Vite（5173，代理 /api -> 4173）
+npm run api
+npm run dev
+
+# CLI
+npm run cli -- inspect --batch FO-2026-001 --json
+
+# 测试与类型检查
 npm test
 npm run typecheck
-```
-
-前端（Vite + React + TypeScript + TanStack Query）：
-
-```bash
-# 开发：启动共享 API 与静态前端服务，再启动 Vite dev server（自动代理 /api）
-npm run web           # node api-server.ts，监听 4173
-npm run dev           # Vite dev server，监听 5173，代理 /api -> 4173
-
-# 生产：构建后由 api-server.ts 直接服务 web/dist
-npm run build
-npm run web
 ```
 
 ## 目录
 
 ```text
-src/types.ts                       通用任务、证据和服务类型
-src/verifier.ts                    确定性鱼油验收规则
-src/registry.ts                    服务探测、排序和履约反馈
-src/consumer.ts                    消费者授权、购买登记和反馈防刷
-src/demo.ts                        鱼油端到端演示
-contracts/TrustRegistry.sol        服务信誉与消费者贡献事件合约草案
-examples/fish-oil-batch-task.json  鱼油任务样例
-test/                              验收和消费者参与测试
-docs/fish-oil-development-plan.md  完整开发方案和分工
-docs/architecture-v0.3-fish-oil.md 鱼油战略架构
-docs/consumer-participation.md     消费者 Agent 参与规则
-docs/fish-oil-demo-script.md       现场演示脚本
-docs/frontend-visual-plan.md       前端页面和美工预案
-docs/strategy-v0.4-consumer-cli.md 消费者 CLI、链上结构、商业与展示战略
-docs/cli-contract.md               CLI 命令、JSON 输出和安全合同
-docs/DOCUMENT-VERSIONING.md        文档版本、修改说明和协作规则
-docs/jev-integration-v0.5.md       JEV 结构化决策门、类型合同和降级策略
-assets/fish-oil-evidence-dashboard.png 前端高保真方向图
-assets/fish-oil-consumer-cli-journey.png 消费者 CLI 证据故事方向图
-web/                              前端源码（Vite + React + TypeScript）
-web/src/components/               页面组件（对话、产品、证据链路、共建）
-web/public/assets/                图片素材与品牌 Logo
-server.mjs                        兼容启动入口，统一转发到 api-server.ts
+src/                  核心后端：verifier / registry / consumer / chain / cli / agents / data
+api-server.ts          本地测试对接层：静态服务 + REST + 多批次演示数据 + DeepSeek 对话
+bin/truthpass.mjs      CLI 入口
+contracts/             链上合约
+config/                BOT Chain 主网/测试网配置与回执
+docs/                  架构、CLI 合同、部署与交接文档
+web/                   前端（Vite + React + TypeScript）
+web/src/components/    对话、产品、证据、共建、报告、账号等组件
+web/public/assets/     图片素材与品牌 Logo
 ```
 
-## 赛题对应
+## 数据说明
 
-项目对应赛题一“Agent 公共信誉与服务验收”：
-
-- 服务探测：`ServiceRegistry.evaluate`；
-- 交付验收：`verifyExecution`；
-- 履约记录：`FeedbackRecord`；
-- 消费者参与：`ConsumerParticipationRegistry`；
-- 链上锚定：`TrustRegistry.sol`；
-- 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
-
-ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环，正式部署时再接入 BOT Chain 和注册表适配器。
-
-JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。
-
+演示数据标记为 `demo/synthetic`。缺证据代表暂时无法核实，不等同于产品不合格；模型提示也不替代确定性规则验收。
