@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { postChat } from "../api";
-import type { ChatLine } from "../types";
+import type { ChatLine, OrderCard, RecommendItem } from "../types";
 
 export interface ChatMessage {
   id: string;
@@ -8,6 +8,8 @@ export interface ChatMessage {
   lines: ChatLine[];
   done: boolean;
   error?: string;
+  recommendations?: RecommendItem[];
+  order?: OrderCard;
 }
 
 let seq = 0;
@@ -19,6 +21,14 @@ export function useChatStream() {
 
   const patch = useCallback((id: string, updater: (m: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? updater(m) : m)));
+  }, []);
+
+  const pushUser = useCallback((text: string) => {
+    setMessages((prev) => [...prev, { id: nextId(), role: "user", lines: [{ cls: "plain", text }], done: true }]);
+  }, []);
+
+  const pushAgent = useCallback((lines: ChatLine[], extras?: { recommendations?: RecommendItem[]; order?: OrderCard }) => {
+    setMessages((prev) => [...prev, { id: nextId(), role: "agent", lines, done: true, ...extras }]);
   }, []);
 
   const ask = useCallback(
@@ -65,5 +75,5 @@ export function useChatStream() {
     [patch],
   );
 
-  return { messages, ask };
+  return { messages, ask, pushUser, pushAgent };
 }

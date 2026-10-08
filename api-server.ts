@@ -517,6 +517,49 @@ async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): P
     return true;
   }
 
+  if (p === "/api/recommend" && req.method === "GET") {
+    const items = Object.entries(FISH_OIL_BATCHES)
+      .filter(([, item]) => item.passed)
+      .map(([batchId, item]) => ({ batchId, ...item }))
+      .sort((a, b) => b.epaDha - a.epaDha || a.peroxide - b.peroxide || a.coldGap - b.coldGap)
+      .slice(0, 3)
+      .map((item) => ({
+        batchId: item.batchId,
+        name: item.name,
+        origin: item.origin,
+        productionDate: item.productionDate,
+        imageUrl: item.image,
+        epaDha: item.epaDha,
+        peroxide: item.peroxide,
+        coldGap: item.coldGap,
+        reason: `EPA+DHA ${item.epaDha}%、过氧化值 ${item.peroxide} meq/kg、冷链中断 ${item.coldGap} 小时，综合表现优秀`,
+        expertise: "EPA+DHA 是鱼油的核心 Omega-3 成分，含量 ≥70% 属于高浓度配方；过氧化值越低说明油脂越新鲜；冷链中断越短，活性成分保存越好。",
+      }));
+    sendJson(res, 200, items);
+    return true;
+  }
+
+  if (p === "/api/orders" && req.method === "POST") {
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
+    const b = FISH_OIL_BATCHES[batchId];
+    if (!b) {
+      sendJson(res, 404, { error: "批次不存在" });
+      return true;
+    }
+    const orderId = "TP-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    sendJson(res, 200, {
+      orderId,
+      batchId,
+      productName: b.name,
+      imageUrl: b.image,
+      quantity: 1,
+      createdAt: new Date().toISOString(),
+      status: "confirmed",
+    });
+    return true;
+  }
+
   if (p === "/api/agent/chat" && req.method === "POST") {
     const body = await readBody(req);
     const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: unknown }> : [];

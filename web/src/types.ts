@@ -111,6 +111,29 @@ export interface ChatLine {
   text: string;
 }
 
+export interface RecommendItem {
+  batchId: string;
+  name: string;
+  origin: string;
+  productionDate: string;
+  epaDha: number;
+  peroxide: number;
+  coldGap: number;
+  reason: string;
+  expertise?: string;
+  imageUrl?: string;
+}
+
+export interface OrderCard {
+  orderId: string;
+  batchId: string;
+  productName: string;
+  quantity: number;
+  createdAt: string;
+  status: string;
+  imageUrl?: string;
+}
+
 export type VerifyState = "idle" | "running" | "done";
 
 export interface JevChoiceAnswer {

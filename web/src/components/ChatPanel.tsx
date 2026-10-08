@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useChatStream, type ChatMessage } from "../hooks/useChatStream";
-import { postIotSimulation, type IotSimulationMode } from "../api";
-import type { ChatLine } from "../types";
+import { createOrder, fetchRecommend, postIotSimulation, type IotSimulationMode } from "../api";
+import { saveOrderRecord } from "../lib/supabase";
+import type { ChatLine, RecommendItem } from "../types";
 
 const FISH_OIL_BATCHES = [
   { id: "FO-2026-001", name: "深海鱼油软胶囊" },
@@ -54,7 +55,7 @@ function LineView({ line }: { line: ChatLine }) {
   }
 }
 
-function MessageView({ message }: { message: ChatMessage }) {
+function MessageView({ message, onOrder }: { message: ChatMessage; onOrder: (item: RecommendItem) => void }) {
   if (message.role === "user") {
     return (
       <div className="msg user">
@@ -68,6 +69,35 @@ function MessageView({ message }: { message: ChatMessage }) {
         {message.lines.map((line, i) => (
           <LineView key={i} line={line} />
         ))}
+        {!message.done && message.lines.length === 0 && (
+          <div className="thinking">TruthPass 正在思考中....</div>
+        )}
+        {message.recommendations && (
+          <div className="recommend-list">
+            {message.recommendations.map((item, index) => (
+              <div className="recommend-card" key={item.batchId}>
+                {item.imageUrl && <img src={item.imageUrl} alt="" />}
+                <div className="recommend-info">
+                  <b>{index + 1}. {item.name}</b>
+                  <span>{item.batchId} · {item.origin} · {item.productionDate}</span>
+                  <p>{item.reason}</p>
+                  {item.expertise && <p className="recommend-expertise">专业提示：{item.expertise}</p>}
+                </div>
+                <button type="button" className="recommend-order" onClick={() => onOrder(item)}>补货</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {message.order && (
+          <div className="order-card">
+            {message.order.imageUrl && <img src={message.order.imageUrl} alt="" />}
+            <div className="order-info">
+              <b>补货已生成 · {message.order.orderId}</b>
+              <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
+              <span className="order-status">状态：已确认</span>
+            </div>
+          </div>
+        )}
         {message.error && <div className="disclaimer">{message.error}</div>}
       </div>
     </div>
@@ -85,7 +115,7 @@ export function ChatPanel({
   onBatch: (id: string) => void;
   batchId: string | null;
 }) {
-  const { messages, ask } = useChatStream();
+  const { messages, ask, pushUser, pushAgent } = useChatStream();
   const [input, setInput] = useState("");
   const [batchOpen, setBatchOpen] = useState(false);
   const [listening, setListening] = useState(false);
@@ -114,6 +144,49 @@ export function ChatPanel({
     }
   };
 
+  const recommend = async (text: string) => {
+    setInput("");
+    pushUser(text);
+    pushAgent([{ cls: "plain", text: "好的，我来帮你看补货建议。" }]);
+    try {
+      const items = await fetchRecommend();
+      if (!items.length) {
+        pushAgent([{ cls: "plain", text: "当前暂无可补货批次，请保持规律服用。" }]);
+      } else {
+        pushAgent(
+          [{ cls: "plain", text: "根据你的服用情况，建议补货以下批次：" }],
+          { recommendations: items },
+        );
+      }
+    } catch {
+      pushAgent([{ cls: "disclaimer", text: "推荐服务暂不可用。" }]);
+    }
+  };
+
+  const handleOrder = async (item: RecommendItem) => {
+    if (busy) return;
+    try {
+      const order = await createOrder(item.batchId, 1);
+      void saveOrderRecord({
+        orderId: order.orderId,
+        batchId: order.batchId,
+        productName: order.productName,
+        imageUrl: order.imageUrl,
+        quantity: order.quantity,
+        status: order.status,
+      });
+      pushAgent(
+        [
+          { cls: "conclusion", text: `已为你补货：${order.orderId}` },
+          { cls: "disclaimer", text: "此为 demo 模拟补货，不产生真实交易。" },
+        ],
+        { order },
+      );
+    } catch {
+      pushAgent([{ cls: "disclaimer", text: "补货失败，请稍后重试。" }]);
+    }
+  };
+
   const simulateIot = async (mode: IotSimulationMode) => {
     const target = batchId ?? "FO-2026-001";
     if (busy || iotBusy) return;
@@ -131,7 +204,13 @@ export function ChatPanel({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    runVerify(input);
+    const text = input.trim();
+    if (!text || busy) return;
+    if (/(推荐|补货|快吃完|复购|再买|帮我选)/.test(text)) {
+      recommend(text);
+    } else {
+      runVerify(text);
+    }
   };
 
   const toggleVoice = () => {
@@ -184,7 +263,7 @@ export function ChatPanel({
           </div>
         </div>
         {messages.map((message) => (
-          <MessageView key={message.id} message={message} />
+          <MessageView key={message.id} message={message} onOrder={handleOrder} />
         ))}
       </div>
 

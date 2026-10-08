@@ -5,6 +5,8 @@ import type {
   MetricDetail,
   ProductBatch,
   JevDetection,
+  RecommendItem,
+  OrderCard,
 } from "./types";
 
 export const BATCH_ID = "FO-2026-001";
@@ -21,6 +23,18 @@ export const fetchJourney = (batchId: string) => getJson<Journey>(`/api/products
 export const fetchMetricDetail = (batchId: string, key: string) =>
   getJson<MetricDetail>(`/api/products/${batchId}/metrics/${key}`);
 export const fetchJevDetection = () => getJson<JevDetection>("/api/jev/detection");
+
+export const fetchRecommend = () => getJson<RecommendItem[]>("/api/recommend");
+
+export async function createOrder(batchId: string, quantity = 1): Promise<OrderCard> {
+  const res = await fetch("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batchId, quantity }),
+  });
+  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+  return (await res.json()) as OrderCard;
+}
 
 export interface CliInspectData {
   schemaVersion: "truthpass.cli.inspect.v1";

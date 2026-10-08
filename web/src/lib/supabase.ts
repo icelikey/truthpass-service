@@ -91,3 +91,69 @@ export async function fetchVerificationRecords(): Promise<VerificationHistoryRec
     };
   });
 }
+
+export async function clearVerificationRecords(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data: user } = await supabase.auth.getUser();
+  if (!user.user) return false;
+  const { error } = await supabase
+    .from("verification_history")
+    .delete()
+    .eq("user_id", user.user.id);
+  return !error;
+}
+
+export interface OrderRecord {
+  id: string;
+  order_id: string;
+  batch_id: string;
+  product_name: string;
+  image_url?: string | null;
+  quantity: number;
+  status: string;
+  created_at: string;
+}
+
+export async function saveOrderRecord(input: {
+  orderId: string;
+  batchId: string;
+  productName: string;
+  imageUrl?: string;
+  quantity: number;
+  status: string;
+}): Promise<boolean> {
+  if (!supabase) return false;
+  const { data: user } = await supabase.auth.getUser();
+  if (!user.user) return false;
+  const { error } = await supabase.from("orders").insert({
+    user_id: user.user.id,
+    order_id: input.orderId,
+    batch_id: input.batchId,
+    product_name: input.productName,
+    image_url: input.imageUrl ?? null,
+    quantity: input.quantity,
+    status: input.status,
+  });
+  return !error;
+}
+
+export async function fetchOrderRecords(): Promise<OrderRecord[]> {
+  if (!supabase) return [];
+  const { data: user } = await supabase.auth.getUser();
+  if (!user.user) return [];
+  const { data } = await supabase
+    .from("orders")
+    .select("id, order_id, batch_id, product_name, image_url, quantity, status, created_at")
+    .eq("user_id", user.user.id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  return (data ?? []) as OrderRecord[];
+}
+
+export async function clearOrderRecords(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data: user } = await supabase.auth.getUser();
+  if (!user.user) return false;
+  const { error } = await supabase.from("orders").delete().eq("user_id", user.user.id);
+  return !error;
+}
