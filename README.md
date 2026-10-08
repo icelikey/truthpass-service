@@ -116,7 +116,14 @@ server.mjs                        兼容启动入口，统一转发到 api-serve
 - 链上锚定：`TrustRegistry.sol`；
 - 抗刷分基础：反馈绑定购买记录、任务哈希、服务身份和证据哈希。
 
-ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环，正式部署时再接入 BOT Chain 和注册表适配器。
+ERC-8004 作为身份、信誉和验证模型的参考；当前仓库是可运行的最小闭环。BOT Chain 接入适配器、证据锚定合约和交接步骤见 [docs/bot-chain-integration-v0.7.0.md](docs/bot-chain-integration-v0.7.0.md) 与 [docs/bot-chain-handoff-v0.7.1.md](docs/bot-chain-handoff-v0.7.1.md)。
 
 JEV 只用于结构化判别、缺口识别和服务路由；最终通过/拒绝仍由确定性 `Verifier` 决定。接入边界、失败关闭和回放要求见 [docs/jev-integration-v0.5.md](docs/jev-integration-v0.5.md)。
 
+
+
+## BOT Chain 接入边界
+
+当前集成分支默认使用 Bohr Testnet（Chain ID 968）。客户端会先校验 RPC 的 `eth_chainId`，再构造与 `TruthPassEvidenceAnchor.anchorEvidence` 8 参数 ABI 一致的 calldata；默认 dry-run，真实提交只能接收外部钱包已经签名的 raw transaction。合约地址、角色地址和交易回执在测试网部署前均不视为已确认。
+
+链上只锚定证据根、批次/样品承诺、规则和 Verifier 版本哈希、状态及争议/撤销事件；原始报告、设备时序、消费者个人信息和 JEV Key 留在链下。链上锚定表示“某个授权写入者提交了某个承诺”，不单独证明现实测量真实。
