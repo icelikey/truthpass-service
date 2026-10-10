@@ -1,11 +1,11 @@
 # 真验文档版本规范
 
-> 文档版本：v0.9.0
+> 文档版本：v1.0.0
 > 状态：当前生效
-> 最近修改：2026-10-08
-> 修改摘要：记录消费者 Agent + CLI 交付入口、BOT Chain 主网四类业务 receipt、公开 replay manifest 和订单适配边界。
-> 影响范围：BOT Chain、CLI、消费者 Agent、鱼油 Demo、JEV、合约、网页 BFF、订单适配器
-> 队友下一步：接入真实签名 EvidenceEnvelope、拆分角色钱包，并实现商家 Checkout Adapter。
+> 最近修改：2026-10-10
+> 修改摘要：增加企业生产接入、传感器服务器取证、第三方认证、钱包角色和 BOT Chain 上链协议。
+> 影响范围：生产数据接入、Agent/JEV、Verifier、钱包、BOT Chain、消费者 CLI、隐私和企业交付
+> 队友下一步：先实现 L0 低改造接入和真实钱包交互，再接入固定摄像头、实验室适配器和设备签名。
 
 ## 目的
 
@@ -62,7 +62,9 @@ docs(v0.4.1): clarify evidence envelope fields
 | v0.8.4 | 历史私链战略版本 | BOT Chain 运作逻辑、联盟链构筑边界、节点治理、链下数据范围和公共 checkpoint 方案 |
 | v0.8.5 | 历史战略版本 | 跨品类扩展、白牌/新生商家品牌成长、公共信誉增长飞轮和路演表达 |
 | v0.9.0 | 历史交付版本 | 消费者 Agent + CLI 入口、主网业务 receipt 回放、网页 BFF 回读、推荐与订单计划合同 |
-| v0.9.1 | 当前交付版本 | 新增 `inspect` 综合查询，聚合确定性验收、JEV 路由和主网回执，提供 Agent 调用示例 |
+| v0.9.1 | 历史交付版本 | 新增 `inspect` 综合查询，聚合确定性验收、JEV 路由和主网回执，提供 Agent 调用示例 |
+| v0.9.2 | 当前交付版本 | 支持批次编号直查、中文 Agent 转译和 JEV 降级边界说明 |
+| v1.0.0 | 当前架构版本 | 企业生产接入、传感器/服务器取证、第三方认证、钱包角色和 BOT Chain 上链协议 |
 
 ## 变更日志
 
@@ -204,3 +206,10 @@ docs(v0.4.1): clarify evidence envelope fields
 - **合同变化**：`docs/cli-contract.md` 增加 `truthpass.cli.inspection.v1`，明确公开主网回执与链下原始数据的边界；
 - **兼容性**：保留 `verify`、`recommend`、`order` 和 `replay` 原有命令，`inspect` 只读，不发起链上写入；
 - **队友下一步**：把 `demo/synthetic` 替换为带签名的厂家、实验室和设备 EvidenceEnvelope，并接入真实 Checkout Adapter。
+
+### v0.9.2 — 2026-10-08
+
+- **新增能力**：`truthpass FO-2026-001 --json` 和 `truthpass explain FO-2026-001`；
+- **转译内容**：增加鱼油指标、演示阈值、JEV 路由/降级状态、确定性 Verifier 检查计数和主网 receipt 摘要；
+- **安全口径**：JEV 的 fallback 不被描述为 live 模型，区块链确权边界明确为哈希/结论/回执记录，不替代链下原始数据真实性；
+- **测试**：新增批次直查、中文转译和 inspect 文本输出测试。
