@@ -71,8 +71,17 @@ docs(v0.4.1): clarify evidence envelope fields
 | v1.2.1 | 当前钱包安全修订版本 | EIP-6963 多钱包发现、选中/连接状态分离、禁止演示钱包和伪造交易回退 |
 | v1.2.2 | 当前消费者 Agent 示例版本 | CoinCall 对照示例、JEV/确定性验收转译、用户钱包交易准备和脱敏日志 |
 | v1.4.0 | 当前集成交付版本 | 公共标准、跨品类 ProductPolicy、CFI/CLI Manifest、匿名消费者凭证、真实钱包 receipt 校验和 Vercel 兼容入口 |
+| v1.4.1 | 当前部署修订版本 | `/web-demo/` 尾斜杠入口修复、Preview 保护边界和 Production 公开验收说明 |
 
 ## 变更日志
+
+### v1.4.1 — 2026-10-15
+
+- **新增文档**：`docs/integration-v1.4.1-deployment-fix.md`；
+- **修改代码**：`vercel.json` 增加 `/web-demo/` 到旧观察台首页的显式重写；
+- **部署边界**：保留 Vercel Preview Deployment Protection，公开验收统一使用 Production；
+- **验证结论**：Production 的健康检查和 Chain 677 状态接口可公开访问，`wallet/prepare` 使用 POST，当前批次继续标记为 `demo/synthetic`；
+- **队友下一步**：重新部署 Production 后，完成 `/web-demo/` 尾斜杠和普通钱包真实主网交易验收。
 
 ### v1.2.1 — 2026-10-15
 

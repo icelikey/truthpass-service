@@ -5,6 +5,7 @@
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/[[...path]].ts" },
     { "source": "/web-demo", "destination": "/legacy/index.html" },
+    { "source": "/web-demo/", "destination": "/legacy/index.html" },
     { "source": "/web-demo/:path*", "destination": "/legacy/:path*" },
     { "source": "/frontend/:path*", "destination": "/index.html" },
     { "source": "/", "destination": "/index.html" },

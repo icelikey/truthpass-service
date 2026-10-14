@@ -41,7 +41,7 @@ lab-c：在线、签名有效、指标和冷链通过
 
 演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
 
-比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；Python 宿主示例见 [examples/truthpass_consumer_agent_v1.py](examples/truthpass_consumer_agent_v1.py)，完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md)、[docs/integration-v1.2.0.md](docs/integration-v1.2.0.md)、[docs/integration-v1.2.1-wallet-discovery.md](docs/integration-v1.2.1-wallet-discovery.md) 和 [docs/truthpass-consumer-agent-v1.2.2.md](docs/truthpass-consumer-agent-v1.2.2.md)。根路径 `/` 使用新的 React 前端，旧观察台保留在 `/web-demo` 作为回滚入口。
+比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；Python 宿主示例见 [examples/truthpass_consumer_agent_v1.py](examples/truthpass_consumer_agent_v1.py)，完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md)、[docs/integration-v1.2.0.md](docs/integration-v1.2.0.md)、[docs/integration-v1.2.1-wallet-discovery.md](docs/integration-v1.2.1-wallet-discovery.md)、[docs/truthpass-consumer-agent-v1.2.2.md](docs/truthpass-consumer-agent-v1.2.2.md) 和 [docs/integration-v1.4.1-deployment-fix.md](docs/integration-v1.4.1-deployment-fix.md)。根路径 `/` 使用新的 React 前端，旧观察台保留在 `/web-demo` 作为回滚入口（`/web-demo/` 尾斜杠同样支持）。
 
 ## 交互状态标记
 
