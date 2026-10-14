@@ -25,7 +25,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focusTech, setFocusTech] = useState(false);
-  const { user, signUp, signIn, signOut } = useAuth();
+  const { user, signUp, signIn, signOut, configured: authConfigured } = useAuth();
   const toastTimer = useRef<number | undefined>(undefined);
   const inQueryMode = !!batchId;
 
@@ -119,7 +119,7 @@ export default function App() {
         {inQueryMode && <ReportSection batchId={batchId} />}
         {inQueryMode && <Community onToast={showToast} batchId={batchId} />}
         <ObserverDrawer open={observerOpen} onClose={() => setObserverOpen(false)} batchId={batchId} />
-        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuth={handleAuth} />
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuth={handleAuth} configured={authConfigured} />
         <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
         {toast && (
           <div className="toast" role="status">

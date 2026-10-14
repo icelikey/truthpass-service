@@ -72,5 +72,7 @@ v1.4.0 把 TruthPass 的公共入口从单一鱼油演示扩展为可发现、�
 - 本机 `/`、`/web-demo`、CFI、标准、CLI explain、钱包准备和 Chain 677 状态接口：通过；
 - 消费者钱包交易准备要求显式 wallet，purchase 指向 Consumer Gateway，dispute 指向 Audit Escrow 并携带最小质押值。
 
-线上交付边界：当前 Vercel 仍需部署本集成分支并配置环境变量。完成部署前，线上旧版本的 `tx-confirm`、CFI/标准接口和 `/web-demo` 不能作为 v1.4.0 验收证据；主网历史回放仍标记为 `demo/synthetic`。
+线上部署记录（2026-10-15）：Production 已发布到 [truthpass-service.vercel.app](https://truthpass-service.vercel.app/)，根页面和 `/web-demo` 均可访问。`/api/health`、`/api/agent/manifest`、`/api/cfi/manifest`、`/api/standards`、`/api/standards/policies`、`/api/cli/explain`、`/api/cli/reference/manifest`、`/api/chain/status` 和 `/api/wallet/prepare` 已通过线上探针；线上 API 返回版本 `1.4.0`、Chain ID `677`，钱包准备要求显式消费者地址。Preview 部署受 Vercel 登录保护，Production 作为公开验收入口。
+
+线上交付边界：当前没有把任何历史回放或部署钱包交易当作新的普通钱包现场交易。`tx-confirm` 只有在真实 receipt、目标合约和业务事件全部匹配后才可返回 `mainnet_receipt_verified`；主网历史回放和当前样例证据仍标记为 `demo/synthetic`。真实非部署钱包的 `purchase → contribution → openChallenge` 主网现场交易仍需由评委钱包完成并回填 receipt。
 

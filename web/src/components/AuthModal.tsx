@@ -4,10 +4,12 @@ export function AuthModal({
   open,
   onClose,
   onAuth,
+  configured,
 }: {
   open: boolean;
   onClose: () => void;
   onAuth: (mode: "signin" | "signup", email: string, password: string) => Promise<boolean | void>;
+  configured: boolean;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -47,7 +49,12 @@ export function AuthModal({
           </div>
           <button className="close-button" onClick={onClose} aria-label="关闭">×</button>
         </div>
-        <form onSubmit={submit} className="auth-form">
+        {!configured ? (
+          <div className="auth-form">
+            <p className="auth-notice">当前部署未配置邮箱账号服务。你仍可直接连接 BOT Chain 钱包，查询批次、查看证据并发起真实交易；邮箱登录仅用于保存个人历史记录。</p>
+            <button className="join-btn full" type="button" onClick={onClose}>以钱包继续</button>
+          </div>
+        ) : <form onSubmit={submit} className="auth-form">
           <label>
             <span>邮箱</span>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" />
@@ -67,7 +74,7 @@ export function AuthModal({
           >
             {mode === "signin" ? "没有账号？去注册" : "已有账号？去登录"}
           </button>
-        </form>
+        </form>}
       </div>
     </>
   );

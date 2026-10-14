@@ -1208,6 +1208,7 @@ body {
 }
 .auth-form input:focus { border-color: var(--cyan); }
 .auth-error { color: var(--reject); font-size: 12.5px; margin: 0; }
+.auth-notice { color: rgba(220, 235, 245, 0.78); line-height: 1.65; margin: 0; }
 .auth-switch { background: none; border: none; color: var(--cyan-2); font-size: 13px; cursor: pointer; padding: 4px 0; }
 .history-modal { max-height: 80vh; overflow-y: auto; }
 .history-head-actions { display: flex; align-items: center; gap: 10px; }

@@ -268,7 +268,7 @@ docs(v0.4.1): clarify evidence envelope fields
 - **修改方向**：将队友 Agent/CLI/CFI 能力、公共标准、消费者钱包交互和旧 `/web-demo` 入口统一到同一集成基线；
 - **风险记录**：固化厂商伪造、传感器替换、样品调包、报告重放、同源 Agent、女巫刷信誉、Agent 越权、Oracle 和隐私风险；
 - **状态边界**：鱼油、蜂蜜、传感器和历史回放继续标记为 `demo/synthetic`；合约部署不等于真实生产认证；普通非部署钱包现场交易仍需验收；
-- **验证**：以 `npm run typecheck`、`npm test` 和 `npm run build` 的当前集成分支结果为准，线上部署状态另行核验。
+- **验证**：`npm run typecheck`、`npm test`（161 项）和 `npm run build` 通过；Production 已部署到 `https://truthpass-service.vercel.app/`，公开 API 和 `/web-demo` 已通过线上探针；普通非部署钱包主网现场交易仍待验收。
 
 ### v1.5.0 — 2026-10-15
 
