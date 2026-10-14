@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v1.2.0
+> 项目文档版本：v1.2.1
 > 最近修改：2026-10-15
-> 本次修改：兼容合并队友 Agent/JEV/IoT/React 栈，统一 Vercel Serverless 与本机 API，并将消费者购买和质疑接入真实钱包交易路径。
+> 本次修改：收敛多钱包 provider 发现和真实交易安全边界，禁止演示钱包与伪造回执回退。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -39,7 +39,7 @@ lab-c：在线、签名有效、指标和冷链通过
 
 演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
 
-比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md) 和 [docs/integration-v1.2.0.md](docs/integration-v1.2.0.md)。根路径 `/` 使用新的 React 前端，旧观察台保留在 `/web-demo` 作为回滚入口。
+比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md)、[docs/integration-v1.2.0.md](docs/integration-v1.2.0.md) 和 [docs/integration-v1.2.1-wallet-discovery.md](docs/integration-v1.2.1-wallet-discovery.md)。根路径 `/` 使用新的 React 前端，旧观察台保留在 `/web-demo` 作为回滚入口。
 
 ## 交互状态标记
 

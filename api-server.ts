@@ -939,7 +939,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     sendJson(res, 200, {
       status: "ok",
       service: "truthpass-integrated-api",
-      version: "1.2.0",
+      version: "1.2.1",
       batchId: BATCH_ID,
       chainId: BOT_CHAIN_MAINNET.chainId,
       dataClass: "demo/synthetic",
@@ -953,7 +953,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       schemaVersion: "truthpass.agent.manifest.v1",
       service: "truthpass",
       name: "TruthPass Consumer Agent Gateway",
-      version: "1.2.0",
+      version: "1.2.1",
       status: "ready",
       dataClass: "demo/synthetic",
       publicUrl: origin,

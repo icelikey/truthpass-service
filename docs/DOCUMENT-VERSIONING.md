@@ -68,8 +68,17 @@ docs(v0.4.1): clarify evidence envelope fields
 | v1.0.1 | 历史实现交接版本 | 浏览器钱包连接、五类主网 calldata、RPC 故障下的元数据准备和 receipt 回读边界 |
 | v1.1.0 | 当前功能版本 | Consumer Gateway、Audit Escrow、消费者钱包路径和 Agent 审计质押接口 |
 | v1.1.1 | 当前主网部署版本 | Gateway/Escrow 主网部署、Anchor 角色授权回执、本机代理适配和现场验收待办 |
+| v1.2.1 | 当前钱包安全修订版本 | EIP-6963 多钱包发现、选中/连接状态分离、禁止演示钱包和伪造交易回退 |
 
 ## 变更日志
+
+### v1.2.1 — 2026-10-15
+
+- **修改文档**：新增 `docs/integration-v1.2.1-wallet-discovery.md`；
+- **修改方向**：移植队友提交 `4d550ac` 的 EIP-6963 provider 发现和钱包选择高亮修复；
+- **安全影响**：指定钱包不再复用错误的 `window.ethereum`，连接失败不创建演示钱包、不生成伪造交易回执；
+- **兼容边界**：保留 Vercel API、CLI、`/web-demo`、Consumer Gateway、Audit Escrow 和真实 receipt/事件校验；
+- **队友下一步**：使用非部署钱包完成一笔真实 BOT Chain Mainnet 交易并回填公开 Hash 和 Explorer 链接。
 
 ### v0.4.0 — 2026-10-06
 

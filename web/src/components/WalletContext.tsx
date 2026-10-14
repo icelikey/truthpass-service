@@ -58,6 +58,10 @@ export function WalletProvider({
   const [chainId, setChainId] = useState<number | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
   const [walletKind, setWalletKind] = useState<WalletKind | null>(null);
+  // Selection is UI intent; walletKind is only set after a real provider
+  // returns an authorized account. Keeping them separate prevents a failed
+  // connection from being rendered as a connected wallet.
+  const [selectedWalletKind, setSelectedWalletKind] = useState<WalletKind | null>(null);
   const [provider, setProvider] = useState<Eip1193Provider | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [txBusy, setTxBusy] = useState(false);
@@ -114,6 +118,7 @@ export function WalletProvider({
   const connectWallet = useCallback(
     async (kind: WalletKind): Promise<string | null> => {
       setTxError(null);
+      setSelectedWalletKind(kind);
       const discovered = discoverWalletOptions();
       setOptions(discovered);
       const target = discovered.find((o) => o.kind === kind) ?? discovered[0];
@@ -212,6 +217,7 @@ export function WalletProvider({
     setChainId(null);
     setWalletName(null);
     setWalletKind(null);
+    setSelectedWalletKind(null);
     setProvider(null);
     setTxError(null);
     setTxStage(null);
@@ -367,19 +373,28 @@ export function WalletProvider({
               </div>
               <div className="wallet-grid">
                 {options.map((opt) => {
-                  const isCurrent = address && walletKind === opt.kind;
+                  const isSelected = selectedWalletKind === opt.kind;
+                  const isConnected = Boolean(address && walletKind === opt.kind);
                   return (
                     <button
                       key={opt.kind}
                       type="button"
-                      className={isCurrent ? "wallet-option-btn active" : "wallet-option-btn"}
+                      className={isSelected ? "wallet-option-btn active" : "wallet-option-btn"}
                       disabled={connecting}
                       onClick={() => connectWallet(opt.kind)}
                     >
                       <div className="wallet-option-top">
                         <strong>{opt.name}</strong>
                         <span className={opt.detected ? "wallet-badge detected" : "wallet-badge"}>
-                          {isCurrent ? "✓ 当前已连接" : opt.detected ? "已检测到插件" : "未检测到插件"}
+                          {isConnected
+                            ? "✓ 当前已连接"
+                            : connecting && isSelected
+                              ? "⏳ 正在请求授权…"
+                              : isSelected
+                                ? "已选中"
+                                : opt.detected
+                                  ? "已检测到插件"
+                                  : "未检测到插件"}
                         </span>
                       </div>
                       <small>{opt.subtitle}</small>
