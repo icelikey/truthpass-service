@@ -90,7 +90,8 @@ export interface TruthPassEvidenceAnchorInput {
 export interface EvidenceAnchorTransaction {
   to: string;
   data: string;
-  value: "0x0";
+  /** Hex quantity in wei. Consumer challenge transactions may carry stake. */
+  value: string;
   chainId: number;
   chainIdHex: string;
 }
@@ -116,6 +117,10 @@ export interface TruthPassWriteTransaction extends EvidenceAnchorTransaction {
     | "consumerPurchase"
     | "consumerContribution"
     | "consumerDispute"
+    | "openChallenge"
+    | "submitAuditFinding"
+    | "approveAuditFinding"
+    | "resolveChallenge"
     | "revokeOrSupersede";
 }
 
@@ -142,6 +147,38 @@ export interface ConsumerGatewayDisputeInput {
   targetId: string;
   reasonHash: string;
   gatewayAddress: string;
+}
+
+export interface AuditEscrowOpenChallengeInput {
+  challengeId: string;
+  targetKind: TruthPassTargetKind;
+  targetId: string;
+  reasonHash: string;
+  agentRunHash: string;
+  /** Wei encoded as a hex quantity, for example 0xde0b6b3a7640000. */
+  stake: string;
+  escrowAddress: string;
+}
+
+export interface AuditEscrowFindingInput {
+  challengeId: string;
+  evidenceRoot: string;
+  auditResultHash: string;
+  verifierVersionHash: string;
+  agentAttestationHash: string;
+  escrowAddress: string;
+}
+
+export interface AuditEscrowApprovalInput {
+  challengeId: string;
+  escrowAddress: string;
+}
+
+export interface AuditEscrowResolutionInput {
+  challengeId: string;
+  upheld: boolean;
+  resolutionHash: string;
+  escrowAddress: string;
 }
 
 export interface TruthPassWriteSubmission {
@@ -297,6 +334,13 @@ export const CONSUMER_GATEWAY_CONTRIBUTION_SIGNATURE =
   "recordContribution(bytes32,bytes32,bytes32,bytes32,uint8)";
 export const CONSUMER_GATEWAY_DISPUTE_SIGNATURE =
   "raiseDispute(bytes32,uint8,bytes32,bytes32)";
+export const AUDIT_ESCROW_OPEN_CHALLENGE_SIGNATURE =
+  "openChallenge(bytes32,uint8,bytes32,bytes32,bytes32)";
+export const AUDIT_ESCROW_SUBMIT_FINDING_SIGNATURE =
+  "submitAuditFinding(bytes32,bytes32,bytes32,bytes32,bytes32)";
+export const AUDIT_ESCROW_APPROVE_FINDING_SIGNATURE = "approveAuditFinding(bytes32)";
+export const AUDIT_ESCROW_RESOLVE_CHALLENGE_SIGNATURE =
+  "resolveChallenge(bytes32,bool,bytes32)";
 export const EVIDENCE_ANCHORED_SIGNATURE =
   "EvidenceAnchored(bytes32,bytes32,bytes32,bytes32,bytes32,uint8,address)";
 export const VERIFICATION_RECORDED_SIGNATURE =
@@ -310,6 +354,18 @@ export const DISPUTE_RAISED_SIGNATURE =
 export const RECORD_REVOKED_OR_SUPERSEDED_SIGNATURE =
   "RecordRevokedOrSuperseded(uint8,bytes32,bytes32,bytes32,bool,address)";
 export const LEGACY_EVIDENCE_ANCHORED_SIGNATURE = "EvidenceAnchored(bytes32,bytes32,bytes32)";
+export const CHALLENGE_OPENED_SIGNATURE =
+  "ChallengeOpened(bytes32,bytes32,address,uint256,bytes32)";
+export const AUDIT_FINDING_SUBMITTED_SIGNATURE =
+  "AuditFindingSubmitted(bytes32,bytes32,bytes32,bytes32,bytes32)";
+export const AUDIT_VERIFIER_APPROVED_SIGNATURE =
+  "AuditVerifierApproved(bytes32,bytes32,address)";
+export const CHALLENGE_RESOLVED_SIGNATURE =
+  "ChallengeResolved(bytes32,bool,bytes32,address)";
+export const CHALLENGE_REWARD_PAID_SIGNATURE =
+  "ChallengeRewardPaid(bytes32,address,uint256)";
+export const CHALLENGE_STAKE_SLASHED_SIGNATURE =
+  "ChallengeStakeSlashed(bytes32,address,uint256)";
 /** Solidity getter selector for `DOMAIN_SEPARATOR()`. */
 export const DOMAIN_SEPARATOR_SELECTOR = "0x3644e515";
 
@@ -446,6 +502,46 @@ export function encodeRecordContributionCalldata(
     uint8Word(input.score, "score"),
     uintWord(chainId, "chainId"),
     asBytes32(input.domainSeparator, "domainSeparator").slice(2),
+  ]);
+}
+
+/** ABI calldata for TruthPassAuditEscrow.openChallenge. */
+export function encodeOpenChallengeCalldata(input: AuditEscrowOpenChallengeInput): string {
+  if (!Number.isInteger(input.targetKind) || input.targetKind < 1 || input.targetKind > 4) {
+    throw new BotChainError("targetKind must be one of 1..4");
+  }
+  const stake = asHexQuantity(input.stake, "stake");
+  if (/^0x0+$/i.test(stake)) throw new BotChainError("stake must be greater than zero");
+  return truthPassCalldata(AUDIT_ESCROW_OPEN_CHALLENGE_SELECTOR, [
+    asBytes32(input.challengeId, "challengeId").slice(2),
+    uint8Word(input.targetKind, "targetKind"),
+    asBytes32(input.targetId, "targetId").slice(2),
+    asBytes32(input.reasonHash, "reasonHash").slice(2),
+    asBytes32(input.agentRunHash, "agentRunHash").slice(2),
+  ]);
+}
+
+export function encodeSubmitAuditFindingCalldata(input: AuditEscrowFindingInput): string {
+  return truthPassCalldata(AUDIT_ESCROW_SUBMIT_FINDING_SELECTOR, [
+    asBytes32(input.challengeId, "challengeId").slice(2),
+    asBytes32(input.evidenceRoot, "evidenceRoot").slice(2),
+    asBytes32(input.auditResultHash, "auditResultHash").slice(2),
+    asBytes32(input.verifierVersionHash, "verifierVersionHash").slice(2),
+    asBytes32(input.agentAttestationHash, "agentAttestationHash").slice(2),
+  ]);
+}
+
+export function encodeApproveAuditFindingCalldata(input: AuditEscrowApprovalInput): string {
+  return truthPassCalldata(AUDIT_ESCROW_APPROVE_FINDING_SELECTOR, [
+    asBytes32(input.challengeId, "challengeId").slice(2),
+  ]);
+}
+
+export function encodeResolveChallengeCalldata(input: AuditEscrowResolutionInput): string {
+  return truthPassCalldata(AUDIT_ESCROW_RESOLVE_CHALLENGE_SELECTOR, [
+    asBytes32(input.challengeId, "challengeId").slice(2),
+    uintWord(input.upheld ? 1 : 0, "upheld"),
+    asBytes32(input.resolutionHash, "resolutionHash").slice(2),
   ]);
 }
 
@@ -610,6 +706,64 @@ export function buildConsumerGatewayDisputeTransaction(
       asBytes32(input.targetId, "targetId").slice(2),
       asBytes32(input.reasonHash, "reasonHash").slice(2),
     ]),
+    value: "0x0",
+    chainId: config.chainId,
+    chainIdHex: config.chainIdHex,
+  };
+}
+
+export function buildAuditEscrowOpenChallengeTransaction(
+  input: AuditEscrowOpenChallengeInput,
+  config: BotChainConfig,
+): TruthPassWriteTransaction {
+  const stake = asHexQuantity(input.stake, "stake");
+  if (/^0x0+$/i.test(stake)) throw new BotChainError("stake must be greater than zero");
+  return {
+    action: "openChallenge",
+    to: asAddress(input.escrowAddress, "escrowAddress"),
+    data: encodeOpenChallengeCalldata(input),
+    value: stake,
+    chainId: config.chainId,
+    chainIdHex: config.chainIdHex,
+  };
+}
+
+export function buildAuditEscrowSubmitFindingTransaction(
+  input: AuditEscrowFindingInput,
+  config: BotChainConfig,
+): TruthPassWriteTransaction {
+  return {
+    action: "submitAuditFinding",
+    to: asAddress(input.escrowAddress, "escrowAddress"),
+    data: encodeSubmitAuditFindingCalldata(input),
+    value: "0x0",
+    chainId: config.chainId,
+    chainIdHex: config.chainIdHex,
+  };
+}
+
+export function buildAuditEscrowApproveFindingTransaction(
+  input: AuditEscrowApprovalInput,
+  config: BotChainConfig,
+): TruthPassWriteTransaction {
+  return {
+    action: "approveAuditFinding",
+    to: asAddress(input.escrowAddress, "escrowAddress"),
+    data: encodeApproveAuditFindingCalldata(input),
+    value: "0x0",
+    chainId: config.chainId,
+    chainIdHex: config.chainIdHex,
+  };
+}
+
+export function buildAuditEscrowResolveChallengeTransaction(
+  input: AuditEscrowResolutionInput,
+  config: BotChainConfig,
+): TruthPassWriteTransaction {
+  return {
+    action: "resolveChallenge",
+    to: asAddress(input.escrowAddress, "escrowAddress"),
+    data: encodeResolveChallengeCalldata(input),
     value: "0x0",
     chainId: config.chainId,
     chainIdHex: config.chainIdHex,
@@ -900,6 +1054,38 @@ export class BotChainClient {
     return this.submitWrite(transaction, disputeExpectation(input, transaction.to), options);
   }
 
+  async openChallenge(
+    input: AuditEscrowOpenChallengeInput,
+    options: WriteOptions = {},
+  ): Promise<TruthPassWriteSubmission> {
+    const transaction = buildAuditEscrowOpenChallengeTransaction(input, this.config);
+    return this.submitWrite(transaction, challengeOpenedExpectation(input, transaction.to), options);
+  }
+
+  async submitAuditFinding(
+    input: AuditEscrowFindingInput,
+    options: WriteOptions = {},
+  ): Promise<TruthPassWriteSubmission> {
+    const transaction = buildAuditEscrowSubmitFindingTransaction(input, this.config);
+    return this.submitWrite(transaction, auditFindingSubmittedExpectation(input, transaction.to), options);
+  }
+
+  async approveAuditFinding(
+    input: AuditEscrowApprovalInput,
+    options: WriteOptions = {},
+  ): Promise<TruthPassWriteSubmission> {
+    const transaction = buildAuditEscrowApproveFindingTransaction(input, this.config);
+    return this.submitWrite(transaction, auditVerifierApprovedExpectation(input, transaction.to), options);
+  }
+
+  async resolveChallenge(
+    input: AuditEscrowResolutionInput,
+    options: WriteOptions = {},
+  ): Promise<TruthPassWriteSubmission> {
+    const transaction = buildAuditEscrowResolveChallengeTransaction(input, this.config);
+    return this.submitWrite(transaction, challengeResolvedExpectation(input, transaction.to), options);
+  }
+
   async revokeOrSupersede(
     input: RevokeOrSupersedeInput,
     options: WriteOptions = {},
@@ -1093,6 +1279,14 @@ export const CONSUMER_GATEWAY_CONTRIBUTION_SELECTOR =
   `0x${keccak256Hex(CONSUMER_GATEWAY_CONTRIBUTION_SIGNATURE).slice(0, 8)}`;
 export const CONSUMER_GATEWAY_DISPUTE_SELECTOR =
   `0x${keccak256Hex(CONSUMER_GATEWAY_DISPUTE_SIGNATURE).slice(0, 8)}`;
+export const AUDIT_ESCROW_OPEN_CHALLENGE_SELECTOR =
+  `0x${keccak256Hex(AUDIT_ESCROW_OPEN_CHALLENGE_SIGNATURE).slice(0, 8)}`;
+export const AUDIT_ESCROW_SUBMIT_FINDING_SELECTOR =
+  `0x${keccak256Hex(AUDIT_ESCROW_SUBMIT_FINDING_SIGNATURE).slice(0, 8)}`;
+export const AUDIT_ESCROW_APPROVE_FINDING_SELECTOR =
+  `0x${keccak256Hex(AUDIT_ESCROW_APPROVE_FINDING_SIGNATURE).slice(0, 8)}`;
+export const AUDIT_ESCROW_RESOLVE_CHALLENGE_SELECTOR =
+  `0x${keccak256Hex(AUDIT_ESCROW_RESOLVE_CHALLENGE_SIGNATURE).slice(0, 8)}`;
 export const EVIDENCE_ANCHORED_TOPIC = `0x${keccak256Hex(EVIDENCE_ANCHORED_SIGNATURE)}`;
 export const VERIFICATION_RECORDED_TOPIC = `0x${keccak256Hex(VERIFICATION_RECORDED_SIGNATURE)}`;
 export const PURCHASE_RECORDED_TOPIC = `0x${keccak256Hex(PURCHASE_RECORDED_SIGNATURE)}`;
@@ -1101,6 +1295,12 @@ export const DISPUTE_RAISED_TOPIC = `0x${keccak256Hex(DISPUTE_RAISED_SIGNATURE)}
 export const RECORD_REVOKED_OR_SUPERSEDED_TOPIC =
   `0x${keccak256Hex(RECORD_REVOKED_OR_SUPERSEDED_SIGNATURE)}`;
 export const LEGACY_EVIDENCE_ANCHORED_TOPIC = `0x${keccak256Hex(LEGACY_EVIDENCE_ANCHORED_SIGNATURE)}`;
+export const CHALLENGE_OPENED_TOPIC = `0x${keccak256Hex(CHALLENGE_OPENED_SIGNATURE)}`;
+export const AUDIT_FINDING_SUBMITTED_TOPIC = `0x${keccak256Hex(AUDIT_FINDING_SUBMITTED_SIGNATURE)}`;
+export const AUDIT_VERIFIER_APPROVED_TOPIC = `0x${keccak256Hex(AUDIT_VERIFIER_APPROVED_SIGNATURE)}`;
+export const CHALLENGE_RESOLVED_TOPIC = `0x${keccak256Hex(CHALLENGE_RESOLVED_SIGNATURE)}`;
+export const CHALLENGE_REWARD_PAID_TOPIC = `0x${keccak256Hex(CHALLENGE_REWARD_PAID_SIGNATURE)}`;
+export const CHALLENGE_STAKE_SLASHED_TOPIC = `0x${keccak256Hex(CHALLENGE_STAKE_SLASHED_SIGNATURE)}`;
 
 function normalizeReceiptStatus(status: string | undefined): number {
   if (status === undefined) return -1;
@@ -1206,5 +1406,57 @@ function revisionExpectation(input: RevokeOrSupersedeInput, address: string): Re
       input.reasonHash,
       word(!/^0x0{64}$/i.test(input.replacementId.startsWith("0x") ? input.replacementId : `0x${input.replacementId}`) ? 1 : 0),
     ],
+  };
+}
+
+function challengeOpenedExpectation(
+  input: AuditEscrowOpenChallengeInput,
+  address: string,
+): ReceiptEventExpectation {
+  return {
+    name: "ChallengeOpened",
+    topic: CHALLENGE_OPENED_TOPIC,
+    address,
+    indexed: [input.challengeId, input.targetId],
+    dataWords: [word(BigInt(input.stake)), input.agentRunHash],
+  };
+}
+
+function auditFindingSubmittedExpectation(
+  input: AuditEscrowFindingInput,
+  address: string,
+): ReceiptEventExpectation {
+  return {
+    name: "AuditFindingSubmitted",
+    topic: AUDIT_FINDING_SUBMITTED_TOPIC,
+    address,
+    indexed: [input.challengeId, input.evidenceRoot],
+    dataWords: [input.auditResultHash, input.verifierVersionHash, input.agentAttestationHash],
+  };
+}
+
+function auditVerifierApprovedExpectation(
+  input: AuditEscrowApprovalInput,
+  address: string,
+): ReceiptEventExpectation {
+  return {
+    name: "AuditVerifierApproved",
+    topic: AUDIT_VERIFIER_APPROVED_TOPIC,
+    address,
+    indexed: [input.challengeId],
+    dataWords: [],
+  };
+}
+
+function challengeResolvedExpectation(
+  input: AuditEscrowResolutionInput,
+  address: string,
+): ReceiptEventExpectation {
+  return {
+    name: "ChallengeResolved",
+    topic: CHALLENGE_RESOLVED_TOPIC,
+    address,
+    indexed: [input.challengeId],
+    dataWords: [word(input.upheld ? 1 : 0), input.resolutionHash],
   };
 }

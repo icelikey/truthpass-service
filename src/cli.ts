@@ -219,7 +219,7 @@ export async function evaluateBatch(batchId: string): Promise<Record<string, unk
   const { ServiceRegistry } = await import("./registry.js") as { ServiceRegistry: new () => any };
   const registry = new ServiceRegistry();
   const task = makeTask(batchId);
-  for (const { card, mode } of demoServices()) registry.register(card, adapterFor(card, mode));
+  for (const { card, mode } of demoServices()) registry.register(card, adapterFor(card, mode), "demo/synthetic");
   const providerConfig = providerFromEnv();
   const decisionGate = new SafeJevDecisionGate({ provider: providerConfig.provider, modelId: providerConfig.source === "none" ? "deterministic-fallback" : providerConfig.source });
   const ranking = await registry.evaluate(task, { decisionGate });
@@ -243,8 +243,11 @@ export async function evaluateBatch(batchId: string): Promise<Record<string, unk
   const selected = normalized.find((item) => item.eligible);
   const selectedRanking = ranking.find((item: any) => item.service.id === selected?.serviceId);
   const verificationResult = selectedRanking?.verification as VerificationResult | undefined;
-  const selectedExecution = (selectedRanking?.execution as Record<string, unknown> | undefined)
-    ?? (selectedRanking?.service ? await adapterFor(selectedRanking.service, "valid").execute(makeTask(batchId)) as Record<string, unknown> : undefined);
+  // The ranked execution is the deterministic verdict, not the raw report.
+  // Re-read the selected fixture only for the consumer-facing evidence card.
+  const selectedExecution = selected
+    ? await adapterFor({ id: selected.serviceId }, "valid").execute(makeTask(batchId)) as Record<string, unknown>
+    : undefined;
   const selectedJevDecision = selectedRanking?.jevDecision as Record<string, unknown> | undefined;
   const selectedEvidence = selectedExecution
     ? {

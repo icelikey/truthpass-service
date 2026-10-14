@@ -10,6 +10,10 @@ import {
   buildConsumerGatewayPurchaseTransaction,
   buildConsumerGatewayContributionTransaction,
   buildConsumerGatewayDisputeTransaction,
+  buildAuditEscrowOpenChallengeTransaction,
+  buildAuditEscrowSubmitFindingTransaction,
+  buildAuditEscrowApproveFindingTransaction,
+  buildAuditEscrowResolveChallengeTransaction,
   buildRecordPurchaseTransaction,
   buildRecordContributionTransaction,
   buildRaiseDisputeTransaction,
@@ -22,6 +26,10 @@ import {
   CONSUMER_GATEWAY_PURCHASE_SELECTOR,
   CONSUMER_GATEWAY_CONTRIBUTION_SELECTOR,
   CONSUMER_GATEWAY_DISPUTE_SELECTOR,
+  AUDIT_ESCROW_OPEN_CHALLENGE_SELECTOR,
+  AUDIT_ESCROW_SUBMIT_FINDING_SELECTOR,
+  AUDIT_ESCROW_APPROVE_FINDING_SELECTOR,
+  AUDIT_ESCROW_RESOLVE_CHALLENGE_SELECTOR,
   encodeAnchorEvidenceCalldata,
   encodeTruthPassEvidenceAnchorCalldata,
   keccak256Hex,
@@ -39,6 +47,7 @@ const SCHEMA = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 const SOURCE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 const DOMAIN = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 const TX_HASH = "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+const ESCROW = "0x2222222222222222222222222222222222222222";
 
 function rpcResponse(id: number, result: unknown): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
@@ -157,6 +166,38 @@ test("consumer gateway calldata targets the public self-service gateway", () => 
   assert.equal(contribution.data.slice(0, 10), CONSUMER_GATEWAY_CONTRIBUTION_SELECTOR);
   assert.equal(dispute.data.slice(0, 10), CONSUMER_GATEWAY_DISPUTE_SELECTOR);
   assert.equal(purchase.chainId, 677);
+});
+
+test("audit escrow calldata carries challenge stake and distinct agent/verifier actions", () => {
+  const config = getBotChainConfig("mainnet", { contractAddress: ADDRESS });
+  const open = buildAuditEscrowOpenChallengeTransaction({
+    challengeId: REQUEST,
+    targetKind: 1,
+    targetId: ROOT,
+    reasonHash: SCHEMA,
+    agentRunHash: SOURCE,
+    stake: "0xde0b6b3a7640000",
+    escrowAddress: ESCROW,
+  }, config);
+  const finding = buildAuditEscrowSubmitFindingTransaction({
+    challengeId: REQUEST,
+    evidenceRoot: ROOT,
+    auditResultHash: SCHEMA,
+    verifierVersionHash: SOURCE,
+    agentAttestationHash: SUBJECT,
+    escrowAddress: ESCROW,
+  }, config);
+  const approval = buildAuditEscrowApproveFindingTransaction({ challengeId: REQUEST, escrowAddress: ESCROW }, config);
+  const resolution = buildAuditEscrowResolveChallengeTransaction({ challengeId: REQUEST, upheld: true, resolutionHash: ROOT, escrowAddress: ESCROW }, config);
+  assert.equal(open.to, ESCROW);
+  assert.equal(open.value, "0xde0b6b3a7640000");
+  assert.equal(open.data.slice(0, 10), AUDIT_ESCROW_OPEN_CHALLENGE_SELECTOR);
+  assert.equal(finding.data.slice(0, 10), AUDIT_ESCROW_SUBMIT_FINDING_SELECTOR);
+  assert.equal(approval.data.slice(0, 10), AUDIT_ESCROW_APPROVE_FINDING_SELECTOR);
+  assert.equal(resolution.data.slice(0, 10), AUDIT_ESCROW_RESOLVE_CHALLENGE_SELECTOR);
+  assert.throws(() => buildAuditEscrowOpenChallengeTransaction({
+    challengeId: REQUEST, targetKind: 1, targetId: ROOT, reasonHash: SCHEMA, agentRunHash: SOURCE, stake: "0x0", escrowAddress: ESCROW,
+  }, config));
 });
 
 test("dry-run checks RPC chain and builds calldata without sending a transaction", async () => {

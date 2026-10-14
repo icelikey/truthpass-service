@@ -1,0 +1,12 @@
+{
+  "batchId": "FO-2026-001",
+  "status": "verified",
+  "steps": [
+    { "step": 1, "title": "捕捞与提炼", "description": "渔船捕捞 → 原料提炼，生产哈希上链", "hash": "0x1a2b3c4d5e6f708192a3b4c5d6e7f809" },
+    { "step": 2, "title": "第三方检测", "description": "SGS 检测报告 + 4 步过程证据上链", "hash": "0x2b3c4d5e6f708192a3b4c5d6e7f8091a" },
+    { "step": 3, "title": "跨境物流", "description": "全程冷链运输，物流哈希上链", "hash": "0x3c4d5e6f708192a3b4c5d6e7f8091a2b" },
+    { "step": 4, "title": "海关清关", "description": "入境检验检疫，海关哈希上链", "hash": "0x4d5e6f708192a3b4c5d6e7f8091a2b3c" },
+    { "step": 5, "title": "保税仓入库", "description": "保税仓入库，入库哈希上链", "hash": "0x5e6f708192a3b4c5d6e7f8091a2b3c4d" },
+    { "step": 6, "title": "出库销售", "description": "出库销售，销售哈希上链", "hash": "0x6f708192a3b4c5d6e7f8091a2b3c4d5e" }
+  ]
+}

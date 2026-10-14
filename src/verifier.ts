@@ -1,7 +1,8 @@
 import { canonicalizeJson } from "./evidence.js";
 import { sha256Hex } from "./hash.js";
+import { getPolicySnapshot } from "./rules/policy.js";
 import type { JevDecision } from "./jev/model.js";
-import type { ExecutionEvidence, TaskRequest, VerificationResult } from "./types.js";
+import type { ExecutionEvidence, ProductBatchAssessment, ServiceExecutionResult, SignatureVerification, TaskRequest, VerificationResult } from "./types.js";
 
 export interface VerificationOptions {
   /** JEV is a routing gate; it can never override a failed deterministic check. */
@@ -33,8 +34,8 @@ export async function verifyExecution(
     batchMatches: evidence.batchId === task.batchId && evidence.reportBatchId === task.batchId,
     reportAfterProduction:
       production !== undefined && report !== undefined && taskProduction !== undefined ? report >= Math.max(production, taskProduction) : false,
-    signatureValid: !task.acceptance.requireSignature || evidence.signatureValid,
-    logisticsWithinLimit: evidence.logisticsGapHours <= task.acceptance.maxLogisticsGapHours,
+    signatureValid: !task.acceptance.requireSignature || evidence.signatureValid === true,
+    logisticsWithinLimit: evidence.logisticsGapHours <= (task.acceptance.maxLogisticsGapHours ?? Number.POSITIVE_INFINITY),
     epaDhaWithinLimit:
       task.acceptance.minEpaDhaPercent === undefined ||
       (evidence.epaDhaPercent !== undefined && evidence.epaDhaPercent >= task.acceptance.minEpaDhaPercent),
@@ -46,7 +47,7 @@ export async function verifyExecution(
       (evidence.totox !== undefined && evidence.totox <= task.acceptance.maxTotox),
     coldChainWithinLimit:
       !task.acceptance.requireColdChain ||
-      (evidence.coldChainGapHours !== undefined && evidence.coldChainGapHours <= task.acceptance.maxLogisticsGapHours),
+      (evidence.coldChainGapHours !== undefined && evidence.coldChainGapHours <= (task.acceptance.maxLogisticsGapHours ?? Number.POSITIVE_INFINITY)),
   };
 
   const passed = Object.values(checks).filter(Boolean).length;
@@ -161,4 +162,48 @@ export async function verifyExecution(
     verifierVersion,
     modelAssisted: options.jevDecision?.modelAssisted ?? false,
   };
+}
+
+/** New naming used by the teammate's service layer; it shares the same rule boundary. */
+export async function verifyServiceExecution(
+  task: TaskRequest,
+  evidence: ExecutionEvidence,
+  signatureVerification: SignatureVerification = evidence.signatureValid ? "demo" : "invalid",
+): Promise<ServiceExecutionResult> {
+  const result = await verifyExecution(task, {
+    ...evidence,
+    signatureValid: signatureVerification === "verified" || signatureVerification === "demo",
+  }, {});
+  return {
+    ...result,
+    status: result.status,
+    score: result.score,
+    checks: result.checks,
+    reasons: result.reasons,
+    evidenceHash: result.evidenceHash,
+  };
+}
+
+/** Product-level deterministic assessment used by the CLI and Agent adapters. */
+export async function assessProductBatch(
+  task: TaskRequest,
+  evidence: ExecutionEvidence,
+): Promise<ProductBatchAssessment> {
+  const policy = getPolicySnapshot(task.acceptance.policyId ?? "fish-oil-quality", task.acceptance.policyVersion ?? "v1");
+  const checks = {
+    logisticsWithinLimit: evidence.logisticsGapHours <= policy.thresholds.maxLogisticsGapHours,
+    epaDhaWithinLimit: evidence.epaDhaPercent !== undefined && evidence.epaDhaPercent >= policy.thresholds.minEpaDhaPercent,
+    peroxideWithinLimit: evidence.peroxideValue !== undefined && evidence.peroxideValue <= policy.thresholds.maxPeroxideValue,
+    totoxWithinLimit: evidence.totox !== undefined && evidence.totox <= policy.thresholds.maxTotox,
+    coldChainWithinLimit: evidence.coldChainGapHours !== undefined && evidence.coldChainGapHours <= policy.thresholds.maxLogisticsGapHours,
+  };
+  const score = Math.round((Object.values(checks).filter(Boolean).length / Object.keys(checks).length) * 100);
+  const reasons: string[] = [];
+  if (!checks.logisticsWithinLimit) reasons.push("物流记录存在超出验收标准的中断");
+  if (!checks.epaDhaWithinLimit) reasons.push(`EPA+DHA 未达到 ${policy.thresholds.minEpaDhaPercent}% 或缺少检测值`);
+  if (!checks.peroxideWithinLimit) reasons.push(`过氧化值未达到 ≤${policy.thresholds.maxPeroxideValue} 或缺少检测值`);
+  if (!checks.totoxWithinLimit) reasons.push(`TOTOX 未达到 ≤${policy.thresholds.maxTotox} 或缺少检测值`);
+  if (!checks.coldChainWithinLimit) reasons.push("冷链记录存在超温中断或缺少温度证据");
+  const result = { status: Object.values(checks).every(Boolean) ? "accepted" as const : "rejected" as const, policyId: policy.policyId, policyVersion: policy.version, score, checks, reasons };
+  return { ...result, evidenceHash: await sha256Hex(canonicalizeJson({ kind: "product-assessment", policy, task, evidence, result })) };
 }

@@ -119,7 +119,7 @@ if (
   flow.shipment.batchId !== flow.order.batchId ||
   flow.shipment.deliveryStatus !== "delivered" ||
   !flow.shipment.sealIntactAtDelivery ||
-  flow.shipment.temperatureGapHours > task.acceptance.maxLogisticsGapHours
+  flow.shipment.temperatureGapHours > (task.acceptance.maxLogisticsGapHours ?? Number.POSITIVE_INFINITY)
 ) {
   throw new Error("shipment does not satisfy delivery closure checks");
 }

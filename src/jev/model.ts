@@ -119,3 +119,42 @@ export function parseJevDecision(value: unknown): JevDecision | undefined {
 
 export type EnvelopeLike = Pick<EvidenceEnvelope, "eventId" | "payloadHash" | "eventType" | "issuer">;
 
+/**
+ * Data-oriented JEV context used by the Agent contract layer.  It is kept
+ * separate from the legacy routing state above so existing protocol clients
+ * remain source-compatible during the v1.2 integration.
+ */
+import type { BatchRecord, EvidenceRecord, ProductRecord } from "../data/model.js";
+
+export type JevRole = "production" | "inspection" | "consumer_feedback";
+export type JevEvidenceStatus = "submitted" | "revoked";
+
+export interface JevContextEvidenceRef {
+  evidenceId: string;
+  batchId: string;
+  kind: EvidenceRecord["kind"];
+  issuerId: string;
+  sourceKind: EvidenceRecord["sourceKind"];
+  occurredAt: string;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  status: JevEvidenceStatus;
+  dataMode: EvidenceRecord["dataMode"];
+}
+
+export interface JevBatchContext {
+  schemaVersion: "jev.context.v1";
+  entity: "fish_oil_batch";
+  product: ProductRecord;
+  batch: BatchRecord;
+  claims: string[];
+  evidence: JevContextEvidenceRef[];
+}
+
+export interface JevRoleView {
+  schemaVersion: "jev.view.v1";
+  role: JevRole;
+  context: JevBatchContext;
+  allowedEvidenceKinds: EvidenceRecord["kind"][];
+}
+

@@ -1,0 +1,20 @@
+{
+  "batchId": "FO-2026-001",
+  "name": "深海鱼油软胶囊",
+  "category": "鱼油",
+  "origin": "北太平洋海域",
+  "productionDate": "2026-01-12",
+  "supplyChainTags": ["来自纯净海域", "全程冷链", "多重检测", "区块链存证"],
+  "imageUrl": "/assets/fish-oil-product.png",
+  "verification": {
+    "status": "accepted",
+    "summary": "基于多源证据的综合判断",
+    "scope": "FO-2026-001 批次及当前公开的规则 v1.0"
+  },
+  "keyMetrics": [
+    { "key": "epa-dha", "icon": "fish", "label": "EPA+DHA", "value": "78%", "unit": "检测结果（占总脂肪酸）", "status": "pass" },
+    { "key": "peroxide", "icon": "warning", "label": "过氧化值", "value": "2.1", "unit": "meq/kg", "status": "pass" },
+    { "key": "cold-chain", "icon": "snowflake", "label": "冷链", "value": "2小时", "unit": "全程温度异常时长", "status": "pass" },
+    { "key": "heavy-metal", "icon": "alert", "label": "重金属报告", "value": "—", "unit": "未覆盖 · 可继续调用独立检测服务", "status": "missing" }
+  ]
+}

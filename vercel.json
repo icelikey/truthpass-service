@@ -1,11 +1,13 @@
 {
   "version": 2,
-  "outputDirectory": "web-frontend/dist",
+  "buildCommand": "npm run build",
+  "outputDirectory": "web/dist",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/[[...path]].ts" },
-    { "source": "/assets/:path*", "destination": "/web-frontend/dist/assets/:path*" },
-    { "source": "/frontend/:path*", "destination": "/web-frontend/dist/:path*" },
-    { "source": "/", "destination": "/web-frontend/dist/index.html" },
-    { "source": "/:path*", "destination": "/web-frontend/dist/index.html" }
+    { "source": "/web-demo", "destination": "/legacy/index.html" },
+    { "source": "/web-demo/:path*", "destination": "/legacy/:path*" },
+    { "source": "/frontend/:path*", "destination": "/index.html" },
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/:path*", "destination": "/index.html" }
   ]
 }

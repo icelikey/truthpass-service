@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8"><title>TruthPass Agent contract testbench</title></head>
+  <body>
+    <main><h1>TruthPass Agent Contract Testbench</h1><pre id="output">ready</pre></main>
+    <script>
+      (() => {
+        const output = document.getElementById("output");
+        const checks = ["schemaVersion", "role", "batchId", "findings"];
+        output.textContent = `contract checks ready: ${checks.join(", ")}`;
+      })();
+    </script>
+  </body>
+</html>

@@ -1,8 +1,8 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v1.1.0
-> 最近修改：2026-10-12
-> 本次修改：增加消费者 Gateway、普通钱包主网交易路径、事件级 receipt 校验和 Agent 审计质押设计。
+> 项目文档版本：v1.2.0
+> 最近修改：2026-10-15
+> 本次修改：兼容合并队友 Agent/JEV/IoT/React 栈，统一 Vercel Serverless 与本机 API，并将消费者购买和质疑接入真实钱包交易路径。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
 
@@ -39,7 +39,20 @@ lab-c：在线、签名有效、指标和冷链通过
 
 演示数据全部标记为 `demo/synthetic`，不能作为真实供应链证明。链上保存身份、任务哈希、结果和证据哈希；报告全文、图片、传感器明细和个人信息留在链下。
 
-比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md)。
+比赛网页只是现场观察台，不是产品主入口。用户自有 Agent 或我们提供的消费者 Agent 安装 CLI 后，可以查询、解释、推荐和准备下单；完整交付边界见 [docs/release-v0.9.0-consumer-agent-mainnet.md](docs/release-v0.9.0-consumer-agent-mainnet.md) 和 [docs/integration-v1.2.0.md](docs/integration-v1.2.0.md)。根路径 `/` 使用新的 React 前端，旧观察台保留在 `/web-demo` 作为回滚入口。
+
+## 交互状态标记
+
+所有页面、CLI 和 API 都必须区分以下状态，不能把演示回放当作用户真实交易：
+
+| 标记 | 含义 |
+| --- | --- |
+| `demo/synthetic` | 仓库内置的模拟批次、模拟传感器或历史回放数据 |
+| `wallet_signed` | 用户钱包已签名交易请求，尚未确认广播结果 |
+| `wallet_broadcast` | 用户钱包已广播，已取得交易 Hash，等待 receipt |
+| `mainnet_receipt_verified` | BOT Chain 主网 receipt、目标合约和业务事件全部匹配 |
+
+消费者 `purchase` 和 `contribution` 发送到 Consumer Gateway，经济性质疑 `openChallenge` 发送到 Audit Escrow 并携带真实质押。没有钱包插件、用户拒签、交易回滚或事件缺失时，前端只能显示待验证/失败，不能生成演示 Hash。
 
 ## 质量规则示例
 
@@ -116,6 +129,7 @@ docs/wallet-interaction-v1.0.1.md 浏览器钱包、主网 calldata、receipt �
 docs/consumer-wallet-audit-v1.1.0.md 消费者 Gateway、事件验收和 Agent 审计质押
 docs/future-vision-v0.8.5.md 可信商品平台愿景、白牌/新生商家品牌成长和跨品类扩展
 docs/release-v0.9.0-consumer-agent-mainnet.md 消费者 Agent、CLI、主网 receipt 和订单适配边界
+docs/integration-v1.2.0.md 队友代码兼容合并、React/Vercel/API、钱包和 Agent 审计验收
 examples/consumer-agent-cli.mjs 用户 Agent 通过 child_process 调用 CLI 的最小示例
 config/bot-chain-mainnet.replay.json 主网业务回放公开 receipt manifest
 assets/fish-oil-evidence-dashboard.png 前端高保真方向图

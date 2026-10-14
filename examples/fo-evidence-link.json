@@ -1,0 +1,7 @@
+[
+  { "step": 1, "icon": "sensor", "title": "设备采集", "source": "船舱传感器 · 温度 / 湿度 / 定位", "description": "船上与加工环节的传感器数据，记录捕捞、加工、温度等关键信息。", "hash": "0x9a1f4c2e8b0d77a31e5f9c2d4b6a8e10", "verifiedAt": "2026-10-06T08:30:00Z" },
+  { "step": 2, "icon": "agent", "title": "Agent 关联", "source": "Zhenyan Agent · 多源数据关联", "description": "Zhenyan Agent 将多源数据关联，形成可验证的证据包。", "hash": "0xb7c2d9a4e10f3c8b6d2a5f7e9c1b4d80", "verifiedAt": "2026-10-06T12:00:00Z" },
+  { "step": 3, "icon": "jev", "title": "JEV 判别", "source": "JEV 决策门 · route_to_rule · 0.94", "description": "用固定类型输出识别证据缺口、冲突和下一步路由。", "hash": "0x7c1e3d5a8f2b9c4e6a0d7f1b3c5e9a2d", "verifiedAt": "2026-10-06T13:40:00Z" },
+  { "step": 4, "icon": "rule", "title": "规则验收", "source": "规则引擎 v1.0 · 9 项验收", "description": "按食品安全与质量规则进行自动化验收，生成结论与置信范围。", "hash": "0x4d8e1f6b2c9a7d3e5f0b8c1a4e6d2f90", "verifiedAt": "2026-10-06T14:00:00Z" },
+  { "step": 5, "icon": "chain", "title": "链上锚定", "source": "链上锚定 · 不可篡改", "description": "关键证据哈希上链，确保记录不可篡改、可长期验证。", "hash": "0xe3a9b5c7d1f2e8a4c6b0d9f1e3a7c5b2", "verifiedAt": "2026-10-06T14:05:00Z" }
+]

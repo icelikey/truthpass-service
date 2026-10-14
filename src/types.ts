@@ -1,14 +1,9 @@
+import type { DataMode, EvidenceAttestation } from "./data/model.js";
+
 export type ServiceKind = "supplier" | "lab" | "logistics" | "after-sales";
 export type ProbeStatus = "healthy" | "degraded" | "offline";
-/**
- * Verification is intentionally scoped.  `accepted` means every check in the
- * declared policy passed; `accepted_with_scope` means that the declared scope
- * passed while other fields were not covered; `review` is a safe failure
- * state for missing/ambiguous evidence; `rejected` is a deterministic hard
- * failure. `partial` is retained as a read-only compatibility value for old
- * consumers and is no longer emitted by the verifier.
- */
-export type VerificationStatus = "accepted" | "accepted_with_scope" | "review" | "rejected" | "partial";
+export type ServiceExecutionStatus = "accepted" | "accepted_with_scope" | "review" | "rejected" | "partial";
+export type ProductAssessmentStatus = "accepted" | "rejected" | "not_evaluated";
 
 export interface ServiceCard {
   id: string;
@@ -21,6 +16,9 @@ export interface ServiceCard {
   feedbackCount: number;
 }
 
+export type EvidenceMode = DataMode;
+export type SignatureVerification = "verified" | "demo" | "invalid";
+
 export interface TaskRequest {
   taskId: string;
   serviceKind: ServiceKind;
@@ -29,17 +27,15 @@ export interface TaskRequest {
   productionTime: string;
   acceptance: {
     requireSignature: boolean;
-    maxLogisticsGapHours: number;
+    /** Legacy threshold fields remain optional during the v1.2 schema merge. */
+    maxLogisticsGapHours?: number;
     minEpaDhaPercent?: number;
     maxPeroxideValue?: number;
     maxTotox?: number;
     requireColdChain?: boolean;
-    /** Optional policy metadata used by the replayable verifier. */
     policyId?: string;
     policyVersion?: string;
-    /** Fields that must be present before a result can be accepted. */
     requiredEvidence?: string[];
-    /** A human-readable declared scope for accepted_with_scope results. */
     declaredScope?: string[];
   };
 }
@@ -62,7 +58,9 @@ export interface ExecutionEvidence {
   productionTime: string;
   reportTime: string;
   logisticsGapHours: number;
-  signatureValid: boolean;
+  /** Demo-only claim. External evidence must use attestation and a trusted issuer key. */
+  signatureValid?: boolean;
+  attestation?: EvidenceAttestation;
   /** Fish-oil metrics are optional so the generic service layer remains reusable. */
   epaDhaPercent?: number;
   peroxideValue?: number;
@@ -71,22 +69,40 @@ export interface ExecutionEvidence {
   payload: Record<string, unknown>;
 }
 
-export interface VerificationResult {
-  status: VerificationStatus;
+export interface ServiceExecutionResult {
+  status: ServiceExecutionStatus;
   score: number;
   checks: Record<string, boolean>;
   reasons: string[];
   evidenceHash: string;
-  /** The policy/version and scope are part of the result contract. */
+  policyId?: string;
+  policyVersion?: string;
+  verifierVersion?: string;
+  missingCodes?: string[];
+  conflictCodes?: string[];
+  modelAssisted?: boolean;
+}
+
+export interface ProductBatchAssessment {
+  status: ProductAssessmentStatus;
+  policyId: string;
+  policyVersion: string;
+  score: number;
+  checks: Record<string, boolean>;
+  reasons: string[];
+  evidenceHash: string;
+}
+
+/** Compatibility name used by the CLI/replay protocol. */
+export type VerificationResult = ServiceExecutionResult & {
   policyId?: string;
   policyVersion?: string;
   scope?: string[];
   missingCodes?: string[];
   conflictCodes?: string[];
   verifierVersion?: string;
-  /** True only when a structured model gate participated before rules. */
   modelAssisted?: boolean;
-}
+};
 
 export interface FeedbackRecord {
   feedbackId: string;

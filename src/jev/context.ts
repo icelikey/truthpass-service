@@ -11,6 +11,9 @@ import {
   type JevStateSummary,
   parseJevDecision,
 } from "./model.js";
+import type { MemoryDataRepository } from "../data/repository.js";
+import type { EvidenceKind } from "../data/model.js";
+import type { JevBatchContext, JevContextEvidenceRef, JevRole, JevRoleView } from "./model.js";
 
 function isExecutionEvidence(value: unknown): value is ExecutionEvidence {
   return !!value && typeof value === "object" && "taskId" in value && "batchId" in value && "payload" in value;
@@ -224,5 +227,54 @@ export function replayJevDecision(decision: JevDecision, input: JevState, now = 
   delete unsigned.outputHash;
   if (decision.outputHash !== outputHash(unsigned as Omit<JevDecision, "outputHash">)) errors.push("outputHash 不一致");
   return { valid: errors.length === 0, errors };
+}
+
+const roleEvidenceKinds: Record<JevRole, EvidenceKind[]> = {
+  production: ["production"],
+  inspection: ["inspection", "cold_chain", "shipment"],
+  consumer_feedback: ["production", "inspection", "cold_chain", "shipment", "purchase", "consumer_feedback"],
+};
+
+/** Build a role-neutral JEV context from the code-owned evidence repository. */
+export function buildJevContext(repository: MemoryDataRepository, batchId: string): JevBatchContext {
+  const batch = repository.getBatch(batchId);
+  if (!batch) throw new Error("JEV context 的 batch 不存在");
+  const product = repository.getProduct(batch.productId);
+  if (!product) throw new Error("JEV context 的 product 不存在");
+  const evidence: JevContextEvidenceRef[] = repository.listEvidence(batchId).map((record) => ({
+    evidenceId: record.evidenceId,
+    batchId: record.batchId,
+    kind: record.kind,
+    issuerId: record.issuerId,
+    sourceKind: record.sourceKind,
+    occurredAt: record.occurredAt,
+    payload: { ...record.payload },
+    payloadHash: record.payloadHash,
+    status: record.status,
+    dataMode: record.dataMode,
+  }));
+  return {
+    schemaVersion: "jev.context.v1",
+    entity: "fish_oil_batch",
+    product,
+    batch,
+    claims: [...product.claims],
+    evidence,
+  };
+}
+
+/** Restrict evidence by Agent role before any model sees it. */
+export function buildJevRoleView(context: JevBatchContext, role: JevRole): JevRoleView {
+  const allowedEvidenceKinds = roleEvidenceKinds[role];
+  return {
+    schemaVersion: "jev.view.v1",
+    role,
+    context: {
+      ...context,
+      claims: [...context.claims],
+      evidence: context.evidence.filter((item) => allowedEvidenceKinds.includes(item.kind)),
+    },
+    allowedEvidenceKinds: [...allowedEvidenceKinds],
+  };
 }
 

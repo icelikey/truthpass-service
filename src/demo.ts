@@ -1,6 +1,13 @@
 import { ServiceRegistry } from "./registry.js";
 import { ConsumerParticipationRegistry } from "./consumer.js";
-import type { ServiceAdapter, ServiceCard, TaskRequest } from "./types.js";
+import { runVerificationWorkflow } from "./orchestrator.js";
+import { closePersistence, persistenceEnabled, persistDemoRun, recordEvidence } from "./data/persistence.js";
+import { explainRejection } from "./knowledge/explain.js";
+import { loadKnowledgeChunks } from "./knowledge/wiki.js";
+import type { ExecutionEvidence, ServiceAdapter, ServiceCard, TaskRequest } from "./types.js";
+
+// 组合根旁路记录各服务返回的原始证据，供持久化 Sink 写入 execution_evidence
+const evidenceLog = new Map<string, ExecutionEvidence>();
 
 const task: TaskRequest = {
   taskId: "task-fish-oil-2026-001",
@@ -10,11 +17,8 @@ const task: TaskRequest = {
   productionTime: "2026-10-06T08:00:00Z",
   acceptance: {
     requireSignature: true,
-    maxLogisticsGapHours: 6,
-    minEpaDhaPercent: 70,
-    maxPeroxideValue: 5,
-    maxTotox: 20,
-    requireColdChain: true,
+    policyId: "fish-oil-quality",
+    policyVersion: "v1",
   },
 };
 
@@ -109,15 +113,19 @@ const services: Array<[ServiceCard, "valid" | "wrong-batch" | "offline"]> = [
 ];
 
 const registry = new ServiceRegistry();
-for (const [card, mode] of services) registry.register(card, adapterFor(card, mode));
+for (const [card, mode] of services) registry.register(card, recordEvidence(card.id, evidenceLog, adapterFor(card, mode)), "demo/synthetic");
 
-const ranked = await registry.evaluate(task);
-const winner = ranked[0];
-if (!winner?.verification) throw new Error("没有可验收的服务");
-const feedback = await registry.recordFeedback(winner.service.id, task, winner.verification);
+const workflow = await runVerificationWorkflow(task, registry, "2026-10-06T12:00:00Z");
+if (workflow.status !== "completed" || !workflow.selectedServiceId || !workflow.feedback) {
+  throw new Error("没有符合服务履约条件的服务");
+}
+const ranked = workflow.ranking;
+const winner = ranked.find((item) => item.service.id === workflow.selectedServiceId);
+const feedback = workflow.feedback;
+if (!winner) throw new Error("工作流选择的服务不在排名结果中");
 
 const consumers = new ConsumerParticipationRegistry();
-await consumers.grantConsent({
+const consent = await consumers.grantConsent({
   consumerId: "consumer-demo-001",
   batchId: task.batchId,
   scopes: ["purchase", "packaging", "odor", "storage", "quality-feedback"],
@@ -137,16 +145,63 @@ const consumerFeedback = await consumers.recordFeedback({
   createdAt: "2026-10-06T12:20:00Z",
 });
 
+let rejectionExplanations: unknown = undefined;
+if (persistenceEnabled()) {
+  try {
+    await persistDemoRun({ task, ranking: ranked, evidenceByServiceId: evidenceLog, feedback, consent, purchase, consumerFeedback });
+    console.error("[persistence] 本次演示已落库 Supabase/Postgres");
+  } catch (error) {
+    console.error("[persistence] 落库失败(不影响演示输出):", error instanceof Error ? error.message : error);
+  }
+  try {
+    const chunks = await loadKnowledgeChunks();
+    const rejected = ranked.filter((item) => !item.eligible && (item.execution || item.product));
+    const explanations = [];
+    for (const item of rejected) {
+      const evidence = evidenceLog.get([item.service.id, task.taskId].join(":"));
+      explanations.push({
+        serviceId: item.service.id,
+        ...(await explainRejection(
+          {
+            checks: { ...(item.execution?.checks ?? {}), ...(item.product?.checks ?? {}) },
+            reasons: [...(item.execution?.reasons ?? []), ...(item.product?.reasons ?? [])],
+            evidence: evidence
+              ? {
+                  epaDhaPercent: evidence.epaDhaPercent,
+                  peroxideValue: evidence.peroxideValue,
+                  totox: evidence.totox,
+                  coldChainGapHours: evidence.coldChainGapHours,
+                  reportBatchId: evidence.reportBatchId,
+                  signatureValid: evidence.signatureValid,
+                }
+              : undefined,
+          },
+          chunks,
+        )),
+      });
+    }
+    rejectionExplanations = explanations;
+    console.error("[knowledge] 拒因解释已生成: " + explanations.length + " 条");
+  } catch (error) {
+    console.error("[knowledge] 解释生成失败(不影响演示输出):", error instanceof Error ? error.message : error);
+  }
+  await closePersistence();
+}
+
 console.log(JSON.stringify({
   task,
+  agentTrace: workflow.trace,
   ranking: ranked.map((item) => ({
     serviceId: item.service.id,
     liveStatus: item.probe.status,
     score: item.score,
-    accepted: item.verification?.status ?? "not-executed",
-    reasons: item.verification?.reasons ?? [item.probe.reason],
+    eligible: item.eligible,
+    serviceExecution: item.execution?.status ?? "not-executed",
+    productAssessment: item.product?.status ?? "not-evaluated",
+    reasons: [...(item.execution?.reasons ?? []), ...(item.product?.reasons ?? []), ...(item.probe.reason ? [item.probe.reason] : [])],
   })),
   selectedService: winner.service.id,
   feedback,
   consumerParticipation: { purchase, feedback: consumerFeedback },
+  rejectionExplanations,
 }, null, 2));
