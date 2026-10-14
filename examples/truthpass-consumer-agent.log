@@ -1,0 +1,13 @@
+TruthPass Consumer Agent v1（脱敏示例）
+==============================================================
+[0] API：http://127.0.0.1:4173 ｜ 批次：FO-2026-001 ｜ 数据：demo/synthetic
+[1] 批次验收 → accepted ｜ 推荐：recommend
+[2] JEV/规则 → route_to_rule ｜ confidence=0.94
+[3] 区块链 → BOT Chain Mainnet ｜ Chain ID=677
+[4] Agent 转译 → 批次 FO-2026-001 当前通过公开验收规则。数据模式为 demo/synthetic；JEV 路由为 route_to_rule，置信度 0.94。链上锚定已记录，可在 https://scan.botchain.ai/tx/0x3ff591a82f012eb05f9f6994aff2af0415c718097587654ebfe4f5c3382b4052 查看。
+==============================================================
+
+说明：上面的锚定交易是仓库公开的历史回放，不代表本次运行新发起了交易。
+真正购买时：
+[5] 钱包交易 → purchase ｜ target=0x5192484B107E51EADFda4DBF4c9fFa41C03453F1 ｜ 状态=wallet_tx_prepared
+    私钥未读取；请在 MetaMask/OKX/Binance 钱包中确认并广播

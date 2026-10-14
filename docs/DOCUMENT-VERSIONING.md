@@ -69,6 +69,8 @@ docs(v0.4.1): clarify evidence envelope fields
 | v1.1.0 | 当前功能版本 | Consumer Gateway、Audit Escrow、消费者钱包路径和 Agent 审计质押接口 |
 | v1.1.1 | 当前主网部署版本 | Gateway/Escrow 主网部署、Anchor 角色授权回执、本机代理适配和现场验收待办 |
 | v1.2.1 | 当前钱包安全修订版本 | EIP-6963 多钱包发现、选中/连接状态分离、禁止演示钱包和伪造交易回退 |
+| v1.2.2 | 当前消费者 Agent 示例版本 | CoinCall 对照示例、JEV/确定性验收转译、用户钱包交易准备和脱敏日志 |
+| v1.4.0 | 当前公共协议基础版本 | 公共标准、跨品类 ProductPolicy、CFI Manifest、匿名消费者凭证和反馈协议 |
 
 ## 变更日志
 
@@ -79,6 +81,23 @@ docs(v0.4.1): clarify evidence envelope fields
 - **安全影响**：指定钱包不再复用错误的 `window.ethereum`，连接失败不创建演示钱包、不生成伪造交易回执；
 - **兼容边界**：保留 Vercel API、CLI、`/web-demo`、Consumer Gateway、Audit Escrow 和真实 receipt/事件校验；
 - **队友下一步**：使用非部署钱包完成一笔真实 BOT Chain Mainnet 交易并回填公开 Hash 和 Explorer 链接。
+
+### v1.2.2 — 2026-10-15
+
+- **新增示例**：`examples/truthpass_consumer_agent_v1.py`、`examples/truthpass-consumer-agent.log`；
+- **新增文档**：`docs/truthpass-consumer-agent-v1.2.2.md`；
+- **修改方向**：提供与 CoinCall Consumer Agent v2 对照的 TruthPass 宿主侧查询、JEV/确定性验收转译和钱包交易准备示例；
+- **安全边界**：示例只接收用户公开钱包地址，不读取、保存或广播私钥；交易必须由 EIP-1193 钱包确认并经过 receipt/业务事件校验；
+- **数据边界**：当前 `FO-2026-001` 和日志仍是 `demo/synthetic`，历史锚定 Hash 不能当作本次运行新交易；
+- **队友下一步**：把 `TRUTHPASS_BASE_URL` 指向正式服务，用非部署钱包现场完成 `wallet_signed → wallet_broadcast → mainnet_receipt_verified` 验收。
+
+### v1.4.0 — 2026-10-15
+
+- **新增代码**：`src/standards/v1_4.ts`、`test/v1-4-standards.test.ts`、`test/v1-4-api.test.ts`；扩展 `ProductCategory` 为鱼油和蜂蜜；
+- **新增文档**：`docs/integration-v1.4.0.md`；
+- **修改方向**：建立公共标准、可注册 ProductPolicy、CFI Manifest API、匿名消费者凭证和反馈协议；
+- **安全边界**：Agent 只能引用证据和解释，不能自行宣布质量通过；匿名协议不保存 nonce 或直接身份；模拟数据仍标记为 `demo/synthetic`；
+- **队友下一步**：接入真实第三方签名、密钥生命周期、持久化政策治理、反馈信誉回流和链上 receipt 回读。
 
 ### v0.4.0 — 2026-10-06
 
