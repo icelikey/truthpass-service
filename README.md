@@ -1,10 +1,12 @@
 # 真验 Zhenyan：鱼油批次公共信誉 Demo
 
-> 项目文档版本：v1.2.1
+> 项目文档版本：v1.4.0
 > 最近修改：2026-10-15
-> 本次修改：收敛多钱包 provider 发现和真实交易安全边界，禁止演示钱包与伪造回执回退。
+> 本次修改：完成队友 Agent/CLI/CFI 公共协议兼容合并，统一 Vercel API、真实钱包交易和旧观察台入口。
 
 真验（TruthPass）是一层面向消费者 Agent 的服务可靠性与公共信誉基础设施。鱼油只是演示品类，核心范式是：消费者 Agent 通过 CLI 调用真验，生产方、检测 Agent 和冷链 Agent 围绕同一个批次提交可验证证据，由确定性验收器完成判断，再把任务级履约结果和证据哈希沉淀为公共信誉。
+
+当前首页同时展示 CLI 参考实现：`/api/cli/reference/manifest` 暴露商品、批次、验证、售后和订单准备能力。Demo 数据明确标记为 `demo/synthetic`；订单准备返回 `prepared_pending_checkout`，只有商家 Checkout Adapter、真实支付回调和钱包 receipt 完成后才进入真实交易状态。
 
 ## 解决的问题
 

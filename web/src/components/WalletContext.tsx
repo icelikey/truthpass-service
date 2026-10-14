@@ -74,6 +74,7 @@ export function WalletProvider({
   const [selectedBatch, setSelectedBatch] = useState<string>(activeBatchId || "FO-2026-001");
   const [customNote, setCustomNote] = useState<string>("");
   const [txSeq, setTxSeq] = useState<number>(0);
+  const [latestPurchaseId, setLatestPurchaseId] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeBatchId) {
@@ -219,6 +220,7 @@ export function WalletProvider({
     setWalletKind(null);
     setSelectedWalletKind(null);
     setProvider(null);
+    setLatestPurchaseId(null);
     setTxError(null);
     setTxStage(null);
     onToast("已断开钱包连接");
@@ -254,7 +256,7 @@ export function WalletProvider({
           action: params.action,
           batchId: params.batchId,
           wallet: address,
-          purchaseId: params.purchaseId,
+          purchaseId: params.purchaseId ?? (params.action === "contribution" ? latestPurchaseId ?? undefined : undefined),
           points: params.points,
           reason: params.reason,
         });
@@ -288,6 +290,9 @@ export function WalletProvider({
           ids: prepared.ids,
         });
         setLastTx(confirmed.transaction);
+        if (params.action === "purchase" && typeof prepared.ids?.purchaseId === "string") {
+          setLatestPurchaseId(prepared.ids.purchaseId);
+        }
         setTxSeq((n) => n + 1);
         setTxStage(null);
         void queryClient.invalidateQueries({ queryKey: ["chain-status"] });
@@ -305,7 +310,7 @@ export function WalletProvider({
         setActiveAction(null);
       }
     },
-    [provider, address, walletName, onToast, queryClient],
+    [provider, address, walletName, latestPurchaseId, onToast, queryClient],
   );
 
   const targetBatch = selectedBatch || activeBatchId || "FO-2026-001";
@@ -484,11 +489,12 @@ export function WalletProvider({
                 <button
                   type="button"
                   className={activeAction === "contribution" ? "wallet-tx-btn running" : "wallet-tx-btn"}
-                  disabled={!walletReady || txBusy}
+                  disabled={!walletReady || txBusy || !latestPurchaseId}
                   onClick={() =>
                     executeOnChainAction({
                       action: "contribution",
                       batchId: targetBatch,
+                        purchaseId: latestPurchaseId ?? undefined,
                       points: 20,
                     }).catch(() => undefined)
                   }
@@ -496,7 +502,7 @@ export function WalletProvider({
                   <strong>
                     {activeAction === "contribution" ? "⏳ 正在铸造积分…" : "🌟 2. 链上共建积分铸造"}
                   </strong>
-                   <small>调用 ConsumerGateway.recordContribution 登记积分</small>
+                   <small>{latestPurchaseId ? "调用 ConsumerGateway.recordContribution 登记积分" : "请先完成本钱包的购买凭证登记"}</small>
                   <span className="wallet-tx-cta">点击铸造 20 积分 →</span>
                 </button>
 

@@ -70,7 +70,7 @@ docs(v0.4.1): clarify evidence envelope fields
 | v1.1.1 | 当前主网部署版本 | Gateway/Escrow 主网部署、Anchor 角色授权回执、本机代理适配和现场验收待办 |
 | v1.2.1 | 当前钱包安全修订版本 | EIP-6963 多钱包发现、选中/连接状态分离、禁止演示钱包和伪造交易回退 |
 | v1.2.2 | 当前消费者 Agent 示例版本 | CoinCall 对照示例、JEV/确定性验收转译、用户钱包交易准备和脱敏日志 |
-| v1.4.0 | 当前公共协议基础版本 | 公共标准、跨品类 ProductPolicy、CFI Manifest、匿名消费者凭证和反馈协议 |
+| v1.4.0 | 当前集成交付版本 | 公共标准、跨品类 ProductPolicy、CFI/CLI Manifest、匿名消费者凭证、真实钱包 receipt 校验和 Vercel 兼容入口 |
 
 ## 变更日志
 
@@ -98,6 +98,14 @@ docs(v0.4.1): clarify evidence envelope fields
 - **修改方向**：建立公共标准、可注册 ProductPolicy、CFI Manifest API、匿名消费者凭证和反馈协议；
 - **安全边界**：Agent 只能引用证据和解释，不能自行宣布质量通过；匿名协议不保存 nonce 或直接身份；模拟数据仍标记为 `demo/synthetic`；
 - **队友下一步**：接入真实第三方签名、密钥生命周期、持久化政策治理、反馈信誉回流和链上 receipt 回读。
+
+### v1.4.0 集成扩展 — 2026-10-15
+
+- **新增代码**：`src/cli-reference/v1.ts`、`test/cli-reference.test.ts`、`web/src/components/CliReferencePanel.tsx`；扩展集成 API 和前端演示；增加 `/api/cli/explain`、构建产物检查和消费者钱包绑定校验；
+- **修改文档**：更新 README 的 CLI 参考实现入口；
+- **修改方向**：增加 CLI 参考实现的商品、批次、验证、售后能力和 `prepared_pending_checkout` 购买准备状态；
+- **安全边界**：Demo 订单不代表支付完成，CLI 参考数据使用 `demo/synthetic`，链上保持 `anchor_pending`，真实 receipt 和业务事件通过后才升级；
+- **队友下一步**：接入企业系统适配器、真实 Checkout Adapter、订单回调和持久化多租户治理。
 
 ### v0.4.0 — 2026-10-06
 

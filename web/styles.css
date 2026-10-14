@@ -167,6 +167,74 @@ body {
   grid-auto-rows: minmax(660px, auto);
 }
 
+.cli-reference-demo {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto 24px;
+  padding: 24px;
+  border: 1px solid rgba(88, 215, 205, .22);
+  border-radius: 18px;
+  background: linear-gradient(140deg, rgba(12, 37, 61, .9), rgba(9, 25, 43, .74));
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .2);
+}
+
+.cli-reference-demo-head, .cli-reference-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.cli-reference-kicker {
+  color: var(--teal);
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  font-weight: 700;
+}
+
+.cli-reference-demo h2 {
+  margin: 8px 0 6px;
+  color: var(--text);
+  font-size: clamp(20px, 2.4vw, 30px);
+  font-weight: 600;
+}
+
+.cli-reference-demo p { margin: 0; color: var(--muted); line-height: 1.7; }
+
+.cli-reference-demo-badge, .cli-reference-open-badge, .cli-reference-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #07242b;
+  background: var(--teal);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  white-space: nowrap;
+}
+
+.cli-reference-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 22px 0 14px; }
+.cli-reference-flow-step { display: grid; gap: 5px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(6, 20, 35, .4); }
+.cli-reference-flow-step span { color: var(--teal); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; }
+.cli-reference-flow-step strong { color: var(--text); font-size: 14px; }
+.cli-reference-flow-step small, .cli-reference-card-head small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+.cli-reference-demo-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 12px; }
+.cli-reference-evidence-card, .cli-reference-manifest-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7, 22, 38, .52); }
+.cli-reference-card-head strong { display: block; margin-top: 4px; color: var(--text); font-size: 15px; }
+.cli-reference-status { color: #06282c; background: #8be5d9; }
+.cli-reference-open-badge { color: #d8fff8; background: rgba(43, 199, 181, .16); border: 1px solid rgba(43, 199, 181, .35); }
+.cli-reference-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.cli-reference-checks span { padding: 5px 8px; border-radius: 7px; background: rgba(255, 255, 255, .05); color: var(--muted); font-size: 11px; }
+.cli-reference-checks .passed { color: #9bf0df; }
+.cli-reference-checks .review { color: #f4c97c; }
+.cli-reference-hash { overflow-wrap: anywhere; color: #7090a8; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
+.cli-reference-capabilities { display: flex; flex-wrap: wrap; gap: 7px; }
+.cli-reference-capabilities code { padding: 5px 7px; border-radius: 6px; color: #b5f1e9; background: rgba(43, 199, 181, .08); font-size: 10px; }
+.cli-reference-manifest-card a { color: var(--teal); font-size: 12px; }
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -1006,6 +1074,8 @@ body {
   .chat-panel { grid-column: 1 / -1; order: 3; height: auto; min-height: auto; }
   .chat-log { max-height: 320px; }
   .evidence-panel { height: auto; overflow-y: visible; }
+  .cli-reference-flow { grid-template-columns: repeat(2, 1fr); }
+  .cli-reference-demo-grid { grid-template-columns: 1fr; }
   .hero-slogan { display: none; }
   .community-bar { flex-wrap: wrap; }
   .community-items { grid-template-columns: repeat(3, 1fr); flex: 1 1 100%; order: 3; }
@@ -1019,6 +1089,10 @@ body {
   .hero { padding: 40px 20px 26px; }
   .hero h1 { font-size: 28px; }
   .layout { grid-template-columns: 1fr; padding: 8px 20px 30px; }
+  .cli-reference-demo { width: calc(100% - 28px); padding: 18px; }
+  .cli-reference-demo-head { display: block; }
+  .cli-reference-demo-badge { margin-top: 12px; }
+  .cli-reference-flow { grid-template-columns: 1fr; }
   .product-top { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr; }
   .metric-card { min-height: 0; }

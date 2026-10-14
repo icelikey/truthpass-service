@@ -101,9 +101,9 @@ function MessageView({
           <div className="order-card">
             {message.order.imageUrl && <img src={message.order.imageUrl} alt="" />}
             <div className="order-info">
-              <b>补货已生成 · {message.order.orderId}</b>
+              <b>购买准备已生成 · {message.order.orderId}</b>
               <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
-              <span className="order-status">状态：{message.order.txHash ? "已链上锚定 (BOT Chain 677)" : "已确认"}</span>
+              <span className="order-status">状态：{message.order.txHash ? "已链上锚定 (BOT Chain 677)" : "待商家结账 · anchor_pending"}</span>
               {message.order.txHash ? (
                 <a
                   href={message.order.explorerUrl ?? `https://scan.botchain.ai/tx/${message.order.txHash}`}
@@ -208,7 +208,7 @@ export function ChatPanel({
       pushAgent(
         [
           { cls: "conclusion", text: `已为你生成补货单：${order.orderId}` },
-          { cls: "plain", text: "可点击下方按钮通过 MetaMask / OKX / Binance 钱包在 BOT Chain Mainnet (677) 锚定购买凭证。" },
+          { cls: "plain", text: "下一步交给商家 Checkout Adapter 完成价格、地址和支付；确认后再由钱包在 BOT Chain Mainnet (677) 写入购买凭证。" },
         ],
         { order },
       );
@@ -295,7 +295,7 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>TruthPass 鱼油助理</strong>
+            <strong>TruthPass 商品 Agent</strong>
           <small>
             <span className="status-dot" title="在线" />
             在线 · 基于真实数据的 AI 助手
@@ -307,7 +307,7 @@ export function ChatPanel({
         <div className="msg agent">
           <div className="msg-bubble">
             <div className="reason-line">
-              你好，我是你的 TruthPass 鱼油助理。从购前咨询、服用提醒，到补货与溯源验证，我全程陪你。今天吃鱼油了吗？
+              你好，我是 TruthPass 商品 Agent。当前演示从鱼油批次开始：我可以解释商品证据、准备购买，并在授权后协助售后反馈。
             </div>
           </div>
         </div>

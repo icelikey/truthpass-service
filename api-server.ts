@@ -51,6 +51,13 @@ import {
 } from "./src/chain.js";
 import { buildJevContext, buildJevRoleView } from "./src/jev/context.js";
 import type { ServiceAdapter, ServiceCard, TaskRequest } from "./src/types.js";
+import {
+  AnonymousConsumerRegistry,
+  buildCfiManifest,
+  createDefaultProductPolicyRegistry,
+  publicStandardDocument,
+} from "./src/standards/v1_4.js";
+import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
@@ -59,6 +66,8 @@ const LEGACY_WEB = existsSync(join(WEB_DIST, "legacy")) ? join(WEB_DIST, "legacy
 const PORT = Number(process.env.PORT || 4173);
 const BATCH_ID = "FO-2026-001";
 const invokeAgent = createCompatibleAgentInvoker();
+const publicPolicyRegistry = createDefaultProductPolicyRegistry();
+const anonymousConsumers = new AnonymousConsumerRegistry();
 
 // ---------- 加载 .env（SMTP 等本地配置，不提交仓库） ----------
 async function loadEnv(): Promise<void> {
@@ -420,7 +429,11 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
     rawAction === "recordVerification" ? "verification" :
     rawAction;
   const rawWallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
-  const wallet = /^0x[0-9a-fA-F]{40}$/.test(rawWallet) ? rawWallet : "0x2eBdb6C7617d27999cFDEa61C38cAc1647183c08";
+  const suppliedWallet = /^0x[0-9a-fA-F]{40}$/.test(rawWallet) ? rawWallet : "";
+  if (["purchase", "contribution", "dispute"].includes(action) && !suppliedWallet) {
+    throw new Error("消费者钱包地址 wallet 为必填项；不能为消费者交易生成部署钱包回退交易");
+  }
+  const wallet = suppliedWallet || process.env.TRUTHPASS_DEPLOYER_ADDRESS || "0x2eBdb6C7617d27999cFDEa61C38cAc1647183c08";
   const batchId = typeof body.batchId === "string" && body.batchId.trim() ? body.batchId.trim().toUpperCase() : BATCH_ID;
   const clientNonce = typeof body.clientNonce === "string" && body.clientNonce.trim()
     ? body.clientNonce.trim()
@@ -455,6 +468,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
       chainId,
       contractAddress,
       explorerUrl,
+      signer: wallet,
       requiredRole: "EVIDENCE_WRITER_ROLE",
       ids: { requestId, evidenceRoot },
       transaction,
@@ -514,6 +528,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
         contractAddress: gatewayAddress,
         anchorAddress: contractAddress,
         explorerUrl,
+        signer: wallet,
         requiredRole: "CONSUMER_SELF_SERVICE",
         gateway: true,
         ids: { purchaseId, batchCommitment, purchaseProofHash, consentHash },
@@ -545,9 +560,10 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
   }
 
   if (action === "contribution") {
-    // Default to the verified mainnet purchaseId (`0x2049454dc7687d9d82e2b2067cf8dd1a3feb11771216a5830a8a7734cd884fbf`) if the user hasn't registered a custom purchaseId yet, so 1-click contribution works on-chain!
-    const defaultPurchaseId = "0x2049454dc7687d9d82e2b2067cf8dd1a3feb11771216a5830a8a7734cd884fbf";
-    const purchaseId = bytes32OrHash(body.purchaseId, "purchaseId", defaultPurchaseId);
+    if (typeof body.purchaseId !== "string" || !body.purchaseId.trim()) {
+      throw new Error("贡献必须绑定当前消费者钱包已经确认的 purchaseId");
+    }
+    const purchaseId = bytes32OrHash(body.purchaseId, "purchaseId", `purchase:${wallet}:${batchId}`);
     const contributionId = bytes32OrHash(body.contributionId, "contributionId", `contribution:${wallet}:${purchaseId}:${clientNonce}`);
     const evidenceHashVal = bytes32OrHash(body.evidenceHash, "evidenceHash", `feedback-evidence:${wallet}:${batchId}:${clientNonce}`);
     const contributionHash = bytes32OrHash(body.contributionHash, "contributionHash", `feedback:${wallet}:${batchId}:${clientNonce}`);
@@ -571,6 +587,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
         contractAddress: gatewayAddress,
         anchorAddress: contractAddress,
         explorerUrl,
+        signer: wallet,
         requiredRole: "CONSUMER_SELF_SERVICE",
         gateway: true,
         ids: { contributionId, purchaseId, evidenceHash: evidenceHashVal, contributionHash },
@@ -595,6 +612,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
       chainId,
       contractAddress,
       explorerUrl,
+      signer: wallet,
       requiredRole: "CONTRIBUTION_WRITER_ROLE",
       ids: { contributionId, purchaseId },
       transaction,
@@ -604,8 +622,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
   if (action === "dispute") {
     const targetKind = Number.isInteger(body.targetKind) ? Number(body.targetKind) : 1;
     if (![1, 2, 3, 4].includes(targetKind)) throw new Error("targetKind 必须是 1, 2, 3 或 4");
-    const defaultTargetId = "0xeeccdd53031b244279fb7047fb49444c660df34cde6d785640215720e3611419";
-    const targetId = bytes32OrHash(body.targetId, "targetId", defaultTargetId);
+    const targetId = bytes32OrHash(body.targetId, "targetId", `batch:${batchId}`);
     const disputeId = bytes32OrHash(body.disputeId, "disputeId", `dispute:${wallet}:${targetId}:${clientNonce}`);
     const reasonHash = bytes32OrHash(body.reasonHash, "reasonHash", `consumer-dispute:${batchId}:${clientNonce}`);
     const auditEscrowAddress = BOT_CHAIN_MAINNET.auditEscrowAddress;
@@ -630,6 +647,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
       contractAddress: auditEscrowAddress,
       anchorAddress: contractAddress,
       explorerUrl,
+      signer: wallet,
       requiredRole: "CONSUMER_SELF_SERVICE",
       auditEscrow: true,
       stake,
@@ -939,7 +957,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     sendJson(res, 200, {
       status: "ok",
       service: "truthpass-integrated-api",
-      version: "1.2.1",
+      version: "1.4.0",
       batchId: BATCH_ID,
       chainId: BOT_CHAIN_MAINNET.chainId,
       dataClass: "demo/synthetic",
@@ -953,17 +971,20 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       schemaVersion: "truthpass.agent.manifest.v1",
       service: "truthpass",
       name: "TruthPass Consumer Agent Gateway",
-      version: "1.2.1",
+      version: "1.4.0",
       status: "ready",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["consumer.inspect", "cli.inspect", "jev.route", "chain.status", "wallet.prepare", "wallet.broadcast"],
+      capabilities: ["consumer.inspect", "cli.inspect", "cli.explain", "jev.route", "chain.status", "wallet.prepare", "wallet.broadcast", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
       endpoints: {
         inspection: `${origin}/api/cli/inspect?batchId={batchId}`,
+        explanation: `${origin}/api/cli/explain?batchId={batchId}`,
         jevDetection: `${origin}/api/jev/detection?batchId={batchId}`,
         chainStatus: `${origin}/api/chain/status`,
         walletPrepare: `${origin}/api/wallet/prepare`,
         health: `${origin}/api/health`,
+        cfiManifest: `${origin}/api/cfi/manifest`,
+        publicStandard: `${origin}/api/standards`,
       },
       chain: {
         network: BOT_CHAIN_MAINNET.network,
@@ -973,6 +994,152 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       },
       publicDataBoundary: { rawReports: "off_chain", personalData: "off_chain", privateKeys: "off_chain" },
     });
+    return true;
+  }
+
+  if (p === "/api/cli/explain" && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const requestedBatch = repository.getBatch(batchId);
+    if (!requestedBatch) {
+      sendJson(res, 404, { error: `批次不存在: ${batchId}` });
+      return true;
+    }
+    const inspection = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+    const assessment = inspection.verification.assessment;
+    const mode = inspection.verification.dataClass;
+    const explanation = assessment
+      ? `批次 ${batchId} 的确定性验收状态为 ${inspection.verification.status}，${assessment.reasons.join("；") || "规则检查已完成"}。当前数据模式为 ${mode}，链上状态仍为 anchor_pending，真实主网交易需要由用户钱包签名并回读 receipt。`
+      : `批次 ${batchId} 当前缺少足够检测证据，不能给出质量结论。当前数据模式为 ${mode}，请补充检测报告、冷链记录和来源签名。`;
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.cli.explain.v1",
+      command: "explain",
+      batchId,
+      dataClass: mode,
+      status: inspection.verification.status,
+      explanation,
+      inspection,
+    });
+    return true;
+  }
+
+  if (p === "/api/cfi/manifest" && req.method === "GET") {
+    sendJson(res, 200, buildCfiManifest(`${url.protocol}//${url.host}`, publicPolicyRegistry));
+    return true;
+  }
+
+  if (p === "/api/standards" && req.method === "GET") {
+    sendJson(res, 200, publicStandardDocument());
+    return true;
+  }
+
+  if (p === "/api/standards/policies" && req.method === "GET") {
+    const category = url.searchParams.get("category") as "fish-oil" | "honey" | null;
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.product-policy.index.v1",
+      standardVersion: "1.4.0",
+      policies: publicPolicyRegistry.list(category ? { category, status: "active" } : { status: "active" }),
+    });
+    return true;
+  }
+
+  const policyMatch = p.match(/^\/api\/standards\/policies\/([^/]+)\/([^/]+)$/);
+  if (policyMatch && req.method === "GET") {
+    try {
+      sendJson(res, 200, publicPolicyRegistry.get(decodeURIComponent(policyMatch[1]), decodeURIComponent(policyMatch[2])));
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (p === "/api/consumer/credentials" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      const credential = anonymousConsumers.issue({
+        nonce: typeof body.nonce === "string" ? body.nonce : "",
+        scopes: Array.isArray(body.scopes) ? body.scopes as Array<"purchase" | "feedback" | "public-reputation"> : undefined,
+        issuedAt: typeof body.issuedAt === "string" ? body.issuedAt : undefined,
+        expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : undefined,
+      });
+      sendJson(res, 201, { ...credential, privacy: { nonce: "never_stored", personalData: "not_collected" } });
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (p === "/api/consumer/feedback" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      const feedback = anonymousConsumers.submitFeedback({
+        credentialId: typeof body.credentialId === "string" ? body.credentialId : "",
+        batchId: typeof body.batchId === "string" ? body.batchId : "",
+        rating: Number(body.rating),
+        categories: Array.isArray(body.categories) ? body.categories.filter((item): item is string => typeof item === "string") : undefined,
+        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs.filter((item): item is string => typeof item === "string") : undefined,
+        commentHash: typeof body.commentHash === "string" ? body.commentHash : undefined,
+        createdAt: typeof body.createdAt === "string" ? body.createdAt : undefined,
+      });
+      sendJson(res, 201, { ...feedback, privacy: { credential: "pseudonymous", rawComment: "not_collected" }, chainStatus: "anchor_pending" });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (p === "/api/cli/reference/manifest" && req.method === "GET") {
+    sendJson(res, 200, DEFAULT_CLI_REFERENCE_REGISTRY.manifest(url.protocol + "//" + url.host));
+    return true;
+  }
+
+  if (p === "/api/cli/reference/products" && req.method === "GET") {
+    sendJson(res, 200, { schemaVersion: "truthpass.cli.reference.product-index.v1", products: DEFAULT_CLI_REFERENCE_REGISTRY.listProducts() });
+    return true;
+  }
+
+  const cliReferenceProductMatch = p.match(/^\/api\/cli\/reference\/products\/([^/]+)(?:\/(assistant))?$/);
+  if (cliReferenceProductMatch && req.method === "GET") {
+    try {
+      const productId = decodeURIComponent(cliReferenceProductMatch[1]);
+      sendJson(res, 200, cliReferenceProductMatch[2] === "assistant" ? DEFAULT_CLI_REFERENCE_REGISTRY.assistant(productId) : DEFAULT_CLI_REFERENCE_REGISTRY.getProduct(productId));
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  const cliReferenceVerificationMatch = p.match(/^\/api\/cli\/reference\/batches\/([^/]+)\/verification$/);
+  if (cliReferenceVerificationMatch && req.method === "GET") {
+    try {
+      sendJson(res, 200, DEFAULT_CLI_REFERENCE_REGISTRY.verifyBatch(decodeURIComponent(cliReferenceVerificationMatch[1])));
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  const cliReferenceBatchMatch = p.match(/^\/api\/cli\/reference\/batches\/([^/]+)$/);
+  if (cliReferenceBatchMatch && req.method === "GET") {
+    try {
+      sendJson(res, 200, DEFAULT_CLI_REFERENCE_REGISTRY.getBatch(decodeURIComponent(cliReferenceBatchMatch[1])));
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (p === "/api/cli/reference/orders/prepare" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      sendJson(res, 200, DEFAULT_CLI_REFERENCE_REGISTRY.prepareOrder({
+        batchId: typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "",
+        quantity: typeof body.quantity === "number" ? body.quantity : undefined,
+        clientRequestId: typeof body.clientRequestId === "string" ? body.clientRequestId : undefined,
+        checkoutBaseUrl: url.protocol + "//" + url.host + "/api",
+      }));
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error) });
+    }
     return true;
   }
 
@@ -1250,7 +1417,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       imageUrl: b.image,
       quantity: 1,
       createdAt: new Date().toISOString(),
-      status: "confirmed",
+      status: "prepared_pending_checkout",
+      paymentStatus: "not_started",
+      chainStatus: "anchor_pending",
+      nextAction: "send_to_checkout_adapter",
+      dataMode: "demo/synthetic",
     });
     return true;
   }

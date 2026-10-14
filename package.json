@@ -1,6 +1,6 @@
 {
   "name": "truthpass-service",
-  "version": "1.2.1",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "真验 Zhenyan: service reliability and public reputation layer for white-label commerce Agents.",
@@ -33,7 +33,7 @@
     "testbench:tools": "node --env-file-if-exists=.env --import=tsx src/tools/testbench-server.ts",
     "api": "node --env-file-if-exists=.env --import=tsx api-server.ts",
     "dev": "vite",
-    "build": "tsc -p tsconfig.web.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.web.json --noEmit && vite build && node scripts/verify-web-build.mjs",
     "preview": "vite preview",
     "web": "node --env-file-if-exists=.env --import=tsx api-server.ts"
   },

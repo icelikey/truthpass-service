@@ -135,7 +135,7 @@ export function EvidencePanel({ state, batchId, focusTech = false }: { state: Ve
                     <div className="cli-section">
                       <strong>BOT Chain Mainnet (Chain ID: 677) 锚定记录</strong>
                       <span>network: BOT Chain Mainnet (Chain ID: {cliInspect.verification.anchor.chainId ?? 677})</span>
-                      <span>status: ✓ {cliInspect.verification.anchor.status} (已部署并完成主网锚定)</span>
+                      <span>status: {cliInspect.verification.anchor.status}（仅在真实 receipt 与业务事件验证后显示已锚定）</span>
                       <span>
                         EvidenceAnchor:{" "}
                         <a

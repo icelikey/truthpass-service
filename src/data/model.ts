@@ -1,5 +1,5 @@
 export type DataMode = "demo/synthetic" | "external";
-export type ProductCategory = "fish-oil";
+export type ProductCategory = "fish-oil" | "honey";
 export type EvidenceKind =
   | "production"
   | "inspection"

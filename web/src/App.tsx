@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { AuthModal } from "./components/AuthModal";
 import { ChatPanel } from "./components/ChatPanel";
+import { CliReferencePanel } from "./components/CliReferencePanel";
 import { Community } from "./components/Community";
 import { EvidencePanel } from "./components/EvidencePanel";
 import { Hero } from "./components/Hero";
@@ -104,6 +105,7 @@ export default function App() {
           onSignOut={signOut}
         />
         <Hero />
+        <CliReferencePanel />
         <main className={inQueryMode ? "layout" : "assistant-only"}>
           <ChatPanel
             onStart={() => setVerifyState("running")}
