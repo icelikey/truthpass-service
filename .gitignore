@@ -13,3 +13,5 @@ coverage/
 .playwright-mcp/
 .spec-workflow/
 .wallet-tools/
+
+.vercel
