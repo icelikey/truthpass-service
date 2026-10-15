@@ -19,6 +19,7 @@ import { getBotChainConfig } from "./chain-config.js";
 import { ConsumerParticipationRegistry } from "./consumer.js";
 import { replayFishOilFlow } from "./replay.js";
 import { loadLocalEnv } from "./jev/http-provider.js";
+import { getDatabasePool, persistenceEnabled } from "./data/persistence.js";
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const WEB_ROOT = join(PROJECT_ROOT, "web-demo");
@@ -71,7 +72,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type, authorization, x-truthpass-agent",
+    "access-control-allow-headers": "content-type, authorization, x-truthpass-agent, x-truthpass-tenant, x-truthpass-request-id",
   });
   response.end(payload);
 }
@@ -163,37 +164,107 @@ export async function getMainnetStatus(): Promise<Record<string, unknown>> {
 
 type RegisteredAgent = {
   agentId: string;
+  tenantId: string;
   name: string;
   capabilities: string[];
   publicKey?: string;
   registrationId: string;
   registeredAt: string;
-  dataClass: "demo/synthetic";
+  dataClass: "demo/synthetic" | "external";
 };
 
 const registeredAgents = new Map<string, RegisteredAgent>();
+let agentRegistryTableReady: Promise<void> | undefined;
+
+function agentRegistryMode(): "postgres" | "memory" {
+  return persistenceEnabled() ? "postgres" : "memory";
+}
+
+async function ensureAgentRegistryTable(): Promise<void> {
+  if (!persistenceEnabled()) return;
+  agentRegistryTableReady ??= getDatabasePool().query(
+    `create table if not exists truthpass_agent_registry (
+       agent_id text not null,
+       tenant_id text not null,
+       name text not null,
+       capabilities text[] not null,
+       public_key text,
+       registration_id text not null,
+       registered_at timestamptz not null,
+       data_class text not null,
+       updated_at timestamptz not null default now(),
+       primary key (tenant_id, agent_id)
+     )`,
+  ).then(() => undefined);
+  await agentRegistryTableReady;
+}
+
+async function persistAgentRegistration(record: RegisteredAgent): Promise<void> {
+  registeredAgents.set(record.tenantId + ":" + record.agentId, record);
+  if (!persistenceEnabled()) return;
+  await ensureAgentRegistryTable();
+  await getDatabasePool().query(
+    `insert into truthpass_agent_registry (agent_id, tenant_id, name, capabilities, public_key, registration_id, registered_at, data_class)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict (tenant_id, agent_id) do update set name = excluded.name,
+       capabilities = excluded.capabilities, public_key = excluded.public_key,
+       registration_id = excluded.registration_id, registered_at = excluded.registered_at,
+       data_class = excluded.data_class, updated_at = now()`,
+    [record.agentId, record.tenantId, record.name, record.capabilities, record.publicKey ?? null, record.registrationId, record.registeredAt, record.dataClass],
+  );
+}
+
+async function listRegisteredAgents(): Promise<RegisteredAgent[]> {
+  if (!persistenceEnabled()) return [...registeredAgents.values()];
+  await ensureAgentRegistryTable();
+  const result = await getDatabasePool().query(
+    `select agent_id, tenant_id, name, capabilities, public_key, registration_id, registered_at, data_class
+     from truthpass_agent_registry order by registered_at, agent_id`,
+  );
+  return result.rows.map((row) => ({
+    agentId: String(row.agent_id),
+    tenantId: String(row.tenant_id),
+    name: String(row.name),
+    capabilities: Array.isArray(row.capabilities) ? row.capabilities.map(String) : [],
+    publicKey: row.public_key ? String(row.public_key) : undefined,
+    registrationId: String(row.registration_id),
+    registeredAt: new Date(String(row.registered_at)).toISOString(),
+    dataClass: row.data_class === "external" ? "external" : "demo/synthetic",
+  }));
+}
 
 function normalizeAgentRegistration(body: Record<string, unknown>): Omit<RegisteredAgent, "registrationId" | "registeredAt" | "dataClass"> {
   const agentId = typeof body.agentId === "string" ? body.agentId.trim() : "";
+  const tenantId = typeof body.tenantId === "string" && body.tenantId.trim() ? body.tenantId.trim() : "demo";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const capabilities = Array.isArray(body.capabilities)
     ? body.capabilities.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 32)
     : [];
   const publicKey = typeof body.publicKey === "string" && body.publicKey.trim().length > 0 ? body.publicKey.trim() : undefined;
   if (!/^[A-Za-z0-9._:-]{3,128}$/.test(agentId)) throw new Error("agentId must be 3-128 characters using letters, digits, ., _, :, or -");
+  if (!/^[A-Za-z0-9._:-]{2,128}$/.test(tenantId)) throw new Error("tenantId must be 2-128 characters using letters, digits, ., _, :, or -");
   if (!name || name.length > 128) throw new Error("name must be 1-128 characters");
   if (capabilities.length === 0) throw new Error("capabilities must contain at least one value");
   if (publicKey && publicKey.length > 2048) throw new Error("publicKey is too long");
-  return { agentId, name, capabilities, publicKey };
+  return { agentId, tenantId, name, capabilities, publicKey };
 }
 
 async function buildAgentRegistration(body: Record<string, unknown>): Promise<RegisteredAgent> {
   const input = normalizeAgentRegistration(body);
   const registeredAt = new Date().toISOString();
-  const registrationId = await sha256("truthpass:agent-registration:" + input.agentId + ":" + registeredAt);
-  const record: RegisteredAgent = { ...input, registrationId, registeredAt, dataClass: "demo/synthetic" };
-  registeredAgents.set(input.agentId, record);
+  const registrationId = await sha256("truthpass:agent-registration:" + input.tenantId + ":" + input.agentId + ":" + registeredAt);
+  const dataClass = process.env.TRUTHPASS_AGENT_DATA_CLASS === "external" ? "external" : "demo/synthetic";
+  const record: RegisteredAgent = { ...input, registrationId, registeredAt, dataClass };
+  await persistAgentRegistration(record);
   return record;
+}
+
+
+function agentRegistryAuthorized(request: IncomingMessage): { authorized: boolean; authMode: "configured" | "unconfigured" } {
+  const expected = process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN?.trim();
+  if (!expected) return { authorized: true, authMode: "unconfigured" };
+  const authorization = typeof request.headers.authorization === "string" ? request.headers.authorization : "";
+  return { authorized: authorization === "Bearer " + expected, authMode: "configured" };
 }
 
 function buildConsumerSummary(inspection: Record<string, unknown>): string {
@@ -202,6 +273,21 @@ function buildConsumerSummary(inspection: Record<string, unknown>): string {
   const jev = inspection.jev && typeof inspection.jev === "object" ? inspection.jev as Record<string, unknown> : {};
   const route = typeof jev.route === "string" ? jev.route : "等待证据路由";
   return status + "；" + dataClass + "；Agent 路由：" + route + "。最终结论来自确定性规则，模型只负责解释。";
+}
+
+
+function publicChainForInspection(inspection: Record<string, unknown>): Record<string, unknown> {
+  const raw = inspection.chain && typeof inspection.chain === "object" ? inspection.chain as Record<string, unknown> : {};
+  if (inspection.dataClass !== "demo/synthetic") return raw;
+  if (raw.status !== "mainnet_receipts_verified" && raw.lifecycle !== "anchored") return raw;
+  return {
+    ...raw,
+    anchored: false,
+    status: "replay_verified",
+    lifecycle: "replay_verified",
+    source: "historical_replay",
+    reason: "demo/synthetic 历史回放，不代表当前现场消费者交易。",
+  };
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -393,7 +479,7 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
     response.writeHead(204, {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "content-type, authorization, x-truthpass-agent",
+      "access-control-allow-headers": "content-type, authorization, x-truthpass-agent, x-truthpass-tenant, x-truthpass-request-id",
       "access-control-max-age": "600",
     });
     response.end();
@@ -411,8 +497,10 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
       schemaVersion: "truthpass.agent.manifest.v1",
       service: "truthpass",
       name: "TruthPass Consumer Agent Gateway",
-      version: "0.10.0",
+      version: "1.4.0",
       status: "ready",
+      agentMode: "deterministic_fallback",
+      authMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: baseUrl,
       capabilities: ["agent.register", "consumer.inspect", "cli.inspect", "jev.route", "chain.status", "consumer.feedback", "wallet.prepare"],
@@ -448,11 +536,17 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
   }
 
   if (request.method === "POST" && url.pathname === "/api/agent/register") {
+    const access = agentRegistryAuthorized(request);
+    if (!access.authorized) return sendJson(response, 401, { error: "AGENT_REGISTRATION_AUTH_REQUIRED" }), true;
     const body = await readJson(request);
+    const tenantHeader = typeof request.headers["x-truthpass-tenant"] === "string" ? request.headers["x-truthpass-tenant"] : "";
+    if (tenantHeader && body.tenantId === undefined) body.tenantId = tenantHeader;
     const record = await buildAgentRegistration(body);
     return sendJson(response, 201, {
       schemaVersion: "truthpass.agent.registration.v1",
-      status: "registered_local",
+      status: agentRegistryMode() === "postgres" ? "registered_persistent" : "registered_local",
+      authMode: access.authMode,
+      registryMode: agentRegistryMode(),
       dataClass: record.dataClass,
       agent: record,
       chainStatus: "not_submitted",
@@ -461,11 +555,16 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
   }
 
   if (request.method === "GET" && url.pathname === "/api/agent/register") {
+    const access = agentRegistryAuthorized(request);
+    if (!access.authorized) return sendJson(response, 401, { error: "AGENT_REGISTRATION_AUTH_REQUIRED" }), true;
+    const agents = await listRegisteredAgents();
     return sendJson(response, 200, {
       schemaVersion: "truthpass.agent.registry.v1",
-      dataClass: "demo/synthetic",
-      count: registeredAgents.size,
-      agents: [...registeredAgents.values()],
+      dataClass: agents.some((agent) => agent.dataClass === "external") ? "external" : "demo/synthetic",
+      registryMode: agentRegistryMode(),
+      authMode: access.authMode,
+      count: agents.length,
+      agents,
       chainStatus: "not_submitted",
     }), true;
   }
@@ -482,7 +581,7 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
       return sendJson(response, 200, {
         batchId,
         journey: (inspection.product as Record<string, unknown> | undefined)?.productionProcess ?? inspection.batch ?? [],
-        chain: inspection.chain,
+        chain: publicChainForInspection(inspection),
       }), true;
     }
     if (segments[3] === "evidence-link") {
@@ -490,7 +589,7 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
         batchId,
         evidenceHash: (inspection.quality as Record<string, unknown> | undefined)?.evidenceHash ?? (inspection.verification as Record<string, unknown> | undefined)?.evidenceHash ?? null,
         verification: inspection.verification,
-        chain: inspection.chain,
+        chain: publicChainForInspection(inspection),
       }), true;
     }
     if (segments[3] === "metrics") {
@@ -622,7 +721,7 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
       ],
       product: inspection.product,
       verification: inspection.verification,
-      chain: inspection.chain,
+      chain: publicChainForInspection(inspection),
       jevState: inspection.jev,
     }), true;
   }
@@ -707,7 +806,7 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
       status: inspection.status,
       verification: inspection.verification,
       jev: inspection.jev,
-      chain: inspection.chain,
+      chain: publicChainForInspection(inspection),
       summary: buildConsumerSummary(inspection),
       publicDataBoundary: inspection.publicDataBoundary,
     }), true;
@@ -740,16 +839,20 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
     const plan = await anchorPlan(batchId, "mainnet");
     const chain = await getMainnetStatus();
     const replay = await loadReplayManifest();
+    const replayData = verification && typeof verification === "object" ? verification as Record<string, unknown> : {};
+    const replayIsSynthetic = replayData.dataClass === "demo/synthetic";
     const anchor = chain.anchored && replay ? {
       ...plan,
       ...replay,
       command: "replay",
-      anchorStatus: "anchored",
-      lifecycle: "anchored",
+      anchorStatus: replayIsSynthetic ? "replay_verified" : "mainnet_receipt_verified",
+      lifecycle: replayIsSynthetic ? "replay_verified" : "anchored",
       requestId: replay.ids?.requestId ?? plan.requestId,
       evidenceRoot: replay.ids?.evidenceRoot ?? plan.evidenceRoot,
       txHash: replay.events?.[0]?.txHash ?? null,
-      reason: "主网业务 receipt 已确认；网页读取公开 manifest，不把部署回执当作业务回执。",
+      reason: replayIsSynthetic
+        ? "当前页面读取的是 demo/synthetic 历史回放；不能替代现场消费者交易 receipt。"
+        : "主网业务 receipt 已确认；网页读取公开 manifest。",
     } : plan;
     return sendJson(response, 200, { verification, anchor, chain }), true;
   }

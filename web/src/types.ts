@@ -101,9 +101,15 @@ export type ChatLineClass =
   | "disclaimer";
 
 export interface ChatEvent {
-  kind: "begin" | "line" | "done";
+  kind: "begin" | "meta" | "line" | "done";
   cls?: ChatLineClass;
   text?: string;
+  agentMode?: "model_assisted" | "deterministic_fallback";
+  serviceStatus?: "model_assisted" | "deterministic_fallback" | "provider_unavailable" | "rate_limited" | "maintenance";
+  dataMode?: "demo/synthetic" | "external";
+  batchId?: string | null;
+  traceId?: string;
+  sources?: string[];
 }
 
 export interface ChatLine {

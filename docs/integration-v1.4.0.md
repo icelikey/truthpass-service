@@ -3,7 +3,7 @@
 > 文档版本：v1.4.0
 > 状态：当前生效（基础模块）
 > 最近修改：2026-10-15
-> 修改摘要：合并队友 Agent/CLI/CFI 能力，统一 Vercel API、钱包交易和旧观察台入口，并明确 Demo 状态边界。
+> 修改摘要：合并 Agent/CLI/CFI 能力，增加受保护协作入口、确定性 Agent 兜底和持久化注册边界，并统一 Demo、回放与现场交易状态。
 > 影响范围：协议类型、schema/hash、公共 API、消费者 Agent、跨品类政策注册
 > 队友下一步：接入真实第三方机构签名、密钥注册与吊销检查，并把匿名反馈锚定到公开信誉回流流程。
 
@@ -27,6 +27,7 @@ v1.4.0 把 TruthPass 的公共入口从单一鱼油演示扩展为可发现、�
   - `POST /api/consumer/credentials`
   - `POST /api/consumer/feedback`
   - `GET /api/cli/explain?batchId={batchId}`
+  - `POST /api/agent/v1/collaborate`（受保护的三类 Agent 协作入口）
   - `GET /api/cli/reference/manifest`
   - `GET /api/cli/reference/products`
   - `GET /api/cli/reference/products/{productId}`
@@ -58,7 +59,7 @@ v1.4.0 把 TruthPass 的公共入口从单一鱼油演示扩展为可发现、�
 
 - 真实生产模式的第三方机构签名验证、密钥注册、nonce 防重放和吊销检查仍未替代演示兼容字段。
 - 反馈的公共信誉回流、仲裁撤销和链上 receipt 尚未在本版本声称完成；当前 API 返回 `chainStatus: anchor_pending`。
-- ProductPolicy 注册目前是进程内注册表，尚未接入持久化治理存储和多方审批。
+- ProductPolicy 注册目前是进程内注册表，尚未接入持久化治理存储和多方审批；Agent 注册已支持可选 Postgres 持久化，但仍需企业租户、OIDC/mTLS 和权限审批。
 - 匿名凭证、反馈和会话交易目前仍以进程内注册表为主；配置 Supabase/Postgres 后才能获得跨 Vercel 实例的持久化一致性。
 - 真实非部署钱包的 `purchase → contribution → openChallenge` 主网现场交易仍需由评委钱包完成并回填 receipt。
 

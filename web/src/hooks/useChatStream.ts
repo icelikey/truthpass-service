@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { postChat } from "../api";
-import type { ChatLine, OrderCard, RecommendItem } from "../types";
+import type { ChatEvent, ChatLine, OrderCard, RecommendItem } from "../types";
 
 export interface ChatMessage {
   id: string;
@@ -10,6 +10,7 @@ export interface ChatMessage {
   error?: string;
   recommendations?: RecommendItem[];
   order?: OrderCard;
+  meta?: Pick<ChatEvent, "agentMode" | "serviceStatus" | "dataMode" | "batchId" | "traceId" | "sources">;
 }
 
 let seq = 0;
@@ -52,6 +53,8 @@ export function useChatStream() {
           (event) => {
             if (event.kind === "begin") {
               patch(agentId, (m) => ({ ...m, lines: [] }));
+            } else if (event.kind === "meta") {
+              patch(agentId, (m) => ({ ...m, meta: event }));
             } else if (event.kind === "line" && event.cls && event.text) {
               patch(agentId, (m) => {
                 const last = m.lines[m.lines.length - 1];

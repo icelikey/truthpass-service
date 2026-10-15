@@ -20,9 +20,9 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
   return async (invocation) => {
     const sanitized = sanitizeInput(invocation.input);
     if (sanitized.sourceIds.size === 0) return emptyOutput(invocation, sanitized.batchId);
-    const apiKey = options.apiKey ?? process.env.AGENT_API_KEY;
-    const model = options.model ?? process.env.AGENT_MODEL;
-    const baseUrl = options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.stepfun.com/step_plan/v1";
+    const apiKey = (options.apiKey ?? process.env.AGENT_API_KEY)?.trim();
+    const model = (options.model ?? process.env.AGENT_MODEL)?.trim();
+    const baseUrl = (options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.stepfun.com/step_plan/v1").trim();
     if (!apiKey || !model) throw new Error("Agent 模型未配置：需要 AGENT_API_KEY 和 AGENT_MODEL");
 
     const response = await fetchImpl(completionsEndpoint(baseUrl), {
@@ -264,4 +264,31 @@ function emptyOutput(invocation: AgentInvocation, batchId: string): unknown {
   return invocation.role === "consumer"
     ? { schemaVersion: "agent.output.v1", role: invocation.role, batchId, selectedFactIds: [] }
     : { schemaVersion: "agent.output.v1", role: invocation.role, batchId, findings: [] };
+}
+
+
+/**
+ * Safe local invoker used when no external model is configured.
+ * It keeps the Agent contract executable without inventing facts: evidence roles
+ * return no model findings and the consumer role may select only existing facts.
+ */
+export function createDeterministicAgentInvoker(): AgentInvoker {
+  return async (invocation) => {
+    if (invocation.role === "consumer") {
+      const input = invocation.input as Extract<AgentInput, { role: "consumer" }>;
+      return {
+        schemaVersion: "agent.output.v1",
+        role: "consumer",
+        batchId: input.batchId,
+        selectedFactIds: input.evidenceCard.facts.map((_, index) => "F" + index),
+      };
+    }
+    const input = invocation.input as Extract<AgentInput, { role: "production" | "inspection" }>;
+    return {
+      schemaVersion: "agent.output.v1",
+      role: invocation.role,
+      batchId: input.view.context.batch.batchId,
+      findings: [],
+    };
+  };
 }

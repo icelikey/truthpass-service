@@ -346,6 +346,7 @@ body {
   border: 1px solid rgba(125, 200, 232, 0.22);
   border-bottom-right-radius: 4px;
 }
+.chat-meta { margin: 6px 12px 0; color: #77a9ae; font-size: 11px; letter-spacing: .2px; }
 .msg.agent .msg-bubble {
   background: rgba(8, 22, 40, 0.75);
   border: 1px solid var(--line-soft);

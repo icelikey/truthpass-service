@@ -55,6 +55,56 @@ test("agent manifest advertises the forwarded public origin and wallet action", 
   }
 });
 
+
+test("synthetic replay is exposed as replay_verified rather than a live receipt", async () => {
+  const server = createWebServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/consumer/inspection?batchId=FO-2026-001`);
+    const body = await response.json() as Record<string, any>;
+    assert.equal(response.status, 200);
+    assert.equal(body.dataClass, "demo/synthetic");
+    assert.equal(body.chain.status, "replay_verified");
+    assert.equal(body.chain.lifecycle, "replay_verified");
+    assert.equal(body.chain.anchored, false);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("Agent registration is bearer-protected when configured", async () => {
+  const previous = process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN;
+  process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN = "registration-test-token";
+  const server = createWebServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const denied = await fetch(`http://127.0.0.1:${address.port}/api/agent/register`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "external-agent", tenantId: "tenant-a", name: "External Agent", capabilities: ["consumer.inspect"] }),
+    });
+    assert.equal(denied.status, 401);
+
+    const registered = await fetch(`http://127.0.0.1:${address.port}/api/agent/register`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer registration-test-token" },
+      body: JSON.stringify({ agentId: "external-agent", tenantId: "tenant-a", name: "External Agent", capabilities: ["consumer.inspect"] }),
+    });
+    const responseBody = await registered.json() as Record<string, any>;
+    assert.equal(registered.status, 201);
+    assert.equal(responseBody.status, "registered_local");
+    assert.equal(responseBody.agent.tenantId, "tenant-a");
+    assert.equal(responseBody.authMode, "configured");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (previous === undefined) delete process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN;
+    else process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN = previous;
+  }
+});
+
 test("consumer wallet actions target the configured gateway", async () => {
   const previous = process.env.TRUTHPASS_CONSUMER_GATEWAY_ADDRESS;
   process.env.TRUTHPASS_CONSUMER_GATEWAY_ADDRESS = "0x2222222222222222222222222222222222222222";

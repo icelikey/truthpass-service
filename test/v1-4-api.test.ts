@@ -106,3 +106,76 @@ test("v1.4 anonymous credential and feedback APIs keep the nonce out of response
     assert.match(feedback.feedbackId, /^0x[0-9a-f]{64}$/);
   });
 });
+
+
+test("Agent manifest and collaboration expose explicit runtime mode", async () => {
+  await withServer(async (baseUrl) => {
+    const manifestResponse = await fetch(baseUrl + "/api/agent/manifest");
+    const manifest = await manifestResponse.json() as Record<string, any>;
+    assert.equal(manifestResponse.status, 200);
+    assert.equal(manifest.agentMode, "deterministic_fallback");
+    assert.equal(manifest.authMode, "unconfigured_demo");
+    assert.match(manifest.endpoints.collaboration, /\/api\/agent\/v1\/collaborate$/);
+    assert.match(manifest.endpoints.registration, /\/api\/agent\/register$/);
+
+    const collaborationResponse = await fetch(baseUrl + "/api/agent/v1/collaborate", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-request-id": "test-request-001" },
+      body: JSON.stringify({ batchId: "FO-2026-001", question: "请解释证据状态。", tenantId: "demo" }),
+    });
+    const collaboration = await collaborationResponse.json() as Record<string, any>;
+    assert.equal(collaborationResponse.status, 200);
+    assert.equal(collaboration.schemaVersion, "truthpass.agent.collaboration.v1");
+    assert.equal(collaboration.agentMode, "deterministic_fallback");
+    assert.equal(collaboration.dataMode, "demo/synthetic");
+    assert.equal(collaboration.traceId, "test-request-001");
+    assert.ok(Array.isArray(collaboration.selectedFacts));
+  });
+});
+
+
+test("customer service exposes status and SSE runtime metadata", async () => {
+  await withServer(async (baseUrl) => {
+    const statusResponse = await fetch(baseUrl + "/api/agent/status");
+    const status = await statusResponse.json() as Record<string, any>;
+    assert.equal(statusResponse.status, 200);
+    assert.equal(status.schemaVersion, "truthpass.agent.status.v1");
+    assert.equal(status.status, "degraded");
+    assert.equal(status.agentMode, "deterministic_fallback");
+    assert.equal(status.fallbackAvailable, true);
+
+    const chatResponse = await fetch(baseUrl + "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-request-id": "chat-test-001" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "你好" }] }),
+    });
+    const stream = await chatResponse.text();
+    assert.equal(chatResponse.status, 200);
+    assert.match(stream, /"kind":"meta"/);
+    assert.match(stream, /"serviceStatus":"deterministic_fallback"/);
+    assert.match(stream, /"traceId":"chat-test-001"/);
+    assert.match(stream, /"kind":"done"/);
+  });
+});
+
+
+test("customer service rate limits repeated session requests", async () => {
+  await withServer(async (baseUrl) => {
+    let lastStatus = 200;
+    for (let index = 0; index < 31; index += 1) {
+      const response = await fetch(baseUrl + "/api/agent/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "198.51.100.33",
+          "x-truthpass-session": "rate-test-session",
+        },
+        body: JSON.stringify({ messages: [{ role: "user", content: "你好" }] }),
+      });
+      lastStatus = response.status;
+      if (lastStatus === 429) break;
+      await response.text();
+    }
+    assert.equal(lastStatus, 429);
+  });
+});

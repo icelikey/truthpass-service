@@ -44,9 +44,9 @@ export async function answerWithKnowledge(
   if (chunks.length === 0) {
     return { text: "当前知识库没有登记任何知识块，无法回答。可提供批次号，我会检查系统是否登记了对应证据。", citations: [], grounded: false };
   }
-  const apiKey = options.apiKey ?? process.env.AGENT_API_KEY;
-  const model = options.model ?? process.env.AGENT_MODEL;
-  const baseUrl = options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.stepfun.com/step_plan/v1";
+  const apiKey = (options.apiKey ?? process.env.AGENT_API_KEY)?.trim();
+  const model = (options.model ?? process.env.AGENT_MODEL)?.trim();
+  const baseUrl = (options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.stepfun.com/step_plan/v1").trim();
   const fetchImpl = options.fetchImpl ?? fetch;
   if (!apiKey || !model) {
     return deterministicAnswer(chunks, "StepFun 未配置，以下为知识库登记摘录。");

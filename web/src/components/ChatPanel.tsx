@@ -74,6 +74,7 @@ function MessageView({
   }
   return (
     <div className="msg agent">
+      {message.meta && <div className="chat-meta">{message.meta.agentMode === "model_assisted" ? "模型客服" : "确定性兜底"} · {message.meta.dataMode ?? "demo/synthetic"}{message.meta.serviceStatus === "provider_unavailable" ? " · 模型暂不可用" : ""}</div>}
       <div className="msg-bubble">
         {message.lines.map((line, i) => (
           <LineView key={i} line={line} />

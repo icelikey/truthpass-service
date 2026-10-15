@@ -22,9 +22,9 @@ import { TrustedIssuerKeyRegistry, type TrustedIssuerPublicKey } from "./src/sec
 import { resolveStaticFilePath } from "./src/static-path.js";
 import { createPostgresReplayGuard, persistConsumerRun, persistenceEnabled } from "./src/data/persistence.js";
 import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from "./src/data/postgres-reader.js";
-import { answerConsumerQuestion } from "./src/agents/consumer-assistant.js";
+import { answerConsumerQuestion, type ConsumerEvidenceSnapshot } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
-import { createCompatibleAgentInvoker } from "./src/agents/compatible-invoker.js";
+import { createCompatibleAgentInvoker, createDeterministicAgentInvoker } from "./src/agents/compatible-invoker.js";
 import { runCliInspect } from "./src/integrations/cli-verifier.js";
 import { BOT_CHAIN_MAINNET, inspectBotChain } from "./src/integrations/botchain-config.js";
 import { getBotChainConfig } from "./src/chain-config.js";
@@ -799,9 +799,29 @@ function extractBatchId(text: string): string {
   return "";
 }
 
-function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>): void {
+
+type ChatServiceStatus = "model_assisted" | "deterministic_fallback" | "provider_unavailable" | "rate_limited" | "maintenance";
+
+type ChatReplyResult = {
+  lines: Array<{ cls: string; text: string }>;
+  status: ChatServiceStatus;
+  dataMode?: "demo/synthetic" | "external";
+  sources?: string[];
+};
+
+type ChatMeta = {
+  agentMode: "model_assisted" | "deterministic_fallback";
+  serviceStatus: ChatServiceStatus;
+  dataMode: "demo/synthetic" | "external";
+  batchId: string | null;
+  traceId: string;
+  sources?: string[];
+};
+
+function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   res.write("data: " + JSON.stringify({ kind: "begin", intent }) + "\n\n");
+  if (meta) res.write("data: " + JSON.stringify({ kind: "meta", ...meta }) + "\n\n");
   let i = 0;
   const next = () => {
     if (res.writableEnded || res.destroyed) return;
@@ -821,13 +841,25 @@ async function streamChatWithReply(
   res: ServerResponse,
   intent: string,
   script: Array<{ cls: string; text: string }>,
-  reply: Promise<Array<{ cls: string; text: string }>>,
+  reply: Promise<ChatReplyResult>,
+  baseMeta: Omit<ChatMeta, "agentMode" | "serviceStatus" | "dataMode" | "sources"> & { dataMode?: "demo/synthetic" | "external" },
 ): Promise<void> {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (event: unknown) => res.write("data: " + JSON.stringify(event) + "\n\n");
   send({ kind: "begin", intent });
+  const result = await reply;
+  console.info(JSON.stringify({ event: "customer_service_response", intent, traceId: baseMeta.traceId, batchId: baseMeta.batchId, serviceStatus: result.status, dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic" }));
+  send({
+    kind: "meta",
+    agentMode: result.status === "model_assisted" ? "model_assisted" : "deterministic_fallback",
+    serviceStatus: result.status,
+    dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
+    batchId: baseMeta.batchId,
+    traceId: baseMeta.traceId,
+    ...(result.sources?.length ? { sources: result.sources } : {}),
+  });
   for (const line of script) send({ kind: "line", ...line });
-  for (const line of await reply) {
+  for (const line of result.lines) {
     if (res.writableEnded || res.destroyed) return;
     send({ kind: "line", ...line });
   }
@@ -835,118 +867,225 @@ async function streamChatWithReply(
   res.end();
 }
 
-async function freeChatReply(question: string): Promise<Array<{ cls: string; text: string }>> {
-  const apiKey = process.env.AGENT_API_KEY;
-  const model = process.env.AGENT_MODEL;
-  if (!apiKey || !model) return [];
-  const baseUrl = (process.env.AGENT_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+
+async function callCustomerModel(systemPrompt: string, userPrompt: string, sources: string[]): Promise<ChatReplyResult> {
+  const apiKey = process.env.AGENT_API_KEY?.trim();
+  const model = process.env.AGENT_MODEL?.trim();
+  if (!apiKey || !model) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
+  const baseUrl = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
   const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
   try {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: "你是 TruthPass 鱼油助手，也是随产品交付的服用助理。请简洁友好地回答用户，可补充鱼油通用知识，不要编造检测值或疗效承诺；用户想溯源时，请让ta提供批次号（001-010）。纯文本，不要 Markdown，不超过 5 句。",
-          },
-          { role: "user", content: question },
-        ],
-        temperature: 0.2,
-      }),
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], temperature: 0.2, max_tokens: 400 }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
     const content = data.choices?.[0]?.message?.content;
-    return typeof content === "string" && content.trim() ? [{ cls: "plain", text: content.trim() }] : [];
+    if (typeof content !== "string" || !content.trim()) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
+    return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
   } catch {
-    return [];
+    return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
   }
 }
 
-async function demoConsumerChat(
-  batchId: string,
-  b: (typeof FISH_OIL_BATCHES)[string],
-  question: string,
-  res: ServerResponse,
-): Promise<void> {
-  const apiKey = process.env.AGENT_API_KEY;
-  const model = process.env.AGENT_MODEL;
-  const baseUrl = (process.env.AGENT_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
-  const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
-  const system = [
-    "你是 TruthPass 鱼油助手。请只依据下面的 demo 批次数据回答消费者问题，不要编造检测值或疗效承诺。",
-    `批次号：${batchId}`,
-    `商品：${b.name}`,
-    `产地：${b.origin}`,
-    `生产日期：${b.productionDate}`,
-    `验收结论：${b.passed ? "通过当前规则" : "未通过当前规则"}`,
-    `EPA+DHA：${b.epaDha}%（门槛 ≥70%）`,
-    `过氧化值：${b.peroxide} meq/kg（门槛 ≤5）`,
-    `冷链中断：${b.coldGap} 小时（门槛 ≤6）`,
-    "纯文本，不要 Markdown，不超过 5 句。",
-  ].join("\n");
-  const fallback = [
-    {
-      cls: "conclusion",
-      text: b.passed
-        ? `${b.name}（${batchId}）按当前规则通过验收。`
-        : `${b.name}（${batchId}）未通过验收，存在不达标指标。`,
-    },
-  ];
-  let reply: Promise<Array<{ cls: string; text: string }>> = Promise.resolve(fallback);
-  if (apiKey && model) {
-    reply = fetch(endpoint, {
-      method: "POST",
-      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: question },
-        ],
-        temperature: 0.2,
-      }),
-    })
-      .then(async (r) => {
-        if (!r.ok) return fallback;
-        const data = (await r.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-        const content = data.choices?.[0]?.message?.content;
-        return typeof content === "string" && content.trim()
-          ? [{ cls: "plain", text: content.trim() }]
-          : fallback;
-      })
-      .catch(() => fallback);
-  }
-  await streamChatWithReply(res, "consumer_evidence", [], reply);
+async function freeChatReply(question: string): Promise<ChatReplyResult> {
+  return callCustomerModel(
+    "你是 TruthPass 商品客服。只能依据提供的商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据时明确说不知道，并建议转人工。回答不超过 5 句纯文本。",
+    question,
+    ["customer_policy"],
+  );
 }
 
-async function consumerChat(batchId: string, question: string, res: ServerResponse): Promise<void> {
+async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[string], question: string): Promise<ChatReplyResult> {
+  let collaboration: Record<string, unknown> | undefined;
+  try {
+    collaboration = await runPublicAgentCollaboration(batchId, question);
+  } catch {
+    collaboration = undefined;
+  }
+  const selectedFacts = Array.isArray(collaboration?.selectedFacts) ? collaboration.selectedFacts.filter((item): item is string => typeof item === "string") : [];
+  const verification = collaboration?.verification && typeof collaboration.verification === "object" ? collaboration.verification as Record<string, unknown> : {};
+  const assessment = verification.assessment && typeof verification.assessment === "object" ? verification.assessment as Record<string, unknown> : {};
+  const fallbackText = selectedFacts.length
+    ? "当前证据摘要：" + selectedFacts.join("；") + "。数据模式为 demo/synthetic，详细结论仍以确定性验证结果为准。"
+    : b.passed
+      ? b.name + "（" + batchId + "）按当前规则通过验收；当前数据为 demo/synthetic，不能替代真实商品认证。"
+      : b.name + "（" + batchId + "）未通过当前规则，建议转人工复核。";
+  const modelResult = await callCustomerModel(
+    "你是 TruthPass 的商品客服。只能使用下面的确定性验证结果和证据卡回答。不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；如果资料不足，明确说资料不足。回答不超过 5 句纯文本。",
+    JSON.stringify({
+      batchId,
+      dataMode: "demo/synthetic",
+      evidenceCard: collaboration?.evidenceCard ?? null,
+      selectedFacts,
+      verification: { status: verification.status ?? (b.passed ? "accepted" : "rejected"), reasons: assessment.reasons ?? verification.reasons ?? [] },
+      deterministicFacts: { product: b.name, epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, coldChainGapHours: b.coldGap },
+      question,
+    }),
+    ["evidence_card", "deterministic_verifier"],
+  );
+  return modelResult.lines.length ? modelResult : { ...modelResult, lines: [{ cls: "conclusion", text: fallbackText }] };
+}
+
+async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse): Promise<void> {
+  const traceId = requestTraceId(req);
+  const rate = consumeChatRateLimit(req);
+  if (!rate.allowed) {
+    console.info(JSON.stringify({ event: "customer_service_rate_limited", traceId, status: "rate_limited" }));
+    res.writeHead(429, { "Content-Type": "application/json; charset=utf-8", "Retry-After": String(rate.retryAfterSeconds), "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "CHAT_RATE_LIMITED", status: "rate_limited", traceId, retryAfterSeconds: rate.retryAfterSeconds }));
+    return;
+  }
+
   if (!batchId) {
     const available = Object.keys(FISH_OIL_BATCHES).filter((id) => repository.getBatch(id));
-    const fallback = [
-      {
-        cls: "plain",
-        text: available.length
-          ? "我是你的 TruthPass 鱼油助手。需要补货、查询批次或了解鱼油知识时告诉我即可，溯源请提供批次号（001-010）。"
-          : "请提供商品名和批次号，我会先检查系统是否登记了对应证据。",
-      },
-    ];
-    const reply = freeChatReply(question).then((lines) => (lines.length ? lines : fallback));
-    await streamChatWithReply(res, "consumer_query", [], reply);
+    const fallback: ChatReplyResult = {
+      lines: [{ cls: "plain", text: available.length ? "我是你的 TruthPass 商品助手。需要查询商品、批次或售后规则时告诉我即可；查询证据请提供批次号。" : "请提供商品名和批次号，我会先检查系统是否登记了对应证据。" }],
+      status: "deterministic_fallback",
+      dataMode: "demo/synthetic",
+      sources: ["customer_fallback"],
+    };
+    const reply = freeChatReply(question).then((result) => result.lines.length ? result : fallback);
+    await streamChatWithReply(res, "consumer_query", [], reply, { batchId: null, traceId });
     return;
   }
 
   const b = FISH_OIL_BATCHES[batchId];
   if (!b) {
-    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "系统没有找到批次 " + batchId + " 的已登记证据，不会用其他批次的数据代替。" }]);
+    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "系统没有找到批次 " + batchId + " 的已登记证据，不会用其他批次的数据代替。" }], {
+      agentMode: "deterministic_fallback",
+      serviceStatus: "deterministic_fallback",
+      dataMode: "demo/synthetic",
+      batchId,
+      traceId,
+      sources: ["batch_lookup"],
+    });
     return;
   }
-  await demoConsumerChat(batchId, b, question, res);
+
+  const reply = demoConsumerChat(batchId, b, question);
+  await streamChatWithReply(res, "consumer_evidence", [], reply, { batchId, traceId });
+}
+
+
+function agentMode(): "model_assisted" | "deterministic_fallback" {
+  return process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim() ? "model_assisted" : "deterministic_fallback";
+}
+
+
+function agentGatewayAuthorized(req: IncomingMessage): { authorized: boolean; authMode: "configured" | "unconfigured" } {
+  const expected = process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN?.trim();
+  if (!expected) return { authorized: true, authMode: "unconfigured" };
+  const header = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+  return { authorized: header === "Bearer " + expected, authMode: "configured" };
+}
+
+function requestTraceId(req: IncomingMessage): string {
+  const supplied = req.headers["x-truthpass-request-id"];
+  if (typeof supplied === "string" && /^[A-Za-z0-9._:-]{8,128}$/.test(supplied)) return supplied;
+  return sha256Hex32("truthpass:agent-request:" + Date.now() + ":" + Math.random());
+}
+
+
+const chatRateLimits = new Map<string, { startedAt: number; count: number }>();
+const CHAT_RATE_WINDOW_MS = 60_000;
+const CHAT_RATE_LIMIT = 30;
+
+function customerServiceStatus(): "ready" | "degraded" {
+  return process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim() ? "ready" : "degraded";
+}
+
+function requestClientIdentifiers(req: IncomingMessage): string[] {
+  const forwarded = typeof req.headers["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : "";
+  const ip = forwarded || req.socket.remoteAddress || "unknown";
+  const session = typeof req.headers["x-truthpass-session"] === "string" && /^[A-Za-z0-9._:-]{3,128}$/.test(req.headers["x-truthpass-session"])
+    ? req.headers["x-truthpass-session"]
+    : "";
+  return session ? [`ip:${ip}`, `session:${session}`] : [`ip:${ip}`];
+}
+
+function consumeChatRateLimit(req: IncomingMessage): { allowed: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  let retryAfterSeconds = 0;
+  for (const key of requestClientIdentifiers(req)) {
+    const current = chatRateLimits.get(key);
+    if (!current || now - current.startedAt >= CHAT_RATE_WINDOW_MS) {
+      chatRateLimits.set(key, { startedAt: now, count: 1 });
+      continue;
+    }
+    if (current.count >= CHAT_RATE_LIMIT) {
+      retryAfterSeconds = Math.max(retryAfterSeconds, Math.ceil((CHAT_RATE_WINDOW_MS - (now - current.startedAt)) / 1000));
+      continue;
+    }
+    current.count += 1;
+  }
+  return { allowed: retryAfterSeconds === 0, retryAfterSeconds };
+}
+
+async function runPublicAgentCollaboration(batchId: string, question: string): Promise<Record<string, unknown>> {
+  const batch = repository.getBatch(batchId);
+  if (!batch) throw new Error("批次不存在: " + batchId);
+  const inspection = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+  const verification = inspection.verification;
+  const assessment = verification.assessment;
+  const decision: ConsumerEvidenceSnapshot["decision"] = verification.status === "accepted"
+    ? "accepted"
+    : verification.status === "missing_evidence"
+      ? "not_assessed"
+      : "rejected";
+  const snapshot: ConsumerEvidenceSnapshot = {
+    batchId,
+    dataMode: verification.dataClass,
+    decision,
+    decisionReasons: assessment?.reasons ?? verification.reasons ?? [],
+    evidence: verification.evidence.map((item) => {
+      const record = repository.getEvidence(item.evidenceId);
+      const signature = record?.payload.signatureValid === true ? "verified" : record?.payload.signatureValid === false ? "invalid" : "not_checked";
+      return {
+        evidenceId: item.evidenceId,
+        kind: item.kind as ConsumerEvidenceSnapshot["evidence"][number]["kind"],
+        issuerId: record?.issuerId ?? item.sourceKind,
+        sourceKind: item.sourceKind as ConsumerEvidenceSnapshot["evidence"][number]["sourceKind"],
+        status: item.status as ConsumerEvidenceSnapshot["evidence"][number]["status"],
+        dataMode: item.dataMode,
+        signature,
+      };
+    }),
+  };
+  const card = answerConsumerQuestion(question, snapshot);
+  const context = buildJevContext(repository, batchId);
+  const productionInput = { schemaVersion: "agent.input.v1" as const, role: "production" as const, view: buildJevRoleView(context, "production") };
+  const inspectionInput = {
+    schemaVersion: "agent.input.v1" as const,
+    role: "inspection" as const,
+    view: buildJevRoleView(context, "inspection"),
+    policy: getPolicySnapshot(policy.policyId, policy.version),
+  };
+  let effectiveMode = agentMode();
+  let collaboration: Awaited<ReturnType<typeof runAgentCollaboration>>;
+  try {
+    const invoker = effectiveMode === "model_assisted" ? invokeAgent : createDeterministicAgentInvoker();
+    collaboration = await runAgentCollaboration(productionInput, inspectionInput, question, card, invoker);
+  } catch (error) {
+    if (effectiveMode !== "model_assisted") throw error;
+    effectiveMode = "deterministic_fallback";
+    collaboration = await runAgentCollaboration(productionInput, inspectionInput, question, card, createDeterministicAgentInvoker());
+  }
+  return {
+    schemaVersion: "truthpass.agent.collaboration.v1",
+    batchId,
+    question,
+    agentMode: effectiveMode,
+    dataMode: verification.dataClass,
+    verifierVersion: assessment ? "deterministic-verifier-v1" : null,
+    verification,
+    evidenceCard: card,
+    selectedFacts: renderConsumerFacts(card, collaboration.consumer.selectedFactIds),
+    analyses: { production: collaboration.production, inspection: collaboration.inspection },
+  };
 }
 
 // ---------- 路由 ----------
@@ -960,7 +1099,23 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       version: "1.4.0",
       batchId: BATCH_ID,
       chainId: BOT_CHAIN_MAINNET.chainId,
+      customerServiceStatus: customerServiceStatus(),
+      customerAgentMode: agentMode(),
       dataClass: "demo/synthetic",
+    });
+    return true;
+  }
+
+  if (p === "/api/agent/status" && req.method === "GET") {
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.agent.status.v1",
+      status: customerServiceStatus(),
+      agentMode: agentMode(),
+      providerConfigured: Boolean(process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim()),
+      model: process.env.AGENT_MODEL?.trim() ?? null,
+      dataMode: "demo/synthetic",
+      fallbackAvailable: true,
+      chatEndpoint: "/api/agent/chat",
     });
     return true;
   }
@@ -972,10 +1127,13 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       service: "truthpass",
       name: "TruthPass Consumer Agent Gateway",
       version: "1.4.0",
-      status: "ready",
+      status: customerServiceStatus(),
+      agentMode: agentMode(),
+      authMode: process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN ? "bearer_token" : "unconfigured_demo",
+      registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["consumer.inspect", "cli.inspect", "cli.explain", "jev.route", "chain.status", "wallet.prepare", "wallet.broadcast", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
+      capabilities: ["agent.collaborate", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "chain.status", "wallet.prepare", "wallet.broadcast", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
       endpoints: {
         inspection: `${origin}/api/cli/inspect?batchId={batchId}`,
         explanation: `${origin}/api/cli/explain?batchId={batchId}`,
@@ -983,6 +1141,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         chainStatus: `${origin}/api/chain/status`,
         walletPrepare: `${origin}/api/wallet/prepare`,
         health: `${origin}/api/health`,
+        status: `${origin}/api/agent/status`,
+        collaboration: `${origin}/api/agent/v1/collaborate`,
+        registration: `${origin}/api/agent/register`,
         cfiManifest: `${origin}/api/cfi/manifest`,
         publicStandard: `${origin}/api/standards`,
       },
@@ -994,6 +1155,22 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       },
       publicDataBoundary: { rawReports: "off_chain", personalData: "off_chain", privateKeys: "off_chain" },
     });
+    return true;
+  }
+
+  if (p === "/api/agent/v1/collaborate" && req.method === "POST") {
+    const access = agentGatewayAuthorized(req);
+    if (!access.authorized) {
+      sendJson(res, 401, { error: "AGENT_AUTH_REQUIRED", message: "需要受保护的 Agent Gateway 令牌" });
+      return true;
+    }
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" && body.batchId.trim() ? body.batchId.trim().toUpperCase() : BATCH_ID;
+    const question = typeof body.question === "string" && body.question.trim() ? body.question.trim() : "请解释当前批次证据状态。";
+    const result = await runPublicAgentCollaboration(batchId, question);
+    const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"] : "";
+    const tenantId = headerTenant || (typeof body.tenantId === "string" ? body.tenantId : "demo");
+    sendJson(res, 200, { ...result, traceId: requestTraceId(req), authMode: access.authMode, tenantId });
     return true;
   }
 
@@ -1245,7 +1422,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       batchId,
       routeDecision: "route_to_rule",
       confidence: 0.94,
-      mode: "deterministic+jev",
+      mode: agentMode(),
+      modelAssisted: agentMode() === "model_assisted",
       passed: b.passed,
       epaDhaPercent: b.epaDha,
       peroxideValue: b.peroxide,
@@ -1431,7 +1609,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: unknown }> : [];
     const last = typeof messages[messages.length - 1]?.content === "string" ? messages[messages.length - 1].content as string : "";
     const requestedBatch = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
-    await consumerChat(requestedBatch || extractBatchId(last), last, res);
+    await consumerChat(req, requestedBatch || extractBatchId(last), last, res);
     return true;
   }
 
