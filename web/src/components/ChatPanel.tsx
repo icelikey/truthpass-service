@@ -52,16 +52,35 @@ function LineView({ line }: { line: ChatLine }) {
   }
 }
 
+function serviceStatusMeta(status?: string): { pill: string; cls: string; sse: string } | null {
+  switch (status) {
+    case "model_assisted":
+      return { pill: "model_assisted", cls: "verified", sse: "loading" };
+    case "deterministic_fallback":
+      return { pill: "deterministic_fallback", cls: "fallback", sse: "fallback" };
+    case "provider_unavailable":
+      return { pill: "provider unavailable", cls: "unavailable", sse: "unavailable" };
+    case "rate_limited":
+      return { pill: "rate limited", cls: "rate-limited", sse: "rate-limited" };
+    case "maintenance":
+      return { pill: "maintenance", cls: "unavailable", sse: "unavailable" };
+    default:
+      return null;
+  }
+}
+
 function MessageView({
   message,
   onOrder,
   onAnchorOrder,
+  onHandoff,
   txBusy,
   walletReady,
 }: {
   message: ChatMessage;
   onOrder: (item: RecommendItem) => void;
   onAnchorOrder: (order: OrderCard) => void;
+  onHandoff: () => void;
   txBusy: boolean;
   walletReady: boolean;
 }) {
@@ -72,15 +91,55 @@ function MessageView({
       </div>
     );
   }
+
+  const agentMode = message.meta?.agentMode;
+  const serviceStatus = message.meta?.serviceStatus ?? agentMode;
+  const dataMode = message.meta?.dataMode ?? "demo/synthetic";
+  const statusMeta = serviceStatusMeta(serviceStatus);
+  const isLoading = !message.done && message.lines.length === 0;
+  const showHandoff =
+    serviceStatus === "provider_unavailable" ||
+    serviceStatus === "rate_limited" ||
+    serviceStatus === "deterministic_fallback" ||
+    Boolean(message.error);
+
   return (
     <div className="msg agent">
-      {message.meta && <div className="chat-meta">{message.meta.agentMode === "model_assisted" ? "模型客服" : "确定性兜底"} · {message.meta.dataMode ?? "demo/synthetic"}{message.meta.serviceStatus === "provider_unavailable" ? " · 模型暂不可用" : ""}</div>}
+      <div className="chat-meta" aria-label="回答元信息">
+        <span className={`status-pill ${agentMode === "model_assisted" ? "verified" : "fallback"}`}>
+          {agentMode === "model_assisted" ? "model_assisted" : agentMode === "deterministic_fallback" ? "deterministic_fallback" : "Agent"}
+        </span>
+        <span className={`mode-badge ${dataMode === "external" ? "external" : ""}`}>{dataMode}</span>
+        {statusMeta && serviceStatus !== agentMode && (
+          <span className={`status-pill ${statusMeta.cls}`}>{statusMeta.pill}</span>
+        )}
+        {message.meta?.batchId && (
+          <span className="batch-id-chip"><code>{message.meta.batchId}</code></span>
+        )}
+      </div>
+
+      {isLoading && (
+        <div className="chat-sse-state loading" role="status">正在生成回答…</div>
+      )}
+      {!message.done && message.lines.length > 0 && (
+        <div className="chat-sse-state loading" role="status">流式输出中…</div>
+      )}
+      {message.done && statusMeta?.sse === "fallback" && (
+        <div className="chat-sse-state fallback" role="status">已切换确定性兜底，非模型实时判定。</div>
+      )}
+      {message.done && statusMeta?.sse === "unavailable" && (
+        <div className="chat-sse-state unavailable" role="status">模型服务暂不可用，请稍后重试或转人工。</div>
+      )}
+      {message.done && statusMeta?.sse === "rate-limited" && (
+        <div className="chat-sse-state rate-limited" role="status">请求过于频繁（rate limited），请稍后再问。</div>
+      )}
+
       <div className="msg-bubble">
         {message.lines.map((line, i) => (
           <LineView key={i} line={line} />
         ))}
         {!message.done && message.lines.length === 0 && (
-          <div className="thinking">TruthPass 正在思考中....</div>
+          <div className="thinking">TruthPass 正在整理证据与来源…</div>
         )}
         {message.recommendations && (
           <div className="recommend-list">
@@ -93,7 +152,9 @@ function MessageView({
                   <p>{item.reason}</p>
                   {item.expertise && <p className="recommend-expertise">专业提示：{item.expertise}</p>}
                 </div>
-                <button type="button" className="recommend-order" onClick={() => onOrder(item)}>补货</button>
+                <button type="button" className="recommend-order" aria-label={`为 ${item.batchId} 生成购买准备`} onClick={() => onOrder(item)}>
+                  购买准备
+                </button>
               </div>
             ))}
           </div>
@@ -104,27 +165,43 @@ function MessageView({
             <div className="order-info">
               <b>购买准备已生成 · {message.order.orderId}</b>
               <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
-              <span className="order-status">状态：{message.order.txHash ? "已链上锚定 (BOT Chain 677)" : "待商家结账 · anchor_pending"}</span>
+              <span className="order-status">
+                状态：{message.order.txHash ? "已有链上交易 receipt" : "待商家结账 · anchor_pending（尚未完成锚定）"}
+              </span>
               {message.order.txHash ? (
                 <a
                   href={message.order.explorerUrl ?? `https://scan.botchain.ai/tx/${message.order.txHash}`}
                   target="_blank"
                   rel="noreferrer"
                   className="order-chain-link"
+                  aria-label={`在区块浏览器核验交易 ${shortHex(message.order.txHash, 10, 6)}`}
                 >
-                  ✓ BOT Chain 交易 {shortHex(message.order.txHash, 10, 6)} · 区块浏览器核验 ↗
+                  BOT Chain 交易 {shortHex(message.order.txHash, 10, 6)} · 核验 ↗
                 </a>
               ) : (
                 <button
                   type="button"
                   className="order-anchor-btn"
+                  aria-label="使用钱包签名上链存证购买凭证"
                   disabled={!walletReady || txBusy}
                   onClick={() => onAnchorOrder(message.order!)}
                 >
-                  {txBusy ? "钱包签名上链中…" : "⛓️ 钱包签名上链存证 (BOT Chain 677)"}
+                  {txBusy ? "钱包签名中…" : "钱包签名上链存证"}
                 </button>
               )}
             </div>
+          </div>
+        )}
+        {message.meta?.sources && message.meta.sources.length > 0 && (
+          <div className="chat-sources">
+            <b>来源</b> · {message.meta.sources.join(" · ")}
+          </div>
+        )}
+        {showHandoff && (
+          <div className="chat-handoff">
+            <button type="button" aria-label="请求人工客服接手" onClick={onHandoff}>
+              转人工客服
+            </button>
           </div>
         )}
         {message.error && <div className="disclaimer">{message.error}</div>}
@@ -170,7 +247,6 @@ export function ChatPanel({
       await ask(question, bid);
       onDone();
     } else {
-      // 随意对话：只对话，不触发验证状态，中间框保持待检测
       await ask(question, "");
     }
   };
@@ -178,14 +254,14 @@ export function ChatPanel({
   const recommend = async (text: string) => {
     setInput("");
     pushUser(text);
-    pushAgent([{ cls: "plain", text: "好的，我来帮你看补货建议。" }]);
+    pushAgent([{ cls: "plain", text: "好的，我来根据已登记批次给出补货参考（演示数据）。" }]);
     try {
       const items = await fetchRecommend();
       if (!items.length) {
-        pushAgent([{ cls: "plain", text: "当前暂无可补货批次，请保持规律服用。" }]);
+        pushAgent([{ cls: "plain", text: "当前暂无可展示的补货批次。" }]);
       } else {
         pushAgent(
-          [{ cls: "plain", text: "根据你的服用情况，建议补货以下批次：" }],
+          [{ cls: "plain", text: "以下为演示批次参考，不构成购买建议或疗效承诺：" }],
           { recommendations: items },
         );
       }
@@ -208,13 +284,14 @@ export function ChatPanel({
       });
       pushAgent(
         [
-          { cls: "conclusion", text: `已为你生成补货单：${order.orderId}` },
-          { cls: "plain", text: "下一步交给商家 Checkout Adapter 完成价格、地址和支付；确认后再由钱包在 BOT Chain Mainnet (677) 写入购买凭证。" },
+          { cls: "conclusion", text: `已生成购买准备单：${order.orderId}` },
+          { cls: "plain", text: "下一步由商家 Checkout Adapter 完成价格、地址与支付；确认后再由钱包写入购买凭证。当前若无 txHash，状态为 anchor_pending。" },
+          { cls: "disclaimer", text: "演示环境不展示虚构价格、库存或疗效。" },
         ],
         { order },
       );
     } catch {
-      pushAgent([{ cls: "disclaimer", text: "补货失败，请稍后重试。" }]);
+      pushAgent([{ cls: "disclaimer", text: "购买准备失败，请稍后重试。" }]);
     }
   };
 
@@ -227,14 +304,23 @@ export function ChatPanel({
       });
       pushAgent(
         [
-          { cls: "conclusion", text: `订单 ${order.orderId} 已完成 BOT Chain Mainnet (677) 链上存证！` },
+          { cls: "conclusion", text: `订单 ${order.orderId} 已提交链上存证交易。` },
           { cls: "cmd", text: `TxHash: ${tx.txHash}` },
+          { cls: "disclaimer", text: "请以区块浏览器 receipt 为准；界面展示不等于业务结算完成。" },
         ],
         { order: { ...order, txHash: tx.txHash, explorerUrl: tx.explorerUrl } },
       );
     } catch {
       // Error handled by WalletProvider toast
     }
+  };
+
+  const handleHandoff = () => {
+    pushAgent([
+      { cls: "conclusion", text: "已记录人工转接意向。" },
+      { cls: "plain", text: "请通过商家售后渠道继续；Agent 不会把模型回答包装成质量判定。" },
+      { cls: "disclaimer", text: "转接入口为产品流程占位，当前演示不创建真实工单。" },
+    ]);
   };
 
   const simulateIot = async (mode: IotSimulationMode) => {
@@ -296,19 +382,27 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-            <strong>TruthPass 商品 Agent</strong>
+          <strong>TruthPass Agent 客服</strong>
           <small>
             <span className="status-dot" title="在线" />
-            在线 · 基于真实数据的 AI 助手
+            解释证据来源 · 标明数据模式 · 非质量判定器
           </small>
         </div>
       </div>
 
       <div className="chat-log" ref={chatLogRef} aria-live="polite">
         <div className="msg agent">
+          <div className="chat-meta" aria-label="欢迎语元信息">
+            <span className="status-pill demo">demo / synthetic</span>
+            <span className="status-pill pending">Agent CS</span>
+          </div>
           <div className="msg-bubble">
             <div className="reason-line">
-              你好，我是 TruthPass 商品 Agent。当前演示从鱼油批次开始：我可以解释商品证据、准备购买，并在授权后协助售后反馈。
+              你好，我是 TruthPass Agent。我可以解释批次证据、来源与不确定项，并协助购买准备或售后指引。
+              鱼油批次仅为演示；回答会标明 model_assisted / deterministic_fallback 与 demo/synthetic。
+            </div>
+            <div className="disclaimer">
+              下一步：选择批次提问，或查看证据缺口 / 签名状态。需要人工时点「转人工客服」。
             </div>
           </div>
         </div>
@@ -318,6 +412,7 @@ export function ChatPanel({
             message={message}
             onOrder={handleOrder}
             onAnchorOrder={handleAnchorOrder}
+            onHandoff={handleHandoff}
             txBusy={txBusy}
             walletReady={walletReady}
           />
@@ -328,7 +423,14 @@ export function ChatPanel({
         <div className="quick-group">
           <span className="chat-quick-label">批次查询：</span>
           <div className="batch-select">
-            <button className="batch-trigger" type="button" onClick={() => setBatchOpen((v) => !v)} disabled={busy}>
+            <button
+              className="batch-trigger"
+              type="button"
+              aria-label="选择演示批次"
+              aria-expanded={batchOpen}
+              onClick={() => setBatchOpen((v) => !v)}
+              disabled={busy}
+            >
               选择批次 <span aria-hidden="true">▾</span>
             </button>
             {batchOpen && (
@@ -337,6 +439,7 @@ export function ChatPanel({
                   <button
                     key={b.id}
                     type="button"
+                    aria-label={`查询批次 ${b.id} ${b.name}`}
                     onClick={() => {
                       setBatchOpen(false);
                       runVerify(`查询批次 ${b.id}`, b.id);
@@ -350,20 +453,33 @@ export function ChatPanel({
             )}
           </div>
         </div>
-        {batchId && <div className="quick-group">
-          <span className="chat-quick-label">你想了解：</span>
-          {QUICK_PROMPTS.map((prompt) => (
-            <button key={prompt.label} onClick={() => runVerify(prompt.q, batchId ?? "FO-2026-001")} disabled={busy}>
-              {prompt.label}
+        {batchId && (
+          <div className="quick-group">
+            <span className="chat-quick-label">你想了解：</span>
+            {QUICK_PROMPTS.map((prompt) => (
+              <button
+                key={prompt.label}
+                type="button"
+                aria-label={prompt.q}
+                onClick={() => runVerify(prompt.q, batchId ?? "FO-2026-001")}
+                disabled={busy}
+              >
+                {prompt.label}
+              </button>
+            ))}
+            <button type="button" aria-label="请求人工客服接手" onClick={handleHandoff} disabled={busy}>
+              转人工
             </button>
-          ))}
-        </div>}
-        {batchId && <div className="quick-group">
-          <span className="chat-quick-label">IoT 模拟：</span>
-          <button onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
-          <button onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
-          <button onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
-        </div>}
+          </div>
+        )}
+        {batchId && (
+          <div className="quick-group">
+            <span className="chat-quick-label">IoT 模拟：</span>
+            <button type="button" aria-label="模拟正常温度" onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
+            <button type="button" aria-label="模拟冷链异常" onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
+            <button type="button" aria-label="模拟设备离线" onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
+          </div>
+        )}
       </div>
 
       <form className="chat-input" onSubmit={submit}>
@@ -383,8 +499,9 @@ export function ChatPanel({
           placeholder={listening ? "正在聆听，请说话…" : "输入商品名或批次号，例如：鱼油 / FO-2026-001"}
           autoComplete="off"
           disabled={busy}
+          aria-label="Agent 问题输入框"
         />
-        <button type="submit" aria-label="发送" disabled={busy}>
+        <button type="submit" aria-label="发送问题" disabled={busy}>
           ➤
         </button>
       </form>
