@@ -5,7 +5,7 @@
 //   * TLS 严格校验：固定 Supabase Root 2021 CA + 主机名验证，绝不关闭证书校验；
 //     官方 CA 可从 Dashboard → Database settings 下载后覆盖 certs/prod-ca-2021.crt；
 //   * 开关 persistenceEnabled() = 存在 DATABASE_URL 且 DATA_BACKEND != memory。
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
 import type { RankedService } from "../registry.js";
@@ -33,9 +33,12 @@ const CA_PATH = join(process.cwd(), "certs", "prod-ca-2021.crt");
 
 let pool: Pool | undefined;
 
-function sslConfig(): { ca: string; rejectUnauthorized: true } {
-  // 固定路径：项目 certs 目录下的 Supabase Root CA（公开证书，非用户可控输入）
-  return { ca: readFileSync(CA_PATH, "utf8"), rejectUnauthorized: true };
+function sslConfig(): { ca?: string; rejectUnauthorized: true } {
+  // 生产优先从 Secret 注入 CA；本地可使用仓库 certs 文件。没有自定义 CA 时仍保持 Node 系统 CA 校验。
+  const configuredCa = process.env.DATABASE_CA_CERT?.trim();
+  if (configuredCa) return { ca: configuredCa, rejectUnauthorized: true };
+  if (existsSync(CA_PATH)) return { ca: readFileSync(CA_PATH, "utf8"), rejectUnauthorized: true };
+  return { rejectUnauthorized: true };
 }
 
 function getPool(): Pool {
