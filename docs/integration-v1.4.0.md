@@ -28,6 +28,11 @@ v1.4.0 把 TruthPass 的公共入口从单一鱼油演示扩展为可发现、�
   - `POST /api/consumer/feedback`
   - `GET /api/cli/explain?batchId={batchId}`
   - `POST /api/agent/v1/collaborate`（受保护的三类 Agent 协作入口）
+  - `POST /api/tenants/{tenantId}/evidence/import`（租户证据导入与幂等校验）
+  - `POST /api/tenants/{tenantId}/evidence/validate`（批次证据门禁验证）
+  - `GET /api/tenants/{tenantId}/batches/{batchId}/evidence-card`（企业批次证据卡）
+  - `GET /api/tenants/{tenantId}/audit/export`（不含原始 payload 的审计导出）
+  - `POST /api/tenants/{tenantId}/evidence/{evidenceId}/revoke`（追加式撤销）
   - `GET /api/cli/reference/manifest`
   - `GET /api/cli/reference/products`
   - `GET /api/cli/reference/products/{productId}`

@@ -58,6 +58,7 @@ import {
   publicStandardDocument,
 } from "./src/standards/v1_4.js";
 import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
+import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/enterprise/pilot-store.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
@@ -138,6 +139,7 @@ if (!inspectionEvidence) throw new Error(`批次 ${BATCH_ID} 没有可用检测�
 const trustedIssuerKeys = new TrustedIssuerKeyRegistry(
   JSON.parse(process.env.TRUTHPASS_TRUSTED_ISSUER_KEYS ?? "[]") as TrustedIssuerPublicKey[],
 );
+const enterprisePilotStore = new EnterprisePilotStore({ resolveTrustedKey: trustedIssuerKeys.resolve });
 const replayGuard = persistenceEnabled() ? createPostgresReplayGuard() : undefined;
 const inspectionTools = new TruthPassTools(repository, "inspection", trustedIssuerKeys.resolve, true, replayGuard);
 
@@ -983,6 +985,31 @@ function agentGatewayAuthorized(req: IncomingMessage): { authorized: boolean; au
   return { authorized: header === "Bearer " + expected, authMode: "configured" };
 }
 
+type EnterpriseRequestContext = {
+  authorized: boolean;
+  tenantId: string;
+  requestId: string;
+  error?: string;
+};
+
+function enterpriseRequestContext(req: IncomingMessage, tenantId: string): EnterpriseRequestContext {
+  const configured = Boolean(process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN?.trim());
+  const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"].trim() : "";
+  const requestId = typeof req.headers["x-truthpass-request-id"] === "string" ? req.headers["x-truthpass-request-id"].trim() : "";
+  const authorization = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+  if (!configured) return { authorized: false, tenantId, requestId, error: "TENANT_AUTH_NOT_CONFIGURED" };
+  if (authorization !== "Bearer " + process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN!.trim()) {
+    return { authorized: false, tenantId, requestId, error: "AGENT_AUTH_REQUIRED" };
+  }
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tenantId) || headerTenant !== tenantId) {
+    return { authorized: false, tenantId, requestId, error: "TENANT_SCOPE_MISMATCH" };
+  }
+  if (!/^[A-Za-z0-9._:-]{3,128}$/.test(requestId)) {
+    return { authorized: false, tenantId, requestId, error: "REQUEST_ID_REQUIRED" };
+  }
+  return { authorized: true, tenantId, requestId };
+}
+
 function requestTraceId(req: IncomingMessage): string {
   const supplied = req.headers["x-truthpass-request-id"];
   if (typeof supplied === "string" && /^[A-Za-z0-9._:-]{8,128}$/.test(supplied)) return supplied;
@@ -1144,6 +1171,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         status: `${origin}/api/agent/status`,
         collaboration: `${origin}/api/agent/v1/collaborate`,
         registration: `${origin}/api/agent/register`,
+        enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
+        enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
+        enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
+        enterpriseAuditExport: `${origin}/api/tenants/{tenantId}/audit/export`,
         cfiManifest: `${origin}/api/cfi/manifest`,
         publicStandard: `${origin}/api/standards`,
       },
@@ -1155,6 +1186,117 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       },
       publicDataBoundary: { rawReports: "off_chain", personalData: "off_chain", privateKeys: "off_chain" },
     });
+    return true;
+  }
+
+  const enterpriseImportMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/import$/);
+  if (enterpriseImportMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseImportMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const body = await readBody(req);
+    const input = (body.evidence && typeof body.evidence === "object" && !Array.isArray(body.evidence)
+      ? body.evidence as Record<string, unknown>
+      : body);
+    const envelope: EnterpriseEvidenceEnvelope = {
+      schemaVersion: input.schemaVersion as EnterpriseEvidenceEnvelope["schemaVersion"],
+      tenantId,
+      brandId: typeof input.brandId === "string" ? input.brandId : "",
+      productId: typeof input.productId === "string" ? input.productId : "",
+      batchId: typeof input.batchId === "string" ? input.batchId : "",
+      sampleId: typeof input.sampleId === "string" ? input.sampleId : undefined,
+      evidenceId: typeof input.evidenceId === "string" ? input.evidenceId : "",
+      kind: input.kind as EnterpriseEvidenceEnvelope["kind"],
+      issuerId: typeof input.issuerId === "string" ? input.issuerId : "",
+      sourceKind: input.sourceKind as EnterpriseEvidenceEnvelope["sourceKind"],
+      occurredAt: typeof input.occurredAt === "string" ? input.occurredAt : "",
+      payload: input.payload && typeof input.payload === "object" && !Array.isArray(input.payload) ? input.payload as Record<string, unknown> : {},
+      dataMode: input.dataMode === "external" ? "external" : "demo/synthetic",
+      attestation: input.attestation as EnterpriseEvidenceEnvelope["attestation"],
+      rawObjectRef: typeof input.rawObjectRef === "string" ? input.rawObjectRef : undefined,
+    };
+    try {
+      const result = await enterprisePilotStore.importEvidence(envelope, ctx.requestId);
+      sendJson(res, result.idempotent ? 200 : 201, {
+        schemaVersion: "truthpass.enterprise.evidence-import.v1",
+        tenantId,
+        requestId: ctx.requestId,
+        traceId: requestTraceId(req),
+        idempotent: result.idempotent,
+        evidence: { ...result.record, payload: undefined },
+      });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, requestId: ctx.requestId });
+    }
+    return true;
+  }
+
+  const enterpriseValidateMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/validate$/);
+  if (enterpriseValidateMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseValidateMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" ? body.batchId.trim() : "";
+    if (!batchId) {
+      sendJson(res, 400, { error: "BATCH_ID_REQUIRED", tenantId, requestId: ctx.requestId });
+      return true;
+    }
+    try {
+      sendJson(res, 200, await enterprisePilotStore.validateBatch(tenantId, batchId, ctx.requestId));
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), tenantId, batchId });
+    }
+    return true;
+  }
+
+  const enterpriseCardMatch = p.match(/^\/api\/tenants\/([^/]+)\/batches\/([^/]+)\/evidence-card$/);
+  if (enterpriseCardMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(enterpriseCardMatch[1]!);
+    const batchId = decodeURIComponent(enterpriseCardMatch[2]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    try {
+      const result = await enterprisePilotStore.evidenceCard(tenantId, batchId, url.searchParams.get("question") || "请解释当前批次证据状态。", ctx.requestId);
+      sendJson(res, 200, { ...result, tenantId, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), tenantId, batchId });
+    }
+    return true;
+  }
+
+  const enterpriseAuditMatch = p.match(/^\/api\/tenants\/([^/]+)\/audit\/export$/);
+  if (enterpriseAuditMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(enterpriseAuditMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    sendJson(res, 200, { schemaVersion: "truthpass.enterprise.audit-export.v1", ...(await enterprisePilotStore.exportAudit(tenantId)), traceId: requestTraceId(req) });
+    return true;
+  }
+
+  const enterpriseRevokeMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/([^/]+)\/revoke$/);
+  if (enterpriseRevokeMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseRevokeMatch[1]!);
+    const evidenceId = decodeURIComponent(enterpriseRevokeMatch[2]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const revoked = await enterprisePilotStore.revoke(tenantId, evidenceId, ctx.requestId);
+    sendJson(res, revoked ? 200 : 404, { schemaVersion: "truthpass.enterprise.revocation.v1", tenantId, evidenceId, status: revoked ? "revoked" : "not_found", traceId: requestTraceId(req) });
     return true;
   }
 
