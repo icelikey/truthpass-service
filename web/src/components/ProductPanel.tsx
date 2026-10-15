@@ -192,6 +192,62 @@ function ProductionProcess({ process }: { process: ProductionPublicSummary }) {
   );
 }
 
+
+function BatchCompleteness({ product }: { product: ProductBatch }) {
+  const metrics = product.keyMetrics;
+  const passed = metrics.filter((m) => m.status === "pass").length;
+  const missing = metrics.filter((m) => m.status === "missing").length;
+  const failed = metrics.filter((m) => m.status === "fail").length;
+  const total = Math.max(metrics.length, 1);
+  const pct = Math.round((passed / total) * 100);
+  const process = product.productionProcess;
+  const gaps: string[] = [];
+  if (missing > 0) gaps.push(`${missing} 项检测未覆盖`);
+  if (failed > 0) gaps.push(`${failed} 项未通过`);
+  if (process.missingStages.length > 0) gaps.push(`工序缺口：${process.missingStages.join("、")}`);
+
+  return (
+    <>
+      <div className="product-completeness" aria-label="证据完整度摘要">
+        <div className="gauge" style={{ ["--pct" as string]: `${pct}%` }} aria-label={`证据完整度 ${pct}%`}>
+          {pct}%
+        </div>
+        <div>
+          <div className="evidence-summary-row">
+            <span>证据完整度（按已登记指标）</span>
+            <strong>{passed}/{total} 通过</strong>
+          </div>
+          <div className="completeness-list" style={{ marginTop: 8 }}>
+            <span className="ok">检测通过 {passed}</span>
+            {missing > 0 && <span className="partial">未覆盖 {missing}</span>}
+            {failed > 0 && <span className="partial">未通过 {failed}</span>}
+            <span className={process.status === "conformant" ? "ok" : "partial"}>
+              工序 {process.observedStageCount}/{process.requiredStageCount}
+            </span>
+          </div>
+          {gaps.length > 0 && (
+            <div className="evidence-gaps" aria-label="证据缺口">
+              {gaps.map((g) => (
+                <span className="gap-chip" key={g}>{g}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {(gaps.length > 0 || (product.dataMode ?? "demo/synthetic") === "demo/synthetic") && (
+        <div className="uncertainty-note" role="note">
+          <strong>关于不确定项</strong>
+          {(product.dataMode ?? "demo/synthetic") === "demo/synthetic"
+            ? "当前为 demo/synthetic 演示数据，不能视为真实商品认证。"
+            : "部分后期环节或检测项仍在补齐中。"}
+          {gaps.length > 0 ? ` 已知缺口：${gaps.join("；")}。` : " "}
+          缺口不等于已判定不合格；Agent 回答会标明来源与数据模式。
+        </div>
+      )}
+    </>
+  );
+}
+
 export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: string }) {
   const { data: product, isLoading, isError } = useQuery({
     queryKey: ["product", batchId],
@@ -206,8 +262,8 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
       <section id="product" className="panel product-panel">
         <div className="pending-state">
           <div className="pending-icon" aria-hidden="true">◷</div>
-          <h3>待检测</h3>
-          <p>请先在左侧选择商品，Agent 将发起溯源验证，完成后这里会展示商品信息、检测指标与验收结论。</p>
+          <h3>等待批次</h3>
+          <p>在 Agent 中选择或输入批次号后，这里会展示批次摘要、证据完整度、来源与不确定项。</p>
         </div>
       </section>
     );
@@ -218,8 +274,8 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
       <section id="product" className="panel product-panel">
         <div className="pending-state">
           <div className="pending-icon pulse" aria-hidden="true">◷</div>
-          <h3>正在验证</h3>
-          <p>Agent 正在读取设备数据、关联检测报告并执行规则验收，请稍候…</p>
+          <h3>正在汇总证据</h3>
+          <p>正在读取登记证据、关联检测来源并执行确定性验收，请稍候…</p>
         </div>
         <div className="metrics" style={{ marginTop: 20 }}>
           {[0, 1, 2].map((i) => (
@@ -273,22 +329,34 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
         <div className="product-figure">
           <img src={product.imageUrl} alt={`${product.name} ${product.batchId}`} />
           <div className="packaging" aria-hidden="true">
-            <span className="pk-brand">OMEGA-3</span>
-            <span className="pk-sub">PURE OCEAN</span>
-            <span className="pk-sub">FOR A BRIGHTER</span>
-            <span className="pk-sub">TOMORROW</span>
+            <span className="pk-brand">BATCH</span>
+            <span className="pk-sub">EVIDENCE</span>
+            <span className="pk-sub">DEMO</span>
           </div>
           <p className="figure-note" aria-hidden="true">
-            来自深蓝
+            演示批次
             <br />
-            也让更透明的未来
+            非真实认证
           </p>
         </div>
         <div className="product-meta">
-          <p className="product-kicker">深海 · 可追溯 · 更安心</p>
+          <div className="product-kicker-row">
+            <span className="product-kicker">批次摘要</span>
+            <span className={`mode-badge ${(product.dataMode ?? "demo/synthetic") === "external" ? "external" : ""}`}>
+              {product.dataMode ?? "demo/synthetic"}
+            </span>
+            <span className={`status-pill ${product.verification.status === "accepted" ? "verified" : product.verification.status === "rejected" ? "rejected" : "review"}`}>
+              {product.verification.status}
+            </span>
+          </div>
           <h2 className="product-name">{product.name}</h2>
-          <p className="product-batch">{product.batchId}</p>
-          <p className="product-source">数据来源：{product.dataSource === "postgres" ? "数据库登记" : "演示 fixtures"} · {product.dataMode ?? "demo/synthetic"}</p>
+          <p className="product-batch batch-id-chip">
+            批次 <code>{product.batchId}</code>
+          </p>
+          <p className="product-source">
+            数据来源：{product.dataSource === "postgres" ? "数据库登记" : "演示 fixtures"}
+            · 证据状态与数据模式分开展示，避免混淆
+          </p>
           <p className="product-tags">
             {product.supplyChainTags.map((tag) => (
               <span key={tag}>{tag}</span>
@@ -325,6 +393,7 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
         <button
           className={product.verification.status === "rejected" ? "verdict fail" : "verdict"}
           type="button"
+          aria-label="查看完整验收规则与得分说明"
           onClick={() => openModal("完整验收规则（v1.0 · 9 项）", <RulesView batchId={batchId} />)}
           onMouseEnter={() => setTooltipVisible(true)}
           onMouseLeave={() => setTooltipVisible(false)}
@@ -342,6 +411,8 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
           </div>
         )}
       </div>
+
+      <BatchCompleteness product={product} />
 
       <div className="metrics">
         {product.keyMetrics.map((metric) => (
