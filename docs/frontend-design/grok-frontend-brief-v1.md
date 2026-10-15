@@ -19,7 +19,9 @@ web/public/assets/**（需要新增视觉资产时）
 
 ## 视觉参考
 
-预览图：[`truthpass-ui-direction-v1.png`](./truthpass-ui-direction-v1.png)
+预览图：[`truthpass-ui-direction-v1.png`](./truthpass-ui-direction-v1.png)（英文/结构参考）
+中文预览图：[`truthpass-ui-direction-zh-v1.png`](./truthpass-ui-direction-zh-v1.png)
+中文文案基线：[`frontend-copy-zh-v1.md`](./frontend-copy-zh-v1.md)
 
 方向关键词：
 
