@@ -20,19 +20,24 @@ export function Hero() {
         <button
           type="button"
           className="hero-cta primary"
-          aria-label="查看 CLI 参考实现中的批次证据"
-          onClick={() => scrollTo("cli-reference")}
+          aria-label="开始查询批次"
+          onClick={() => scrollTo("agent")}
         >
-          查看批次证据
+          开始查询批次 <span aria-hidden="true">→</span>
         </button>
         <button
           type="button"
           className="hero-cta secondary"
-          aria-label="体验 Agent 客服对话"
-          onClick={() => scrollTo("agent")}
+          aria-label="查看证据演示"
+          onClick={() => scrollTo("cli-reference")}
         >
-          体验 Agent 客服
+          查看证据演示 <span aria-hidden="true">↗</span>
         </button>
+      </div>
+      <div className="hero-proof-row">
+        <span className="demo-badge">DEMO / SYNTHETIC</span>
+        <span>当前演示：鱼油批次</span>
+        <span>协议状态：可查询 · 可解释 · 可迁移</span>
       </div>
       <p className="hero-note">
         当前页面中的鱼油批次仅为 <span className="mode-badge">demo / synthetic</span> 演示数据，

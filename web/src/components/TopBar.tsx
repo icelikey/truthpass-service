@@ -56,6 +56,9 @@ export function TopBar({
           )}
         </button>
 
+        <a className="ghost-button topbar-merchant-link" href="/merchant" aria-label="打开商家工作台">
+          商家工作台
+        </a>
         <button
           className="ghost-button"
           type="button"

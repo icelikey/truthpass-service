@@ -1,7 +1,10 @@
 import { useRef, useState } from "react";
 import { AuthModal } from "./components/AuthModal";
+import { AfterSalesPanel } from "./components/AfterSalesPanel";
 import { ChatPanel } from "./components/ChatPanel";
+import { ConsumerFlowBar, type ConsumerAgentStage } from "./components/ConsumerFlowBar";
 import { CliReferencePanel } from "./components/CliReferencePanel";
+import { MerchantApp } from "./components/MerchantApp";
 import { Community } from "./components/Community";
 import { EvidencePanel } from "./components/EvidencePanel";
 import { Hero } from "./components/Hero";
@@ -25,9 +28,12 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focusTech, setFocusTech] = useState(false);
+  const [consumerStage, setConsumerStage] = useState<ConsumerAgentStage>("idle");
+  const [afterSalesPrompt, setAfterSalesPrompt] = useState("");
   const { user, signUp, signIn, signOut, configured: authConfigured } = useAuth();
   const toastTimer = useRef<number | undefined>(undefined);
   const inQueryMode = !!batchId;
+  const isMerchantRoute = window.location.pathname.startsWith("/merchant");
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -37,6 +43,7 @@ export default function App() {
 
   const handleDone = () => {
     setVerifyState("done");
+    setConsumerStage("evidence_review");
     if (batchId && !user) {
       showToast("请先登录，验证记录才会保存到你的账号");
     } else if (batchId && user) {
@@ -81,6 +88,10 @@ export default function App() {
     else await signUp(email, password);
   };
 
+  if (isMerchantRoute) {
+    return <MerchantApp />;
+  }
+
   return (
     <ModalProvider>
       <WalletProvider activeBatchId={batchId} onToast={showToast}>
@@ -94,6 +105,7 @@ export default function App() {
           onOpenEvidence={() => {
             if (!batchId) setBatchId("FO-2026-001");
             setVerifyState("done");
+            setConsumerStage("evidence_review");
             setFocusTech(true);
             setTimeout(() => {
               document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -106,18 +118,38 @@ export default function App() {
         />
         <Hero />
         <CliReferencePanel />
+        <ConsumerFlowBar stage={consumerStage} batchId={batchId} />
         <main className={inQueryMode ? "layout" : "assistant-only"}>
           <ChatPanel
-            onStart={() => setVerifyState("running")}
+            onStart={() => {
+              setVerifyState("running");
+              setConsumerStage("searching");
+            }}
             onDone={handleDone}
-            onBatch={(id) => setBatchId(id)}
+            onBatch={(id) => {
+              setBatchId(id);
+              setConsumerStage("batch_selected");
+            }}
+            onPurchasePrepared={() => setConsumerStage("purchase_prepared")}
+            onReceiptVerified={() => setConsumerStage("receipt_verified")}
+            afterSalesPrompt={afterSalesPrompt}
+            onPromptConsumed={() => setAfterSalesPrompt("")}
             batchId={batchId}
           />
           {inQueryMode && <ProductPanel state={verifyState} batchId={batchId ?? ""} />}
           {inQueryMode && <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} focusTech={focusTech} />}
         </main>
+        {inQueryMode && (
+          <AfterSalesPanel
+            onPrompt={(question) => {
+              setConsumerStage("after_sales");
+              setAfterSalesPrompt(question);
+              window.setTimeout(() => document.getElementById("agent")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+            }}
+          />
+        )}
         {inQueryMode && <ReportSection batchId={batchId} />}
-        {inQueryMode && <Community onToast={showToast} batchId={batchId} />}
+        {inQueryMode && <Community onToast={showToast} onFeedbackSubmitted={() => setConsumerStage("feedback_submitted")} batchId={batchId} />}
         <ObserverDrawer open={observerOpen} onClose={() => setObserverOpen(false)} batchId={batchId} />
         <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuth={handleAuth} configured={authConfigured} />
         <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />

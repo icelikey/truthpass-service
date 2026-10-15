@@ -5,7 +5,7 @@ import { useWallet } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
 import type { SessionChainTx } from "../types";
 
-export function Community({ onToast, batchId }: { onToast: (msg: string) => void; batchId: string | null }) {
+export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: (msg: string) => void; onFeedbackSubmitted?: () => void; batchId: string | null }) {
   const { address, chainId, walletName, txBusy, executeOnChainAction, setWalletModalOpen } = useWallet();
   const walletReady = Boolean(address && chainId === 677);
   const [consent, setConsent] = useState(false);
@@ -55,6 +55,7 @@ export function Community({ onToast, batchId }: { onToast: (msg: string) => void
           ? `反馈已提交并锚定至 BOT Chain Mainnet (677) · 获得 ${result.contributionPoints} 点共建积分`
           : `已提交反馈${result.persisted ? "并已持久化" : ""}，获得 ${result.contributionPoints} 点共建积分 · 哈希 ${result.evidenceHash.slice(0, 10)}…`,
       );
+      onFeedbackSubmitted?.();
       setConsent(false);
       setPurchaseConfirmed(false);
       setTags([]);

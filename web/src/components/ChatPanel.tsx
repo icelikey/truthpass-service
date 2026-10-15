@@ -214,11 +214,19 @@ export function ChatPanel({
   onStart,
   onDone,
   onBatch,
+  onPurchasePrepared,
+  onReceiptVerified,
+  afterSalesPrompt,
+  onPromptConsumed,
   batchId,
 }: {
   onStart: () => void;
   onDone: () => void;
   onBatch: (id: string) => void;
+  onPurchasePrepared?: () => void;
+  onReceiptVerified?: () => void;
+  afterSalesPrompt?: string;
+  onPromptConsumed?: () => void;
   batchId: string | null;
 }) {
   const { messages, ask, pushUser, pushAgent } = useChatStream();
@@ -233,6 +241,12 @@ export function ChatPanel({
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
 
   useEffect(() => {
+    if (!afterSalesPrompt) return;
+    setInput(afterSalesPrompt);
+    onPromptConsumed?.();
+  }, [afterSalesPrompt, onPromptConsumed]);
+
+  useEffect(() => {
     const el = chatLogRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
@@ -242,8 +256,8 @@ export function ChatPanel({
     setInput("");
     const bid = batch ?? extractBatchId(question) ?? batchId;
     if (bid) {
-      onBatch(bid);
       onStart();
+      onBatch(bid);
       await ask(question, bid);
       onDone();
     } else {
@@ -282,6 +296,7 @@ export function ChatPanel({
         quantity: order.quantity,
         status: order.status,
       });
+      onPurchasePrepared?.();
       pushAgent(
         [
           { cls: "conclusion", text: `已生成购买准备单：${order.orderId}` },
@@ -302,6 +317,7 @@ export function ChatPanel({
         batchId: order.batchId,
         purchaseId: order.orderId,
       });
+      onReceiptVerified?.();
       pushAgent(
         [
           { cls: "conclusion", text: `订单 ${order.orderId} 已提交链上存证交易。` },
