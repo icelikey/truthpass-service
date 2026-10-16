@@ -2,6 +2,7 @@ import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSource, 
 
 const TENANT_ID = "demo-tenant";
 const DEMO_BATCH = "FO-2026-001";
+const MERCHANT_API_ENABLED = import.meta.env.VITE_TRUTHPASS_MERCHANT_API_ENABLED === "true";
 
 const demoIssues: EvidenceIssue[] = [
   { id: "ev-production-001", batchId: DEMO_BATCH, kind: "production", title: "生产记录", status: "passed", issuer: "合作工厂 A", signature: "not_checked", hash: "0x7a31…4c20", detail: "已关联成品批次和生产时间。", nextAction: "保持批次号和生产记录一致。" },
@@ -33,6 +34,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function loadMerchantSummary(tenantId = TENANT_ID): Promise<MerchantSummary> {
+  if (!MERCHANT_API_ENABLED) return { ...demoSummary, tenantId, source: "demo/synthetic" };
   try {
     const result = await request<MerchantSummary>(`/api/tenants/${encodeURIComponent(tenantId)}/summary`);
     return { ...result, source: "external" };
@@ -43,6 +45,7 @@ export async function loadMerchantSummary(tenantId = TENANT_ID): Promise<Merchan
 
 export async function validateMerchantBatch(tenantId: string, batchId: string): Promise<MerchantBatchSummary> {
   const fallback = demoSummary.batches.find((batch) => batch.batchId === batchId) ?? demoSummary.batches[0];
+  if (!MERCHANT_API_ENABLED) return { ...fallback, source: "demo/synthetic" };
   try {
     const result = await request<{ batchId: string; status: MerchantBatchSummary["status"]; dataMode: MerchantSource; checks: Array<{ code: string; status: string; evidenceIds: string[] }>; reasons: string[] }>(`/api/tenants/${encodeURIComponent(tenantId)}/evidence/validate`, {
       method: "POST",
@@ -57,6 +60,7 @@ export async function validateMerchantBatch(tenantId: string, batchId: string): 
 
 export async function importDemoEvidence(tenantId: string, batchId: string, kind: EvidenceIssue["kind"]): Promise<{ ok: boolean; source: MerchantSource; message: string }> {
   const item = demoIssues.find((issue) => issue.kind === kind) ?? demoIssues[0];
+  if (!MERCHANT_API_ENABLED) return { ok: true, source: "demo/synthetic", message: `已在 Demo 模式导入${item.title}，未写入真实企业数据。` };
   try {
     await request(`/api/tenants/${encodeURIComponent(tenantId)}/evidence/import`, {
       method: "POST",
@@ -82,6 +86,14 @@ export async function importDemoEvidence(tenantId: string, batchId: string, kind
 }
 
 export async function exportMerchantAudit(tenantId: string): Promise<AuditExport> {
+  if (!MERCHANT_API_ENABLED) {
+    return {
+      tenantId,
+      exportedAt: new Date().toISOString(),
+      evidence: demoIssues.map((issue) => ({ evidenceId: issue.id, batchId: issue.batchId, kind: issue.kind, payloadHash: issue.hash, status: issue.status, payloadRef: null })),
+      events: [{ eventId: "demo-audit-001", eventType: "batch_validated", requestId: "demo-request", batchId: DEMO_BATCH, createdAt: new Date().toISOString() }],
+    };
+  }
   try {
     return await request<AuditExport>(`/api/tenants/${encodeURIComponent(tenantId)}/audit/export`);
   } catch {
