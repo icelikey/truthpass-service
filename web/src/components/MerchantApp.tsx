@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchAgentStatus, fetchLifecycle, postChat, simulateLifecycleStage } from "../api";
+import { useWallet } from "./WalletContext";
 import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, validateMerchantBatch } from "../merchant/merchantApi";
 import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary } from "../merchant/types";
 import type { ChatEvent, LifecycleView } from "../types";
@@ -20,6 +21,7 @@ function StatusPill({ status }: { status: keyof typeof statusLabel }) {
 }
 
 export function MerchantApp() {
+  const { setWalletModalOpen, address, chainId } = useWallet();
   const [tab, setTab] = useState<MerchantTab>("overview");
   const [summary, setSummary] = useState<MerchantSummary | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<MerchantBatchSummary | null>(null);
@@ -211,6 +213,7 @@ export function MerchantApp() {
             <div className="merchant-top-actions">
               <span className="merchant-notification" aria-label="有待处理提醒">♧<i /></span>
               <span className="merchant-demo-pill">{demo ? "DEMO / SYNTHETIC" : "EXTERNAL"}</span>
+              <button type="button" className="merchant-wallet-button" onClick={() => setWalletModalOpen(true)}>{address && chainId === 677 ? "机构钱包 · Chain 677" : "打开机构钱包"}</button>
               <span className="merchant-account">{summary.brandName}（企业版）⌄</span>
             </div>
           </header>

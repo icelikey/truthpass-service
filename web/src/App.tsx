@@ -89,7 +89,13 @@ export default function App() {
   };
 
   if (isMerchantRoute) {
-    return <MerchantApp />;
+    return (
+      <ModalProvider>
+        <WalletProvider activeBatchId="FO-2026-001" onToast={showToast}>
+          <MerchantApp />
+        </WalletProvider>
+      </ModalProvider>
+    );
   }
 
   return (

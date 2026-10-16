@@ -2576,6 +2576,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .merchant-notification { position: relative; color: #bfd5ed; font-size: 20px; }
 .merchant-notification i { position: absolute; top: 1px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: #ff795f; }
 .merchant-account { color: #dce9f8; font-size: 12px; white-space: nowrap; }
+.merchant-wallet-button { padding: 7px 10px; border: 1px solid rgba(125,232,232,.28); border-radius: 999px; color: #b9eaff; background: rgba(93,213,213,.08); cursor: pointer; font-size: 10px; white-space: nowrap; }
+.merchant-wallet-button:hover, .merchant-wallet-button:focus-visible { border-color: var(--cyan); outline: none; background: rgba(93,213,213,.16); }
 .merchant-dashboard-heading { align-items: center; padding: 28px 30px 18px; }
 .merchant-dashboard-heading h1 { margin: 4px 0 5px; font-size: 30px; }
 .merchant-heading-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
