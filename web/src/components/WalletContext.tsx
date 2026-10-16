@@ -527,6 +527,28 @@ export function WalletProvider({
                 </button>
               </div>
 
+              <div className="wallet-role-actions">
+                <div className="wallet-role-actions-head">
+                  <div>
+                    <strong>生产、检测与监管钱包交互</strong>
+                    <small>这些操作不是消费者购买：需要对应机构钱包和合约角色，服务端会在 receipt 中校验业务事件。</small>
+                  </div>
+                  <span>公开接口：EvidenceAnchor · VerificationRecorded</span>
+                </div>
+                <div className="wallet-role-action-grid">
+                  <button type="button" className={activeAction === "evidence" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "evidence", batchId: targetBatch }).catch(() => undefined)}>
+                    <strong>{activeAction === "evidence" ? "⏳ 正在锚定证据…" : "🏭 生产方 / 检测机构：锚定证据"}</strong>
+                    <small>EVIDENCE_WRITER_ROLE · 写入 EvidenceAnchored</small>
+                    <span className="wallet-tx-cta">连接机构钱包后签名 →</span>
+                  </button>
+                  <button type="button" className={activeAction === "verification" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "verification", batchId: targetBatch }).catch(() => undefined)}>
+                    <strong>{activeAction === "verification" ? "⏳ 正在提交核验…" : "⚖️ 监管 / 审核机构：提交核验"}</strong>
+                    <small>VERIFIER_ROLE · 写入 VerificationRecorded</small>
+                    <span className="wallet-tx-cta">连接审核钱包后签名 →</span>
+                  </button>
+                </div>
+              </div>
+
               {/* 实时步骤进度条 */}
               {txStage && (
                 <div className="wallet-stage-box">

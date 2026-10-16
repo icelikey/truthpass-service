@@ -13,6 +13,8 @@ import type {
   VerifiedChainTx,
   SessionChainTx,
   ChainContractMeta,
+  LifecycleStage,
+  LifecycleView,
 } from "./types";
 
 export const BATCH_ID = "FO-2026-001";
@@ -26,12 +28,23 @@ async function getJson<T>(url: string): Promise<T> {
 export const fetchProduct = (batchId: string) => getJson<ProductBatch>(`/api/products/${batchId}`);
 export const fetchEvidenceLink = (batchId: string) => getJson<EvidenceStep[]>(`/api/products/${batchId}/evidence-link`);
 export const fetchJourney = (batchId: string) => getJson<Journey>(`/api/products/${batchId}/journey`);
+export const fetchLifecycle = (batchId: string) => getJson<LifecycleView>(`/api/products/${batchId}/lifecycle`);
+export async function simulateLifecycleStage(batchId: string, stage: LifecycleStage): Promise<LifecycleView> {
+  const res = await fetch("/api/simulator/lifecycle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batchId, stage }),
+  });
+  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+  return (await res.json()) as LifecycleView;
+}
 export const fetchMetricDetail = (batchId: string, key: string) =>
   getJson<MetricDetail>(`/api/products/${batchId}/metrics/${key}`);
 export const fetchJevDetection = (batchId?: string) =>
   getJson<JevDetection>(batchId ? `/api/jev/detection?batchId=${encodeURIComponent(batchId)}` : "/api/jev/detection");
 
 export const fetchChainStatus = () => getJson<ChainStatusData>("/api/chain/status");
+export const fetchAgentStatus = () => getJson<{ status: string; agentMode: string; providerConfigured?: boolean; model?: string | null; dataMode?: string }>("/api/agent/status");
 
 export async function prepareWalletTx(params: {
   action: WalletActionKind;

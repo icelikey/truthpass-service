@@ -109,6 +109,10 @@ export interface ChatEvent {
   dataMode?: "demo/synthetic" | "external";
   batchId?: string | null;
   traceId?: string;
+  contextMode?: "production_sync_simulation" | "external_production";
+  contextSource?: string;
+  contextRevision?: number;
+  syncedAt?: string;
   sources?: string[];
 }
 
@@ -241,6 +245,31 @@ export interface ChainStatusData {
 }
 
 export type WalletActionKind = "purchase" | "contribution" | "dispute" | "evidence" | "verification";
+
+export type LifecycleStage = "production" | "inspection" | "cold_chain" | "shipment" | "purchase" | "after_sales" | "regulatory_review";
+export type LifecycleStatus = "synced" | "verified" | "pending" | "awaiting_user";
+export interface LifecycleEvent {
+  stage: LifecycleStage;
+  label: string;
+  role: string;
+  status: LifecycleStatus;
+  detail: string;
+  updatedAt: string;
+  walletAction?: WalletActionKind;
+  requiredRole?: string;
+}
+export interface LifecycleView {
+  schemaVersion: "truthpass.lifecycle.v1";
+  batchId: string;
+  contextMode: "production_sync_simulation" | "external_production";
+  contextSource: string;
+  contextRevision: number;
+  syncedAt: string;
+  dataMode: "demo/synthetic" | "external";
+  events: LifecycleEvent[];
+  nextAction: LifecycleStage | "complete";
+  walletRoles: Array<{ stage: LifecycleStage; label: string; role: string; action: WalletActionKind; requiredRole?: string }>;
+}
 
 export interface WalletPrepareResponse {
   ok: boolean;

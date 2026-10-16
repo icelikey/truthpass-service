@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchAgentStatus, fetchLifecycle, postChat, simulateLifecycleStage } from "../api";
 import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, validateMerchantBatch } from "../merchant/merchantApi";
 import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary } from "../merchant/types";
+import type { ChatEvent, LifecycleView } from "../types";
 
 type MerchantTab = "overview" | "import" | "review" | "preview" | "audit";
 
@@ -25,13 +27,25 @@ export function MerchantApp() {
   const [audit, setAudit] = useState<AuditExport | null>(null);
   const [message, setMessage] = useState("");
   const [agentInput, setAgentInput] = useState("");
+  const [agentReply, setAgentReply] = useState("");
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<{ status?: string; agentMode?: string; model?: string | null; dataMode?: string } | null>(null);
+  const [agentMeta, setAgentMeta] = useState<Pick<ChatEvent, "dataMode" | "contextMode" | "contextSource" | "contextRevision" | "syncedAt" | "traceId"> | null>(null);
+  const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadMerchantSummary()
-      .then((next) => {
+      .then(async (next) => {
         setSummary(next);
         setSelectedBatch(next.batches[0] ?? null);
+        const [status, nextLifecycle] = await Promise.all([
+          fetchAgentStatus().catch(() => null),
+          fetchLifecycle(next.batches[0]?.batchId ?? "FO-2026-001").catch(() => null),
+        ]);
+        setAgentStatus(status);
+        setLifecycle(nextLifecycle);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -55,6 +69,53 @@ export function MerchantApp() {
         : current,
     );
     setSelectedBatch(next);
+    setLifecycle(await fetchLifecycle(next.batchId).catch(() => null));
+  };
+
+  const refreshLifecycle = async (batchId = selectedBatch?.batchId ?? "FO-2026-001") => {
+    setLifecycleBusy(true);
+    try {
+      setLifecycle(await fetchLifecycle(batchId));
+    } catch {
+      setMessage("生命周期资料暂时无法读取，请检查 API 状态。");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const syncLifecycle = async (stage: LifecycleView["events"][number]["stage"]) => {
+    setLifecycleBusy(true);
+    try {
+      setLifecycle(await simulateLifecycleStage(selectedBatch?.batchId ?? "FO-2026-001", stage));
+      setMessage("已同步一条生产资料变化；消费者 Agent 和证据卡将在下一次查询时读取新的上下文版本。");
+    } catch {
+      setMessage("资料同步模拟失败，未修改当前批次状态。");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const askAgent = async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed || agentBusy) return;
+    const batchId = selectedBatch?.batchId ?? "FO-2026-001";
+    setAgentInput(trimmed);
+    setAgentBusy(true);
+    setAgentReply("");
+    setAgentMeta(null);
+    try {
+      await postChat(trimmed, batchId, (event) => {
+        if (event.kind === "meta") {
+          setAgentMeta({ dataMode: event.dataMode, contextMode: event.contextMode, contextSource: event.contextSource, contextRevision: event.contextRevision, syncedAt: event.syncedAt, traceId: event.traceId });
+          setAgentStatus((current) => ({ ...(current ?? {}), status: event.serviceStatus, agentMode: event.agentMode, dataMode: event.dataMode }));
+        }
+        if (event.kind === "line" && event.text) setAgentReply((current) => current ? `${current}\n${event.text}` : event.text!);
+      });
+    } catch {
+      setAgentReply("客服 Agent 暂时无法连接，已保留确定性证据卡。请稍后重试或转人工。");
+    } finally {
+      setAgentBusy(false);
+    }
   };
 
   const importEvidence = async (kind: EvidenceIssue["kind"]) => {
@@ -193,6 +254,30 @@ export function MerchantApp() {
                 ))}
               </section>
 
+              <section className="merchant-section merchant-lifecycle-section" aria-label="批次全生命周期">
+                <div className="merchant-section-head merchant-lifecycle-head">
+                  <div><span className="eyebrow">LIFECYCLE CONTEXT</span><h2>全生命周期资料</h2><p>生产方、检测机构、物流、消费者和监管角色共享同一批次上下文。</p></div>
+                  <div className="merchant-lifecycle-actions">
+                    <span className="merchant-sync-meta">{lifecycle ? `${lifecycle.contextMode} · v${lifecycle.contextRevision}` : "正在读取同步上下文"}</span>
+                    <button type="button" className="merchant-secondary" onClick={() => void refreshLifecycle()} disabled={lifecycleBusy}>↻ 刷新同步</button>
+                  </div>
+                </div>
+                {lifecycle ? (
+                  <>
+                    <div className="merchant-lifecycle-meta"><span>资料来源：{lifecycle.contextSource}</span><span>最后同步：{new Date(lifecycle.syncedAt).toLocaleString("zh-CN")}</span><span>数据模式：{lifecycle.dataMode}</span></div>
+                    <div className="merchant-lifecycle-track">
+                      {lifecycle.events.map((event, index) => (
+                        <div className={`merchant-lifecycle-event ${event.status}`} key={event.stage}>
+                          <div className="merchant-lifecycle-node">{event.status === "verified" ? "✓" : event.status === "awaiting_user" ? "⌁" : event.status === "synced" ? "●" : index + 1}</div>
+                          <div className="merchant-lifecycle-copy"><strong>{event.label}</strong><span>{event.role}</span><small>{event.detail}</small><em>{event.status === "verified" ? "已确认" : event.status === "synced" ? "已同步" : event.status === "awaiting_user" ? "等待用户钱包" : "待处理"}</em></div>
+                          {event.status !== "verified" && <button type="button" className="merchant-lifecycle-sync" onClick={() => void syncLifecycle(event.stage)} disabled={lifecycleBusy}>{event.stage === "purchase" ? "模拟购买" : event.stage === "regulatory_review" ? "模拟复核" : "同步变化"}</button>}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : <div className="merchant-empty">尚未读取生命周期上下文。</div>}
+              </section>
+
               <section className="merchant-section merchant-batch-table-section">
                 <div className="merchant-section-head">
                   <div><span className="eyebrow">BATCH OVERVIEW</span><h2>批次列表</h2></div>
@@ -284,10 +369,11 @@ export function MerchantApp() {
       {tab === "overview" && (
         <section className="merchant-agent-bar" aria-label="商品客服 Agent 演示">
           <div className="merchant-agent-avatar">◉</div>
-          <div className="merchant-agent-intro"><strong>商品客服 Agent <span>● 在线</span></strong><small>基于证据的商品咨询助手，为消费者提供客观、准确的信息</small></div>
+          <div className="merchant-agent-intro"><strong>商品客服 Agent <span className={agentStatus?.agentMode === "model_assisted" ? "agent-live" : "agent-fallback"}>{agentStatus?.agentMode === "model_assisted" ? "● 在线 · 模型" : agentStatus?.status === "ready" ? "● 在线 · 兜底" : "○ 待连接"}</span></strong><small>基于批次证据卡和生产资料同步上下文回答，不自行生成质量结论</small>{agentStatus?.model && <small className="merchant-agent-model">模型：{agentStatus.model}</small>}</div>
           <div className="merchant-agent-prompts">
-            {["这个产品的检测项目有哪些？", "适合什么人群食用？", "如何储存？", "这个批次还有哪些证据？"].map((prompt) => <button key={prompt} type="button" onClick={() => setAgentInput(prompt)}>{prompt}</button>)}
-            <form onSubmit={(event) => { event.preventDefault(); if (agentInput.trim()) setMessage("Agent Demo 已收到：" + agentInput.trim()); }}><input value={agentInput} onChange={(event) => setAgentInput(event.target.value)} placeholder="请输入您的问题…" aria-label="商品客服 Agent 问题" /><button type="submit">➤　发送</button></form>
+            {["这个产品的检测项目有哪些？", "适合什么人群食用？", "如何储存？", "这个批次还有哪些证据？"].map((prompt) => <button key={prompt} type="button" onClick={() => void askAgent(prompt)} disabled={agentBusy}>{prompt}</button>)}
+            <form onSubmit={(event) => { event.preventDefault(); void askAgent(agentInput); }}><input value={agentInput} onChange={(event) => setAgentInput(event.target.value)} placeholder="请输入您的问题…" aria-label="商品客服 Agent 问题" disabled={agentBusy} /><button type="submit" disabled={agentBusy}>{agentBusy ? "⏳　回答中" : "➤　发送"}</button></form>
+            {(agentReply || agentBusy) && <div className="merchant-agent-response" aria-live="polite"><div>{agentBusy && !agentReply ? "正在读取批次证据和生产资料…" : agentReply}</div>{agentMeta && <small>来源：{agentMeta.contextMode ?? "证据卡"} · {agentMeta.dataMode ?? "demo/synthetic"} · 上下文 v{agentMeta.contextRevision ?? "—"} · 确定性验证结论优先</small>}</div>}
           </div>
         </section>
       )}

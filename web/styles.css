@@ -1611,6 +1611,21 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+.wallet-role-actions {
+  margin-top: 13px;
+  padding: 12px;
+  border: 1px solid rgba(125, 232, 232, .18);
+  border-radius: 11px;
+  background: rgba(5, 13, 25, .42);
+}
+.wallet-role-actions-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 10px; }
+.wallet-role-actions-head > div { display: flex; flex-direction: column; gap: 4px; }
+.wallet-role-actions-head strong { color: var(--text); font-size: 13px; }
+.wallet-role-actions-head small, .wallet-role-actions-head span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.wallet-role-actions-head span { color: var(--cyan-2); white-space: nowrap; }
+.wallet-role-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.wallet-role-action-grid .wallet-tx-btn { border-color: rgba(144, 198, 255, .55); background: rgba(56, 142, 237, .1); }
+.wallet-role-action-grid .wallet-tx-btn strong { color: #b9dcff; }
 .wallet-action-btn {
   display: flex;
   flex-direction: column;
@@ -2044,7 +2059,9 @@ body {
   color: #06202a;
 }
 @media (max-width: 767px) {
-  .wallet-grid, .wallet-tx-actions { grid-template-columns: 1fr; }
+  .wallet-grid, .wallet-tx-actions, .wallet-role-action-grid { grid-template-columns: 1fr; }
+  .wallet-role-actions-head { flex-direction: column; }
+  .wallet-role-actions-head span { white-space: normal; }
   .mainnet-contract-row, .mainnet-tx-row { flex-direction: column; align-items: flex-start; }
 }
 
@@ -2638,6 +2655,39 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .merchant-agent-prompts form { display: flex; min-width: 0; gap: 7px; grid-column: 1 / -1; }
 .merchant-agent-prompts input { flex: 1; min-width: 0; padding: 10px 13px; border: 1px solid rgba(125,232,232,.22); border-radius: 8px; color: #e8f4ff; background: rgba(3,22,46,.56); }
 .merchant-agent-prompts form button { padding: 0 18px; border: 0; border-radius: 8px; color: #061d38; background: #3c93ff; cursor: pointer; font-weight: 700; }
+.merchant-agent-intro .agent-live { color: #5ce4b7; }
+.merchant-agent-intro .agent-fallback { color: #ffd477; }
+.merchant-agent-model { color: #79b9fb !important; font-family: var(--font-num); }
+.merchant-agent-prompts > button:disabled, .merchant-agent-prompts form button:disabled { opacity: .55; cursor: wait; }
+.merchant-agent-response { grid-column: 1 / -1; margin-top: 4px; padding: 11px 13px; border: 1px solid rgba(93,213,213,.24); border-radius: 10px; color: #e3f5ff; background: rgba(3,22,46,.48); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+.merchant-agent-response small { display: block; margin-top: 7px; color: #86abc9; font-size: 10px; }
+.merchant-lifecycle-section { margin: 0 30px 16px; padding: 17px 18px 16px; border-color: rgba(93,175,244,.22); background: rgba(9,39,73,.64); }
+.merchant-lifecycle-head { align-items: flex-start; margin-bottom: 11px; }
+.merchant-lifecycle-head h2 { margin-bottom: 4px; }
+.merchant-lifecycle-head p { margin: 0; color: #8eafd0; font-size: 11px; }
+.merchant-lifecycle-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+.merchant-sync-meta { color: #78d9d0; font: 10px var(--font-num); letter-spacing: .2px; }
+.merchant-lifecycle-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 13px; color: #84a7c8; font-size: 10px; }
+.merchant-lifecycle-track { display: grid; grid-template-columns: repeat(7, minmax(128px, 1fr)); gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.merchant-lifecycle-event { position: relative; min-width: 128px; min-height: 172px; padding: 12px 10px 10px; border: 1px solid rgba(125,232,232,.13); border-radius: 10px; background: rgba(3,22,46,.45); }
+.merchant-lifecycle-event::after { position: absolute; top: 24px; right: -9px; width: 9px; height: 1px; background: rgba(125,232,232,.28); content: ""; }
+.merchant-lifecycle-event:last-child::after { display: none; }
+.merchant-lifecycle-event.verified { border-color: rgba(83,225,190,.4); background: rgba(10,116,104,.19); }
+.merchant-lifecycle-event.synced { border-color: rgba(93,175,244,.3); }
+.merchant-lifecycle-event.awaiting_user { border-color: rgba(255,194,89,.35); background: rgba(132,99,31,.13); }
+.merchant-lifecycle-node { display: grid; place-items: center; width: 25px; height: 25px; margin-bottom: 9px; border: 1px solid rgba(125,232,232,.35); border-radius: 50%; color: #8fc6ff; background: rgba(56,142,237,.18); font: 11px var(--font-num); }
+.verified .merchant-lifecycle-node { color: #72f0c9; border-color: rgba(83,225,190,.48); background: rgba(10,116,104,.3); }
+.awaiting_user .merchant-lifecycle-node { color: #ffd477; border-color: rgba(255,194,89,.4); }
+.merchant-lifecycle-copy { display: flex; flex-direction: column; gap: 4px; }
+.merchant-lifecycle-copy strong { color: #e5f2ff; font-size: 12px; }
+.merchant-lifecycle-copy span { color: #7fa6cb; font-size: 10px; }
+.merchant-lifecycle-copy small { min-height: 42px; color: #a1bdd6; font-size: 10px; line-height: 1.5; }
+.merchant-lifecycle-copy em { align-self: flex-start; padding: 3px 6px; border-radius: 999px; color: #8ec5f9; background: rgba(56,142,237,.16); font-size: 9px; font-style: normal; }
+.verified .merchant-lifecycle-copy em { color: #73e9c7; background: rgba(16,185,129,.16); }
+.awaiting_user .merchant-lifecycle-copy em { color: #ffd477; background: rgba(255,184,71,.16); }
+.merchant-lifecycle-sync { margin-top: 9px; padding: 6px 7px; border: 1px solid rgba(125,232,232,.22); border-radius: 6px; color: #bfeaff; background: rgba(255,255,255,.045); cursor: pointer; font-size: 10px; }
+.merchant-lifecycle-sync:hover, .merchant-lifecycle-sync:focus-visible { border-color: var(--cyan); outline: none; }
+.merchant-lifecycle-sync:disabled { opacity: .55; cursor: wait; }
 
 @media (max-width: 1250px) {
   .merchant-app-frame { grid-template-columns: 180px minmax(0,1fr); }
@@ -2663,6 +2713,10 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
   .merchant-dashboard-heading { padding: 20px 14px 14px; }
   .merchant-heading-controls { align-items: flex-start; }
   .merchant-dashboard-kpis { grid-template-columns: 1fr 1fr; margin: 0 14px 12px; gap: 8px; }
+  .merchant-lifecycle-section { margin: 0 14px 12px; padding: 13px 12px; }
+  .merchant-lifecycle-head { gap: 8px; }
+  .merchant-lifecycle-actions { justify-content: flex-start; }
+  .merchant-lifecycle-track { grid-template-columns: repeat(7, 148px); }
   .merchant-dashboard-kpi { min-height: 100px; padding: 12px; }
   .merchant-dashboard-kpi strong { font-size: 26px; }
   .merchant-batch-table-section { margin: 0 14px; padding: 13px 10px; }

@@ -168,6 +168,73 @@ const FISH_OIL_BATCHES: Record<string, { name: string; image: string; epaDha: nu
   "FO-2026-010": { name: "高纯度磷虾油胶囊", image: "/assets/fish-oil-010.png", epaDha: 86, peroxide: 6.5, totox: 18, coldGap: 3, productionDate: "2026-07-28", origin: "南极海域", passed: false, heavyMetals: { pb: 0.05, hg: 0.03, cd: 0.15, as: 0.3 } },
 };
 
+type LifecycleStage = "production" | "inspection" | "cold_chain" | "shipment" | "purchase" | "after_sales" | "regulatory_review";
+type LifecycleStatus = "synced" | "verified" | "pending" | "awaiting_user";
+type LifecycleEvent = {
+  stage: LifecycleStage;
+  label: string;
+  role: string;
+  status: LifecycleStatus;
+  detail: string;
+  updatedAt: string;
+  walletAction?: "evidence" | "verification" | "purchase" | "contribution" | "dispute";
+  requiredRole?: string;
+};
+
+const LIFECYCLE_STAGE_DEFS: Array<Omit<LifecycleEvent, "status" | "updatedAt"> & { initialStatus: LifecycleStatus }> = [
+  { stage: "production", label: "生产方提交", role: "生产方 Agent", initialStatus: "synced", detail: "生产记录已同步，等待机构或监管签名锚定。", walletAction: "evidence", requiredRole: "EVIDENCE_WRITER_ROLE" },
+  { stage: "inspection", label: "检测机构签名", role: "检测机构 Agent", initialStatus: "synced", detail: "检测报告已关联 batchId / sampleId，签名状态可继续核验。", walletAction: "verification", requiredRole: "VERIFIER_ROLE" },
+  { stage: "cold_chain", label: "冷链记录同步", role: "物流与设备 Agent", initialStatus: "synced", detail: "温度、湿度和中断时长来自演示设备同步。" },
+  { stage: "shipment", label: "出货与交付", role: "物流 Agent", initialStatus: "pending", detail: "等待物流回调绑定订单和批次。" },
+  { stage: "purchase", label: "消费者购买", role: "消费者 Agent", initialStatus: "awaiting_user", detail: "需要消费者钱包签名并回读 PurchaseRecorded receipt。", walletAction: "purchase", requiredRole: "CONSUMER_SELF_SERVICE" },
+  { stage: "after_sales", label: "售后与反馈", role: "消费者客服 Agent", initialStatus: "pending", detail: "购买确认后开放授权反馈和争议入口。", walletAction: "contribution", requiredRole: "CONSUMER_SELF_SERVICE" },
+  { stage: "regulatory_review", label: "监管复核", role: "监管 / 审核 Agent", initialStatus: "pending", detail: "监管钱包可提交验证记录或发起质疑，最终状态仍由确定性规则和人工流程决定。", walletAction: "dispute", requiredRole: "CONSUMER_SELF_SERVICE" },
+];
+
+const lifecycleSimulation = new Map<string, { revision: number; syncedAt: string; events: LifecycleEvent[] }>();
+
+function lifecycleStateFor(batchId: string) {
+  const current = lifecycleSimulation.get(batchId);
+  if (current) return current;
+  const now = new Date().toISOString();
+  const created = {
+    revision: 1,
+    syncedAt: now,
+    events: LIFECYCLE_STAGE_DEFS.map(({ initialStatus, ...definition }) => ({ ...definition, status: initialStatus, updatedAt: now })),
+  };
+  lifecycleSimulation.set(batchId, created);
+  return created;
+}
+
+function lifecyclePublicView(batchId: string) {
+  const state = lifecycleStateFor(batchId);
+  return {
+    schemaVersion: "truthpass.lifecycle.v1",
+    batchId,
+    contextMode: "production_sync_simulation" as const,
+    contextSource: "repository+demo_fixture" as const,
+    contextRevision: state.revision,
+    syncedAt: state.syncedAt,
+    dataMode: "demo/synthetic" as const,
+    events: state.events,
+    nextAction: state.events.find((event) => event.status === "pending" || event.status === "awaiting_user")?.stage ?? "complete",
+    walletRoles: state.events.filter((event) => event.walletAction).map((event) => ({ stage: event.stage, label: event.label, role: event.role, action: event.walletAction, requiredRole: event.requiredRole })),
+  };
+}
+
+function simulateLifecycleStage(batchId: string, stage: LifecycleStage) {
+  const state = lifecycleStateFor(batchId);
+  const now = new Date().toISOString();
+  const event = state.events.find((item) => item.stage === stage);
+  if (!event) throw new Error("不支持的生命周期阶段: " + stage);
+  event.status = stage === "purchase" ? "verified" : "verified";
+  event.updatedAt = now;
+  event.detail = stage === "regulatory_review" ? "监管复核记录已同步，等待链上 receipt 或人工裁决。" : event.detail.replace("等待", "已完成");
+  state.revision += 1;
+  state.syncedAt = now;
+  return lifecyclePublicView(batchId);
+}
+
 function heavyMetalStatus(metals: HeavyMetals): "pass" | "fail" {
   const keys = Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>;
   return keys.some((k) => metals[k] > HEAVY_METAL_LIMITS[k]) ? "fail" : "pass";
@@ -817,6 +884,10 @@ type ChatMeta = {
   dataMode: "demo/synthetic" | "external";
   batchId: string | null;
   traceId: string;
+  contextMode?: "production_sync_simulation" | "external_production";
+  contextSource?: string;
+  contextRevision?: number;
+  syncedAt?: string;
   sources?: string[];
 };
 
@@ -858,6 +929,10 @@ async function streamChatWithReply(
     dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
     batchId: baseMeta.batchId,
     traceId: baseMeta.traceId,
+    ...(baseMeta.contextMode ? { contextMode: baseMeta.contextMode } : {}),
+    ...(baseMeta.contextSource ? { contextSource: baseMeta.contextSource } : {}),
+    ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
+    ...(baseMeta.syncedAt ? { syncedAt: baseMeta.syncedAt } : {}),
     ...(result.sources?.length ? { sources: result.sources } : {}),
   });
   for (const line of script) send({ kind: "line", ...line });
@@ -976,7 +1051,15 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
   }
 
   const reply = demoConsumerChat(batchId, b, question);
-  await streamChatWithReply(res, "consumer_evidence", [], reply, { batchId, traceId });
+  const lifecycle = lifecyclePublicView(batchId);
+  await streamChatWithReply(res, "consumer_evidence", [], reply, {
+    batchId,
+    traceId,
+    contextMode: lifecycle.contextMode,
+    contextSource: lifecycle.contextSource,
+    contextRevision: lifecycle.contextRevision,
+    syncedAt: lifecycle.syncedAt,
+  });
 }
 
 
@@ -1090,6 +1173,7 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     }),
   };
   const card = answerConsumerQuestion(question, snapshot);
+  const lifecycle = lifecyclePublicView(batchId);
   const context = buildJevContext(repository, batchId);
   const productionInput = { schemaVersion: "agent.input.v1" as const, role: "production" as const, view: buildJevRoleView(context, "production") };
   const inspectionInput = {
@@ -1114,6 +1198,10 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     question,
     agentMode: effectiveMode,
     dataMode: verification.dataClass,
+    contextMode: lifecycle.contextMode,
+    contextSource: lifecycle.contextSource,
+    contextRevision: lifecycle.contextRevision,
+    syncedAt: lifecycle.syncedAt,
     verifierVersion: assessment ? "deterministic-verifier-v1" : null,
     verification,
     evidenceCard: card,
@@ -1669,6 +1757,24 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  if (p === "/api/simulator/lifecycle" && req.method === "POST") {
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : BATCH_ID;
+    const rawStage = typeof body.stage === "string" ? body.stage : "";
+    const stage = LIFECYCLE_STAGE_DEFS.some((item) => item.stage === rawStage) ? rawStage as LifecycleStage : undefined;
+    if (!FISH_OIL_BATCHES[batchId]) {
+      sendJson(res, 404, { error: "batch not found" });
+      return true;
+    }
+    try {
+      if (!stage) throw new Error("不支持的生命周期阶段: " + rawStage);
+      sendJson(res, 200, { ok: true, ...simulateLifecycleStage(batchId, stage) });
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
   if (p === "/api/simulator/iot" && req.method === "POST") {
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
@@ -1831,6 +1937,17 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     sendJson(res, 200, { batchId, status: b.passed ? "verified" : "review", steps: journeyFor(batchId) });
+    return true;
+  }
+
+  const lifecycleMatch = p.match(/^\/api\/products\/([^/]+)\/lifecycle\/?$/);
+  if (lifecycleMatch && req.method === "GET") {
+    const batchId = lifecycleMatch[1].trim().toUpperCase();
+    if (!FISH_OIL_BATCHES[batchId]) {
+      sendJson(res, 404, { error: "batch not found" });
+      return true;
+    }
+    sendJson(res, 200, lifecyclePublicView(batchId));
     return true;
   }
 
