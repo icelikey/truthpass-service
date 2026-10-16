@@ -1750,6 +1750,18 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       createdAt: new Date().toISOString(),
     };
     sessionChainTxs.unshift(record);
+    const lifecycleStageByAction: Partial<Record<string, LifecycleStage>> = {
+      evidence: "production",
+      verification: "regulatory_review",
+      audit_finding: "regulatory_review",
+      audit_approval: "regulatory_review",
+      resolve_challenge: "regulatory_review",
+      purchase: "purchase",
+      contribution: "after_sales",
+      dispute: "regulatory_review",
+    };
+    const lifecycleStage = lifecycleStageByAction[record.action];
+    if (lifecycleStage && FISH_OIL_BATCHES[record.batchId]) simulateLifecycleStage(record.batchId, lifecycleStage);
     sendJson(res, 201, {
       ok: true,
       status: "mainnet_receipt_verified",

@@ -55,13 +55,13 @@ function LineView({ line }: { line: ChatLine }) {
 function serviceStatusMeta(status?: string): { pill: string; cls: string; sse: string } | null {
   switch (status) {
     case "model_assisted":
-      return { pill: "model_assisted", cls: "verified", sse: "loading" };
+      return { pill: "智能回答", cls: "verified", sse: "loading" };
     case "deterministic_fallback":
-      return { pill: "deterministic_fallback", cls: "fallback", sse: "fallback" };
+      return { pill: "基础回答", cls: "fallback", sse: "fallback" };
     case "provider_unavailable":
-      return { pill: "provider unavailable", cls: "unavailable", sse: "unavailable" };
+      return { pill: "暂时无法连接", cls: "unavailable", sse: "unavailable" };
     case "rate_limited":
-      return { pill: "rate limited", cls: "rate-limited", sse: "rate-limited" };
+      return { pill: "请求较多", cls: "rate-limited", sse: "rate-limited" };
     case "maintenance":
       return { pill: "maintenance", cls: "unavailable", sse: "unavailable" };
     default:
@@ -96,6 +96,7 @@ function MessageView({
   const serviceStatus = message.meta?.serviceStatus ?? agentMode;
   const dataMode = message.meta?.dataMode ?? "demo/synthetic";
   const statusMeta = serviceStatusMeta(serviceStatus);
+  const agentLabel = agentMode === "model_assisted" ? "智能回答" : agentMode === "deterministic_fallback" ? "基础回答" : "商品助手";
   const isLoading = !message.done && message.lines.length === 0;
   const showHandoff =
     serviceStatus === "provider_unavailable" ||
@@ -107,14 +108,17 @@ function MessageView({
     <div className="msg agent">
       <div className="chat-meta" aria-label="回答元信息">
         <span className={`status-pill ${agentMode === "model_assisted" ? "verified" : "fallback"}`}>
-          {agentMode === "model_assisted" ? "model_assisted" : agentMode === "deterministic_fallback" ? "deterministic_fallback" : "Agent"}
+          {agentLabel}
         </span>
-        <span className={`mode-badge ${dataMode === "external" ? "external" : ""}`}>{dataMode}</span>
+        <span className={`mode-badge ${dataMode === "external" ? "external" : ""}`}>{dataMode === "external" ? "真实资料" : "演示资料"}</span>
         {statusMeta && serviceStatus !== agentMode && (
           <span className={`status-pill ${statusMeta.cls}`}>{statusMeta.pill}</span>
         )}
         {message.meta?.batchId && (
           <span className="batch-id-chip"><code>{message.meta.batchId}</code></span>
+        )}
+        {message.meta?.contextRevision !== undefined && (
+          <span className="batch-id-chip">资料更新 v{message.meta.contextRevision}</span>
         )}
       </div>
 
@@ -125,7 +129,7 @@ function MessageView({
         <div className="chat-sse-state loading" role="status">流式输出中…</div>
       )}
       {message.done && statusMeta?.sse === "fallback" && (
-        <div className="chat-sse-state fallback" role="status">已切换确定性兜底，非模型实时判定。</div>
+        <div className="chat-sse-state fallback" role="status">当前使用基础回答，内容仍来自已登记资料。</div>
       )}
       {message.done && statusMeta?.sse === "unavailable" && (
         <div className="chat-sse-state unavailable" role="status">模型服务暂不可用，请稍后重试或转人工。</div>
@@ -165,8 +169,13 @@ function MessageView({
             <div className="order-info">
               <b>购买准备已生成 · {message.order.orderId}</b>
               <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
+              <div className="order-flow-steps" aria-label="购买进度">
+                <span className="active">1 购买准备</span>
+                <span className={message.order.txHash ? "active" : "current"}>2 商家确认</span>
+                <span className={message.order.txHash ? "active" : ""}>3 钱包确认</span>
+              </div>
               <span className="order-status">
-                状态：{message.order.txHash ? "已有链上交易 receipt" : "待商家结账 · anchor_pending（尚未完成锚定）"}
+                状态：{message.order.txHash ? "交易已确认" : "等待商家确认价格和地址"}
               </span>
               {message.order.txHash ? (
                 <a
@@ -179,15 +188,18 @@ function MessageView({
                   BOT Chain 交易 {shortHex(message.order.txHash, 10, 6)} · 核验 ↗
                 </a>
               ) : (
-                <button
-                  type="button"
-                  className="order-anchor-btn"
-                  aria-label="使用钱包签名上链存证购买凭证"
-                  disabled={!walletReady || txBusy}
-                  onClick={() => onAnchorOrder(message.order!)}
-                >
-                  {txBusy ? "钱包签名中…" : "钱包签名上链存证"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="order-anchor-btn"
+                    aria-label="使用钱包签名上链存证购买凭证"
+                    disabled={!walletReady || txBusy}
+                    onClick={() => onAnchorOrder(message.order!)}
+                  >
+                    {txBusy ? "正在等待钱包确认…" : "确认钱包操作"}
+                  </button>
+                  {!walletReady && <small className="order-wallet-hint">连接自己的钱包后，才可以确认购买记录。</small>}
+                </>
               )}
             </div>
           </div>
@@ -215,6 +227,7 @@ export function ChatPanel({
   onDone,
   onBatch,
   onPurchasePrepared,
+  onWalletPending,
   onReceiptVerified,
   afterSalesPrompt,
   onPromptConsumed,
@@ -224,6 +237,7 @@ export function ChatPanel({
   onDone: () => void;
   onBatch: (id: string) => void;
   onPurchasePrepared?: () => void;
+  onWalletPending?: () => void;
   onReceiptVerified?: () => void;
   afterSalesPrompt?: string;
   onPromptConsumed?: () => void;
@@ -312,6 +326,7 @@ export function ChatPanel({
 
   const handleAnchorOrder = async (order: OrderCard) => {
     try {
+      onWalletPending?.();
       const tx = await executeOnChainAction({
         action: "purchase",
         batchId: order.batchId,
@@ -401,7 +416,7 @@ export function ChatPanel({
           <strong>TruthPass Agent 客服</strong>
           <small>
             <span className="status-dot" title="在线" />
-            解释证据来源 · 标明数据模式 · 非质量判定器
+            解释资料来源 · 告诉你不确定的地方 · 给出下一步
           </small>
         </div>
       </div>
@@ -409,16 +424,16 @@ export function ChatPanel({
       <div className="chat-log" ref={chatLogRef} aria-live="polite">
         <div className="msg agent">
           <div className="chat-meta" aria-label="欢迎语元信息">
-            <span className="status-pill demo">demo / synthetic</span>
-            <span className="status-pill pending">Agent CS</span>
+            <span className="status-pill demo">演示资料</span>
+            <span className="status-pill pending">商品助手</span>
           </div>
           <div className="msg-bubble">
             <div className="reason-line">
-              你好，我是 TruthPass Agent。我可以解释批次证据、来源与不确定项，并协助购买准备或售后指引。
-              鱼油批次仅为演示；回答会标明 model_assisted / deterministic_fallback 与 demo/synthetic。
+              你好，我是 TruthPass 商品助手。我可以帮你看懂生产、检测、运输和售后资料，
+              也可以帮你准备购买。当前鱼油批次是演示资料。
             </div>
             <div className="disclaimer">
-              下一步：选择批次提问，或查看证据缺口 / 签名状态。需要人工时点「转人工客服」。
+              你可以先选择一个批次，也可以直接问“这批还缺什么”或“我能不能继续了解”。
             </div>
           </div>
         </div>

@@ -29,10 +29,17 @@ const CAP_LABELS: Record<string, string> = {
 };
 
 function anchorLabel(status?: string): { text: string; cls: string } {
-  if (!status) return { text: "loading", cls: "pending" };
-  if (status === "anchored" || status === "confirmed") return { text: status, cls: "verified" };
-  if (status === "anchor_pending" || status === "pending") return { text: "anchor_pending · 尚未完成锚定", cls: "anchor-pending" };
-  return { text: status, cls: "review" };
+  if (!status) return { text: "正在读取", cls: "pending" };
+  if (status === "anchored" || status === "confirmed") return { text: "已确认", cls: "verified" };
+  if (status === "anchor_pending" || status === "pending") return { text: "等待确认", cls: "anchor-pending" };
+  return { text: "需要继续处理", cls: "review" };
+}
+
+function verificationLabel(status?: string): string {
+  if (status === "accepted") return "当前规则通过";
+  if (status === "rejected") return "需要复核";
+  if (status === "missing_evidence") return "资料不足";
+  return "正在读取";
 }
 
 export function CliReferencePanel() {
@@ -63,21 +70,21 @@ export function CliReferencePanel() {
     <section id="cli-reference" className="cli-reference-demo">
       <div className="cli-reference-demo-head">
         <div>
-          <span className="cli-reference-kicker">开放协议能力</span>
-          <h2>同一批证据，服务商家、Agent 和消费者</h2>
-          <p>商家保留原有系统；TruthPass 暴露商品、批次、验证、购买准备与售后能力。下列为演示参考实现。</p>
+          <span className="cli-reference-kicker">商品资料如何流转</span>
+          <h2>同一批资料，企业、Agent 和消费者都能看懂</h2>
+          <p>企业继续使用自己的系统，TruthPass 帮它把商品、批次、检测、购买和售后信息整理成一份公开说明。下面是一份演示。</p>
         </div>
         <span className={`status-pill ${dataMode === "external" ? "verified" : "demo"}`}>
-          {dataMode === "external" ? "external" : "DEMO / SYNTHETIC"}
+          {dataMode === "external" ? "真实资料" : "演示资料"}
         </span>
       </div>
 
       <div className="cli-reference-flow" aria-label="开放协议能力流程">
         {[
-          ["01", "协议发现", "Manifest 声明可读能力"],
-          ["02", "商品与批次", "商品信息 + 批次证据"],
-          ["03", "验证", "确定性验收与缺口"],
-          ["04", "购买与售后", "准备订单 · 售后反馈"],
+          ["01", "先看商品", "找到商品和批次"],
+          ["02", "看资料", "生产、检测和运输"],
+          ["03", "看清楚", "知道通过、缺少和不确定"],
+          ["04", "做决定", "购买准备和售后帮助"],
         ].map(([step, title, detail]) => (
           <div className="cli-reference-flow-step" key={step}>
             <span>{step}</span>
@@ -95,7 +102,7 @@ export function CliReferencePanel() {
               <strong>海蓝营养 · FO-2026-001</strong>
             </div>
             <span className={`status-pill ${verification?.status === "accepted" ? "verified" : verification?.status === "rejected" ? "rejected" : "review"}`}>
-              {verification?.status ?? "loading"}
+          {verificationLabel(verification?.status)}
             </span>
           </div>
           <p>{verification?.summary ?? "正在读取参考实现批次验证结果…"}</p>
@@ -114,10 +121,10 @@ export function CliReferencePanel() {
             type="button"
             className="ghost-button"
             style={{ justifySelf: "start", marginTop: 4 }}
-            aria-label={showHash ? "收起证据哈希" : "展开证据哈希与数据模式"}
+            aria-label={showHash ? "收起详细依据" : "展开详细依据"}
             onClick={() => setShowHash((v) => !v)}
           >
-            {showHash ? "收起技术字段" : "展开证据哈希"}
+            {showHash ? "收起详细依据" : "查看详细依据"}
           </button>
           {showHash && (
             <>
@@ -130,10 +137,10 @@ export function CliReferencePanel() {
         <div className="cli-reference-manifest-card">
           <div className="cli-reference-card-head">
             <div>
-              <small>Agent 可发现能力</small>
-              <strong>{manifest?.protocol ?? "CLI_REFERENCE"} · v{manifest?.version ?? "—"}</strong>
+              <small>Agent 可以帮助你做什么</small>
+              <strong>商品助手能力</strong>
             </div>
-            <span className="cli-reference-open-badge">OPEN</span>
+            <span className="cli-reference-open-badge">公开</span>
           </div>
           <div className="cli-reference-capabilities">
             {(manifest?.capabilities ?? ["product.read", "batch.verify", "order.prepare", "assistant.read"]).map((capability) => (
@@ -143,9 +150,9 @@ export function CliReferencePanel() {
               </code>
             ))}
           </div>
-          <p>健康疗效与个人数据不进公共层；公共层只发布规则、状态与可验证哈希。</p>
-          <a href="/api/cli/reference/manifest" target="_blank" rel="noreferrer" aria-label="在新窗口查看 CLI 参考实现 Manifest">
-            查看 Manifest ↗
+          <p>健康和个人信息不会公开；页面只展示商品资料、确认状态和需要继续处理的地方。</p>
+          <a href="/api/cli/reference/manifest" target="_blank" rel="noreferrer" aria-label="在新窗口查看完整能力说明">
+            查看完整说明 ↗
           </a>
         </div>
       </div>

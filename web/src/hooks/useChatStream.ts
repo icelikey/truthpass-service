@@ -10,7 +10,7 @@ export interface ChatMessage {
   error?: string;
   recommendations?: RecommendItem[];
   order?: OrderCard;
-  meta?: Pick<ChatEvent, "agentMode" | "serviceStatus" | "dataMode" | "batchId" | "traceId" | "sources">;
+  meta?: Pick<ChatEvent, "agentMode" | "serviceStatus" | "dataMode" | "batchId" | "traceId" | "sources" | "contextMode" | "contextSource" | "contextRevision" | "syncedAt">;
 }
 
 let seq = 0;

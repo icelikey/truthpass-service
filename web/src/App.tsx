@@ -137,6 +137,7 @@ export default function App() {
               setConsumerStage("batch_selected");
             }}
             onPurchasePrepared={() => setConsumerStage("purchase_prepared")}
+            onWalletPending={() => setConsumerStage("wallet_pending")}
             onReceiptVerified={() => setConsumerStage("receipt_verified")}
             afterSalesPrompt={afterSalesPrompt}
             onPromptConsumed={() => setAfterSalesPrompt("")}

@@ -238,10 +238,10 @@ function BatchCompleteness({ product }: { product: ProductBatch }) {
         <div className="uncertainty-note" role="note">
           <strong>关于不确定项</strong>
           {(product.dataMode ?? "demo/synthetic") === "demo/synthetic"
-            ? "当前为 demo/synthetic 演示数据，不能视为真实商品认证。"
+            ? "当前为演示资料，不能视为真实商品认证。"
             : "部分后期环节或检测项仍在补齐中。"}
           {gaps.length > 0 ? ` 已知缺口：${gaps.join("；")}。` : " "}
-          缺口不等于已判定不合格；Agent 回答会标明来源与数据模式。
+          缺口不等于已判定不合格；商品助手会告诉你资料来自哪里以及下一步怎么做。
         </div>
       )}
     </>
@@ -343,10 +343,10 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
           <div className="product-kicker-row">
             <span className="product-kicker">批次摘要</span>
             <span className={`mode-badge ${(product.dataMode ?? "demo/synthetic") === "external" ? "external" : ""}`}>
-              {product.dataMode ?? "demo/synthetic"}
+              {(product.dataMode ?? "demo/synthetic") === "external" ? "真实资料" : "演示资料"}
             </span>
             <span className={`status-pill ${product.verification.status === "accepted" ? "verified" : product.verification.status === "rejected" ? "rejected" : "review"}`}>
-              {product.verification.status}
+              {product.verification.status === "accepted" ? "当前规则通过" : product.verification.status === "rejected" ? "需要复核" : "资料不足"}
             </span>
           </div>
           <h2 className="product-name">{product.name}</h2>
@@ -354,8 +354,8 @@ export function ProductPanel({ state, batchId }: { state: VerifyState; batchId: 
             批次 <code>{product.batchId}</code>
           </p>
           <p className="product-source">
-            数据来源：{product.dataSource === "postgres" ? "数据库登记" : "演示 fixtures"}
-            · 证据状态与数据模式分开展示，避免混淆
+            数据来源：{product.dataSource === "postgres" ? "企业登记资料" : "演示资料"}
+            · 页面会区分已确认和仍需补充的内容
           </p>
           <p className="product-tags">
             {product.supplyChainTags.map((tag) => (

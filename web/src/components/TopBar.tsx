@@ -36,7 +36,7 @@ export function TopBar({
           title="在 BOT Chain Mainnet 区块浏览器核验合约"
         >
           <span className="chain-dot" />
-          BOT · 677
+          公开记录
         </a>
 
         <button
@@ -57,7 +57,7 @@ export function TopBar({
         </button>
 
         <a className="ghost-button topbar-merchant-link" href="/merchant" aria-label="打开商家工作台">
-          商家工作台
+          企业入口
         </a>
         <button
           className="ghost-button"
@@ -65,7 +65,7 @@ export function TopBar({
           aria-label="打开评委观察台"
           onClick={onOpenObserver}
         >
-          观察台
+          查看全流程
         </button>
         <button
           className="ghost-button"
@@ -73,7 +73,7 @@ export function TopBar({
           aria-label="打开技术详情与 CLI / BotChain"
           onClick={onOpenEvidence}
         >
-          技术详情
+          资料说明
         </button>
 
         {userEmail ? (

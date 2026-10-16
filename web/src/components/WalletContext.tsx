@@ -292,6 +292,7 @@ export function WalletProvider({
           ids: prepared.ids,
         });
         setLastTx(confirmed.transaction);
+        window.dispatchEvent(new CustomEvent("truthpass:lifecycle-updated", { detail: { batchId: params.batchId, action: params.action } }));
         if (params.action === "purchase" && typeof prepared.ids?.purchaseId === "string") {
           setLatestPurchaseId(prepared.ids.purchaseId);
         }
@@ -426,7 +427,7 @@ export function WalletProvider({
             {/* 2. 真实产品功能链上交互 */}
             <div className="wallet-section">
               <div className="wallet-section-head">
-                <b>2. 真实产品功能链上交互（点击下方按钮立即触发上链）</b>
+                <b>2. 商品确认和争议处理</b>
                 <span>
                   合约：TruthPassConsumerGateway (
                   {shortHex(chainStatus?.contracts.consumerGateway.address ?? "0x5192484B107E51EADFda4DBF4c9fFa41C03453F1")}
@@ -482,10 +483,10 @@ export function WalletProvider({
                   }
                 >
                   <strong>
-                    {activeAction === "purchase" ? "⏳ 正在上链存证…" : "⛓️ 1. 链上购买凭证锚定"}
+                    {activeAction === "purchase" ? "⏳ 正在确认购买记录…" : "🛒 1. 确认购买记录"}
                   </strong>
-                   <small>调用 ConsumerGateway.recordPurchase 写入购买凭证</small>
-                  <span className="wallet-tx-cta">点击立即上链 →</span>
+                   <small>把本次购买和当前批次关联起来。</small>
+                  <span className="wallet-tx-cta">确认钱包操作 →</span>
                 </button>
 
                 <button
@@ -502,10 +503,10 @@ export function WalletProvider({
                   }
                 >
                   <strong>
-                    {activeAction === "contribution" ? "⏳ 正在铸造积分…" : "🌟 2. 链上共建积分铸造"}
+                    {activeAction === "contribution" ? "⏳ 正在提交反馈…" : "💬 2. 提交购买反馈"}
                   </strong>
-                   <small>{latestPurchaseId ? "调用 ConsumerGateway.recordContribution 登记积分" : "请先完成本钱包的购买凭证登记"}</small>
-                  <span className="wallet-tx-cta">点击铸造 20 积分 →</span>
+                   <small>{latestPurchaseId ? "把你的反馈和已确认的购买关联起来。" : "请先完成购买记录确认。"}</small>
+                  <span className="wallet-tx-cta">确认钱包操作 →</span>
                 </button>
 
                 <button
@@ -522,46 +523,46 @@ export function WalletProvider({
                   }
                 >
                   <strong>
-                    {activeAction === "dispute" ? "⏳ 正在提交争议…" : "⚠️ 3. 链上发起质量争议"}
+                    {activeAction === "dispute" ? "⏳ 正在提交复核申请…" : "⚠️ 3. 申请人工复核"}
                   </strong>
-                   <small>调用 AuditEscrow.openChallenge 并锁定质押</small>
-                  <span className="wallet-tx-cta">点击发起争议 →</span>
+                   <small>当你认为资料有问题时，提交一份不可静默删除的复核申请。</small>
+                  <span className="wallet-tx-cta">确认钱包操作 →</span>
                 </button>
               </div>
 
               <div className="wallet-role-actions">
                 <div className="wallet-role-actions-head">
                   <div>
-                    <strong>生产、检测与监管钱包交互</strong>
-                    <small>这些操作不是消费者购买：需要对应机构钱包和合约角色，服务端会在 receipt 中校验业务事件。</small>
+                    <strong>机构和审核钱包</strong>
+                    <small>这些操作不是消费者购买。对应机构确认后，页面会留下可查看的公开记录；没有对应权限时，交易不会完成。</small>
                   </div>
-                  <span>公开接口：EvidenceAnchor · VerificationRecorded</span>
+                  <span>生产方 · 检测机构 · 审核方 · 仲裁方</span>
                 </div>
                 <div className="wallet-role-action-grid">
                   <button type="button" className={activeAction === "evidence" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "evidence", batchId: targetBatch }).catch(() => undefined)}>
                     <strong>{activeAction === "evidence" ? "⏳ 正在锚定证据…" : "🏭 生产方 / 检测机构：锚定证据"}</strong>
-                    <small>EVIDENCE_WRITER_ROLE · 写入 EvidenceAnchored</small>
-                    <span className="wallet-tx-cta">连接机构钱包后签名 →</span>
+                    <small>确认这份生产或检测资料确实由本机构提供。</small>
+                    <span className="wallet-tx-cta">确认后留下公开记录 →</span>
                   </button>
                   <button type="button" className={activeAction === "verification" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "verification", batchId: targetBatch }).catch(() => undefined)}>
                     <strong>{activeAction === "verification" ? "⏳ 正在提交核验…" : "⚖️ 监管 / 审核机构：提交核验"}</strong>
-                    <small>VERIFIER_ROLE · 写入 VerificationRecorded</small>
-                    <span className="wallet-tx-cta">连接审核钱包后签名 →</span>
+                    <small>确认审核结果和当前批次对应。</small>
+                    <span className="wallet-tx-cta">审核方确认 →</span>
                   </button>
                   <button type="button" className={activeAction === "audit_finding" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "audit_finding", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
                     <strong>{activeAction === "audit_finding" ? "⏳ 正在提交调查发现…" : "🔎 审核 Agent：提交调查发现"}</strong>
-                    <small>AUDIT_AGENT_ROLE · 写入 AuditFindingSubmitted</small>
-                    <span className="wallet-tx-cta">绑定争议编号后签名 →</span>
+                    <small>记录对争议资料的调查发现。</small>
+                    <span className="wallet-tx-cta">绑定争议后继续 →</span>
                   </button>
                   <button type="button" className={activeAction === "audit_approval" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "audit_approval", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
                     <strong>{activeAction === "audit_approval" ? "⏳ 正在批准发现…" : "⚖️ 监管机构：批准调查发现"}</strong>
-                    <small>VERIFIER_ROLE · 写入 AuditVerifierApproved</small>
-                    <span className="wallet-tx-cta">连接监管钱包后签名 →</span>
+                    <small>批准调查意见，进入最终处理。</small>
+                    <span className="wallet-tx-cta">审核方确认 →</span>
                   </button>
                   <button type="button" className={activeAction === "resolve_challenge" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "resolve_challenge", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
                     <strong>{activeAction === "resolve_challenge" ? "⏳ 正在提交裁决…" : "⚖️ 仲裁机构：结案裁决"}</strong>
-                    <small>ARBITER_ROLE · 写入 ChallengeResolved</small>
-                    <span className="wallet-tx-cta">连接仲裁钱包后签名 →</span>
+                    <small>给出争议处理结果并结束流程。</small>
+                    <span className="wallet-tx-cta">仲裁方确认 →</span>
                   </button>
                 </div>
               </div>
@@ -584,18 +585,18 @@ export function WalletProvider({
                 <div className="wallet-receipt-box" key={lastTx.id || txSeq}>
                   <div className="wallet-receipt-main">
                     <div className="wallet-receipt-head">
-                      <span className="wallet-receipt-badge">✓ 上链已确认 #{txSeq}</span>
+                      <span className="wallet-receipt-badge">✓ 公开记录已确认 #{txSeq}</span>
                       <strong>
-                        事件：{lastTx.event} · 批次 {lastTx.batchId}
+                        批次 {lastTx.batchId} · {lastTx.event === "PurchaseRecorded" ? "购买记录" : lastTx.event === "VerificationRecorded" ? "审核记录" : lastTx.event === "EvidenceAnchored" ? "资料记录" : "处理记录"}
                       </strong>
                       <small>{new Date(lastTx.createdAt).toLocaleTimeString()}</small>
                     </div>
                     <div className="wallet-receipt-meta">
                       <span>
-                        签名钱包：<code>{shortHex(lastTx.wallet, 8, 6)}</code> ({lastTx.providerName})
+                        确认钱包：<code>{shortHex(lastTx.wallet, 8, 6)}</code> ({lastTx.providerName})
                       </span>
                       <span>
-                        目标合约：<code>{shortHex(lastTx.contractAddress, 8, 6)}</code>
+                        公开记录位置：<code>{shortHex(lastTx.contractAddress, 8, 6)}</code>
                       </span>
                       <span>
                         主网区块：<code>#{lastTx.blockNumber ?? 25873910}</code>
@@ -628,7 +629,7 @@ export function WalletProvider({
             {/* 3. BOT Chain Mainnet (677) 主网已部署合约与可验证交易记录 */}
             <div className="wallet-section">
               <div className="wallet-section-head">
-                <b>3. BOT Chain Mainnet (Chain ID: 677) 主网合约与交易核验</b>
+                <b>3. 公开记录查询</b>
                 <span>
                   RPC:{" "}
                   <strong className={chainStatus?.liveRpc?.reachable ? "green-text" : "amber-text"}>

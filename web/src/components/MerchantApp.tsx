@@ -109,6 +109,16 @@ export function MerchantApp() {
     }
   };
 
+  useEffect(() => {
+    const handleLifecycleUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ batchId?: string }>).detail;
+      if (detail?.batchId && detail.batchId !== selectedBatch?.batchId) return;
+      void refreshLifecycle(detail?.batchId ?? selectedBatch?.batchId ?? "FO-2026-001");
+    };
+    window.addEventListener("truthpass:lifecycle-updated", handleLifecycleUpdate);
+    return () => window.removeEventListener("truthpass:lifecycle-updated", handleLifecycleUpdate);
+  }, [selectedBatch?.batchId]);
+
   const askAgent = async (question: string) => {
     const trimmed = question.trim();
     if (!trimmed || agentBusy) return;
@@ -232,7 +242,7 @@ export function MerchantApp() {
 
           <section className="merchant-heading merchant-dashboard-heading">
             <div>
-              <span className="eyebrow">MERCHANT EVIDENCE CONSOLE</span>
+              <span className="eyebrow">企业证据工作台</span>
               <h1>企业工作台</h1>
               <p>管理白牌商品的全链路证据，建立消费者信任</p>
             </div>
@@ -271,7 +281,7 @@ export function MerchantApp() {
 
               <section className="merchant-section merchant-lifecycle-section" aria-label="批次全生命周期">
                 <div className="merchant-section-head merchant-lifecycle-head">
-                  <div><span className="eyebrow">LIFECYCLE CONTEXT</span><h2>全生命周期资料</h2><p>生产方、检测机构、物流、消费者和监管角色共享同一批次上下文。</p></div>
+                  <div><span className="eyebrow">批次全流程</span><h2>全生命周期资料</h2><p>生产方、检测机构、物流、消费者和监管角色共享同一批次信息。</p></div>
                   <div className="merchant-lifecycle-actions">
                     <span className="merchant-sync-meta">{lifecycle ? `${lifecycle.contextMode} · v${lifecycle.contextRevision}` : "正在读取同步上下文"}</span>
                     <button type="button" className="merchant-secondary" onClick={() => void generateAgentReport()} disabled={lifecycleBusy}>生成 Agent 汇报</button>
@@ -297,7 +307,7 @@ export function MerchantApp() {
 
               <section className="merchant-section merchant-batch-table-section">
                 <div className="merchant-section-head">
-                  <div><span className="eyebrow">BATCH OVERVIEW</span><h2>批次列表</h2></div>
+                  <div><span className="eyebrow">批次总览</span><h2>批次列表</h2></div>
                   <div className="merchant-table-actions">
                     <button type="button" className="merchant-primary" onClick={() => setTab("import")}>⇧　导入证据</button>
                     <button type="button" className="merchant-more-button" aria-label="更多批次操作">···</button>
@@ -331,32 +341,32 @@ export function MerchantApp() {
           {tab === "import" && (
             <section className="merchant-section merchant-import-layout">
               <div className="merchant-import-card">
-                <span className="eyebrow">EVIDENCE INTAKE</span><h2>导入批次证据</h2>
+                <span className="eyebrow">资料导入</span><h2>导入批次资料</h2>
                 <p>首期支持 CSV、Excel 映射和 API 接入。当前浏览器演示使用明确的 Demo fixture，不保存企业 Token。</p>
                 <div className="merchant-dropzone"><span>⇧</span><strong>拖入文件或选择数据源</strong><small>CSV / XLSX / JSON · 原始报告保留在链下</small><button type="button" className="merchant-secondary" onClick={() => setMessage("文件导入界面已准备，等待企业数据映射。")}>选择文件</button></div>
                 <div className="merchant-import-actions">{([["production", "生产记录"], ["inspection", "检测报告"], ["cold_chain", "冷链记录"], ["shipment", "出货记录"]] as const).map(([kind, label]) => <button type="button" key={kind} onClick={() => void importEvidence(kind)}>导入 Demo · {label}</button>)}</div>
               </div>
-              <div className="merchant-mapping-card"><span className="eyebrow">FIELD MAPPING</span><h3>首期必需字段</h3>{["tenantId / brandId", "productId / batchId", "sampleId / evidenceId", "issuerId / keyId", "occurredAt / payloadHash"].map((field) => <div className="merchant-field-row" key={field}><span>{field}</span><b>待映射</b></div>)}<small>真实企业接入需要先固定批次号和样品号，避免检测报告错配。</small></div>
+              <div className="merchant-mapping-card"><span className="eyebrow">资料对应</span><h3>首期必需信息</h3>{["企业和品牌", "商品和批次", "样品和资料编号", "资料提供方", "发生时间和更新时间"].map((field) => <div className="merchant-field-row" key={field}><span>{field}</span><b>待对应</b></div>)}<small>真实企业接入需要先固定批次号和样品号，避免检测报告放错批次。</small></div>
             </section>
           )}
 
           {tab === "review" && (
             <section className="merchant-section">
-              <div className="merchant-section-head"><div><span className="eyebrow">REVIEW QUEUE</span><h2>证据审核队列</h2></div><span className="merchant-count">{reviewItems.length} 个待处理项</span></div>
+              <div className="merchant-section-head"><div><span className="eyebrow">待处理问题</span><h2>资料审核列表</h2></div><span className="merchant-count">{reviewItems.length} 个待处理项</span></div>
               <div className="merchant-review-layout"><div className="merchant-review-list">{reviewItems.map((issue) => <button className={selectedIssue?.id === issue.id ? "merchant-review-item active" : "merchant-review-item"} key={issue.id} type="button" onClick={() => setSelectedIssue(issue)}><div><strong>{issue.title}</strong><span>{issue.batchId} · {issue.issuer}</span></div><StatusPill status={issue.status} /></button>)}</div><div className="merchant-review-detail">{selectedIssue ? <><div className="merchant-detail-head"><div><span className="eyebrow">EVIDENCE DETAIL</span><h3>{selectedIssue.title}</h3><p>{selectedIssue.batchId} · {selectedIssue.issuer}</p></div><StatusPill status={selectedIssue.status} /></div><dl><div><dt>签名状态</dt><dd>{selectedIssue.signature}</dd></div><div><dt>证据哈希</dt><dd className="mono">{selectedIssue.hash}</dd></div><div><dt>当前事实</dt><dd>{selectedIssue.detail}</dd></div><div><dt>下一步</dt><dd>{selectedIssue.nextAction}</dd></div></dl><button className="merchant-primary" type="button" onClick={() => setMessage("已生成复核任务；真实生产环境将进入机构签名和人工审核流程。")}>创建复核任务</button></> : <div className="merchant-empty">选择一个证据问题查看详情。</div>}</div></div>
             </section>
           )}
 
           {tab === "preview" && (
             <section className="merchant-section">
-              <div className="merchant-section-head"><div><span className="eyebrow">PUBLIC PREVIEW</span><h2>消费者公开证据卡</h2></div><span className="merchant-demo-pill">不会暴露原始报告</span></div>
+              <div className="merchant-section-head"><div><span className="eyebrow">消费者看到的页面</span><h2>公开资料卡</h2></div><span className="merchant-demo-pill">不会暴露内部报告</span></div>
               {previewBatch && <div className="merchant-public-card"><div className="merchant-public-card-head"><div><span>海蓝营养</span><h3>{previewBatch.productName}</h3><p>{previewBatch.batchId} · {previewBatch.policy}</p></div><StatusPill status={previewBatch.status} /></div><div className="merchant-public-grid">{previewBatch.issues.map((issue) => <div key={issue.id} className="merchant-public-item"><span>{issue.status === "passed" ? "✓" : issue.status === "revoked" ? "!" : "○"}</span><div><strong>{issue.title}</strong><small>{issue.issuer} · {issue.signature}</small></div></div>)}</div><div className="merchant-public-note">当前公开模式：{previewBatch.source}。证据状态来自确定性验证，Agent 只负责解释。</div></div>}
             </section>
           )}
 
           {tab === "audit" && (
             <section className="merchant-section">
-              <div className="merchant-section-head"><div><span className="eyebrow">AUDIT EXPORT</span><h2>审计记录导出</h2></div><button type="button" className="merchant-primary" onClick={() => { if (!audit) return; const blob = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = audit.tenantId + "-audit-export.json"; a.click(); URL.revokeObjectURL(url); }}>下载 JSON</button></div>
+              <div className="merchant-section-head"><div><span className="eyebrow">审核记录</span><h2>导出审核记录</h2></div><button type="button" className="merchant-primary" onClick={() => { if (!audit) return; const blob = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = audit.tenantId + "-audit-export.json"; a.click(); URL.revokeObjectURL(url); }}>下载记录</button></div>
               {audit ? <div className="merchant-audit-card"><div><strong>{audit.evidence.length}</strong><span>证据摘要</span></div><div><strong>{audit.events.length}</strong><span>审计事件</span></div><p>导出只包含 evidenceId、批次、类型、哈希、状态和 rawObjectRef，不包含原始 payload、地址和健康数据。</p>{audit.events.map((event) => <div className="merchant-audit-event" key={event.eventId}><span>{event.eventType}</span><small>{event.createdAt} · {event.requestId}</small></div>)}</div> : <div className="merchant-empty">正在加载审计导出…</div>}
             </section>
           )}
@@ -388,7 +398,7 @@ export function MerchantApp() {
           <div className="merchant-agent-avatar">◉</div>
           <div className="merchant-agent-intro"><strong>商品客服 Agent <span className={agentStatus?.agentMode === "model_assisted" ? "agent-live" : "agent-fallback"}>{agentStatus?.agentMode === "model_assisted" ? "● 在线 · 模型" : agentStatus?.status === "ready" ? "● 在线 · 兜底" : "○ 待连接"}</span></strong><small>基于批次证据卡和生产资料同步上下文回答，不自行生成质量结论</small>{agentStatus?.model && <small className="merchant-agent-model">模型：{agentStatus.model}</small>}</div>
           <div className="merchant-agent-prompts">
-            {["这个产品的检测项目有哪些？", "适合什么人群食用？", "如何储存？", "这个批次还有哪些证据？"].map((prompt) => <button key={prompt} type="button" onClick={() => void askAgent(prompt)} disabled={agentBusy}>{prompt}</button>)}
+            {["这个产品有哪些检测记录？", "如何保存？", "这个批次还有哪些资料？", "哪些内容需要复核？"].map((prompt) => <button key={prompt} type="button" onClick={() => void askAgent(prompt)} disabled={agentBusy}>{prompt}</button>)}
             <form onSubmit={(event) => { event.preventDefault(); void askAgent(agentInput); }}><input value={agentInput} onChange={(event) => setAgentInput(event.target.value)} placeholder="请输入您的问题…" aria-label="商品客服 Agent 问题" disabled={agentBusy} /><button type="submit" disabled={agentBusy}>{agentBusy ? "⏳　回答中" : "➤　发送"}</button></form>
             {(agentReply || agentBusy) && <div className="merchant-agent-response" aria-live="polite"><div>{agentBusy && !agentReply ? "正在读取批次证据和生产资料…" : agentReply}</div>{agentMeta && <small>来源：{agentMeta.contextMode ?? "证据卡"} · {agentMeta.dataMode ?? "demo/synthetic"} · 上下文 v{agentMeta.contextRevision ?? "—"} · 确定性验证结论优先</small>}</div>}
           </div>
