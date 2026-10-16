@@ -244,7 +244,7 @@ export interface ChainStatusData {
   sessionTransactions: SessionChainTx[];
 }
 
-export type WalletActionKind = "purchase" | "contribution" | "dispute" | "evidence" | "verification";
+export type WalletActionKind = "purchase" | "contribution" | "dispute" | "evidence" | "verification" | "audit_finding" | "audit_approval" | "resolve_challenge";
 
 export type LifecycleStage = "production" | "inspection" | "cold_chain" | "shipment" | "purchase" | "after_sales" | "regulatory_review";
 export type LifecycleStatus = "synced" | "verified" | "pending" | "awaiting_user";

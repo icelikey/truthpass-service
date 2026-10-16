@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchAgentStatus, fetchLifecycle, postChat, simulateLifecycleStage } from "../api";
+import { fetchAgentStatus, fetchLifecycle, postChat, requestAgentReport, simulateLifecycleStage } from "../api";
 import { useWallet } from "./WalletContext";
 import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, validateMerchantBatch } from "../merchant/merchantApi";
 import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary } from "../merchant/types";
@@ -35,6 +35,7 @@ export function MerchantApp() {
   const [agentMeta, setAgentMeta] = useState<Pick<ChatEvent, "dataMode" | "contextMode" | "contextSource" | "contextRevision" | "syncedAt" | "traceId"> | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [agentReport, setAgentReport] = useState<Awaited<ReturnType<typeof requestAgentReport>> | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -92,6 +93,17 @@ export function MerchantApp() {
       setMessage("已同步一条生产资料变化；消费者 Agent 和证据卡将在下一次查询时读取新的上下文版本。");
     } catch {
       setMessage("资料同步模拟失败，未修改当前批次状态。");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const generateAgentReport = async () => {
+    setLifecycleBusy(true);
+    try {
+      setAgentReport(await requestAgentReport(selectedBatch?.batchId ?? "FO-2026-001"));
+    } catch {
+      setMessage("Agent 汇报暂时无法生成，请检查 Agent Gateway 状态。");
     } finally {
       setLifecycleBusy(false);
     }
@@ -262,6 +274,7 @@ export function MerchantApp() {
                   <div><span className="eyebrow">LIFECYCLE CONTEXT</span><h2>全生命周期资料</h2><p>生产方、检测机构、物流、消费者和监管角色共享同一批次上下文。</p></div>
                   <div className="merchant-lifecycle-actions">
                     <span className="merchant-sync-meta">{lifecycle ? `${lifecycle.contextMode} · v${lifecycle.contextRevision}` : "正在读取同步上下文"}</span>
+                    <button type="button" className="merchant-secondary" onClick={() => void generateAgentReport()} disabled={lifecycleBusy}>生成 Agent 汇报</button>
                     <button type="button" className="merchant-secondary" onClick={() => void refreshLifecycle()} disabled={lifecycleBusy}>↻ 刷新同步</button>
                   </div>
                 </div>
@@ -277,6 +290,7 @@ export function MerchantApp() {
                         </div>
                       ))}
                     </div>
+                    {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span></div><small>{agentReport.writePlan?.nextAction}</small><button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
                   </>
                 ) : <div className="merchant-empty">尚未读取生命周期上下文。</div>}
               </section>

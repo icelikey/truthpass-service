@@ -2690,6 +2690,15 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .merchant-lifecycle-sync { margin-top: 9px; padding: 6px 7px; border: 1px solid rgba(125,232,232,.22); border-radius: 6px; color: #bfeaff; background: rgba(255,255,255,.045); cursor: pointer; font-size: 10px; }
 .merchant-lifecycle-sync:hover, .merchant-lifecycle-sync:focus-visible { border-color: var(--cyan); outline: none; }
 .merchant-lifecycle-sync:disabled { opacity: .55; cursor: wait; }
+.merchant-agent-report-card { margin-top: 14px; padding: 13px; border: 1px solid rgba(83,225,190,.3); border-radius: 10px; background: rgba(10,116,104,.14); }
+.merchant-agent-report-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.merchant-agent-report-head > div { display: flex; flex-direction: column; gap: 4px; }
+.merchant-agent-report-head strong { color: #e8f8ff; font-size: 13px; }
+.merchant-report-status { padding: 4px 7px; border-radius: 999px; color: #79efc7; background: rgba(16,185,129,.16); font-size: 10px; white-space: nowrap; }
+.merchant-agent-report-card p { margin: 9px 0; color: #b8d8dd; font-size: 11px; line-height: 1.6; }
+.merchant-agent-report-meta { display: flex; flex-wrap: wrap; gap: 8px 13px; color: #8ad4cf; font: 10px var(--font-num); }
+.merchant-agent-report-card small { display: block; margin-top: 8px; color: #97b8bf; font-size: 10px; line-height: 1.5; }
+.merchant-agent-report-card .merchant-primary { margin-top: 10px; padding: 7px 11px; font-size: 10px; }
 
 @media (max-width: 1250px) {
   .merchant-app-frame { grid-template-columns: 180px minmax(0,1fr); }

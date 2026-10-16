@@ -231,6 +231,7 @@ export function WalletProvider({
       action: WalletActionKind;
       batchId: string;
       purchaseId?: string;
+      challengeId?: string;
       points?: number;
       reason?: string;
     }): Promise<SessionChainTx> => {
@@ -257,6 +258,7 @@ export function WalletProvider({
           batchId: params.batchId,
           wallet: address,
           purchaseId: params.purchaseId ?? (params.action === "contribution" ? latestPurchaseId ?? undefined : undefined),
+          challengeId: params.challengeId,
           points: params.points,
           reason: params.reason,
         });
@@ -450,12 +452,12 @@ export function WalletProvider({
                 </label>
 
                 <label className="wallet-control-field wallet-control-grow">
-                  <span>上链备注 / 争议说明（可选，将编码进合约 Calldata）</span>
+                  <span>上链备注 / 争议编号（可选，将编码进合约 Calldata）</span>
                   <input
                     type="text"
                     value={customNote}
                     onChange={(e) => setCustomNote(e.target.value)}
-                    placeholder={`例如：${targetBatch} 消费者收货扫码核验 / 申请复检过氧化值`}
+                    placeholder={`例如：${targetBatch} 消费者收货扫码核验 / challengeId 或复检说明`}
                     disabled={txBusy}
                   />
                 </label>
@@ -545,6 +547,21 @@ export function WalletProvider({
                     <strong>{activeAction === "verification" ? "⏳ 正在提交核验…" : "⚖️ 监管 / 审核机构：提交核验"}</strong>
                     <small>VERIFIER_ROLE · 写入 VerificationRecorded</small>
                     <span className="wallet-tx-cta">连接审核钱包后签名 →</span>
+                  </button>
+                  <button type="button" className={activeAction === "audit_finding" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "audit_finding", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
+                    <strong>{activeAction === "audit_finding" ? "⏳ 正在提交调查发现…" : "🔎 审核 Agent：提交调查发现"}</strong>
+                    <small>AUDIT_AGENT_ROLE · 写入 AuditFindingSubmitted</small>
+                    <span className="wallet-tx-cta">绑定争议编号后签名 →</span>
+                  </button>
+                  <button type="button" className={activeAction === "audit_approval" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "audit_approval", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
+                    <strong>{activeAction === "audit_approval" ? "⏳ 正在批准发现…" : "⚖️ 监管机构：批准调查发现"}</strong>
+                    <small>VERIFIER_ROLE · 写入 AuditVerifierApproved</small>
+                    <span className="wallet-tx-cta">连接监管钱包后签名 →</span>
+                  </button>
+                  <button type="button" className={activeAction === "resolve_challenge" ? "wallet-tx-btn running" : "wallet-tx-btn"} disabled={!walletReady || txBusy} onClick={() => executeOnChainAction({ action: "resolve_challenge", batchId: targetBatch, challengeId: customNote.trim() || undefined }).catch(() => undefined)}>
+                    <strong>{activeAction === "resolve_challenge" ? "⏳ 正在提交裁决…" : "⚖️ 仲裁机构：结案裁决"}</strong>
+                    <small>ARBITER_ROLE · 写入 ChallengeResolved</small>
+                    <span className="wallet-tx-cta">连接仲裁钱包后签名 →</span>
                   </button>
                 </div>
               </div>

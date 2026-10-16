@@ -38,6 +38,9 @@ import {
   buildConsumerGatewayContributionTransaction,
   buildConsumerGatewayDisputeTransaction,
   buildAuditEscrowOpenChallengeTransaction,
+  buildAuditEscrowSubmitFindingTransaction,
+  buildAuditEscrowApproveFindingTransaction,
+  buildAuditEscrowResolveChallengeTransaction,
   CHALLENGE_OPENED_TOPIC,
   AUDIT_FINDING_SUBMITTED_TOPIC,
   AUDIT_VERIFIER_APPROVED_TOPIC,
@@ -177,7 +180,7 @@ type LifecycleEvent = {
   status: LifecycleStatus;
   detail: string;
   updatedAt: string;
-  walletAction?: "evidence" | "verification" | "purchase" | "contribution" | "dispute";
+  walletAction?: "evidence" | "verification" | "purchase" | "contribution" | "dispute" | "audit_finding" | "audit_approval" | "resolve_challenge";
   requiredRole?: string;
 };
 
@@ -188,7 +191,7 @@ const LIFECYCLE_STAGE_DEFS: Array<Omit<LifecycleEvent, "status" | "updatedAt"> &
   { stage: "shipment", label: "出货与交付", role: "物流 Agent", initialStatus: "pending", detail: "等待物流回调绑定订单和批次。" },
   { stage: "purchase", label: "消费者购买", role: "消费者 Agent", initialStatus: "awaiting_user", detail: "需要消费者钱包签名并回读 PurchaseRecorded receipt。", walletAction: "purchase", requiredRole: "CONSUMER_SELF_SERVICE" },
   { stage: "after_sales", label: "售后与反馈", role: "消费者客服 Agent", initialStatus: "pending", detail: "购买确认后开放授权反馈和争议入口。", walletAction: "contribution", requiredRole: "CONSUMER_SELF_SERVICE" },
-  { stage: "regulatory_review", label: "监管复核", role: "监管 / 审核 Agent", initialStatus: "pending", detail: "监管钱包可提交验证记录或发起质疑，最终状态仍由确定性规则和人工流程决定。", walletAction: "dispute", requiredRole: "CONSUMER_SELF_SERVICE" },
+  { stage: "regulatory_review", label: "监管复核", role: "监管 / 审核 Agent", initialStatus: "pending", detail: "监管钱包可提交核验或审核争议发现；最终状态仍由确定性规则和人工流程决定。", walletAction: "audit_approval", requiredRole: "VERIFIER_ROLE" },
 ];
 
 const lifecycleSimulation = new Map<string, { revision: number; syncedAt: string; events: LifecycleEvent[] }>();
@@ -227,7 +230,7 @@ function simulateLifecycleStage(batchId: string, stage: LifecycleStage) {
   const now = new Date().toISOString();
   const event = state.events.find((item) => item.stage === stage);
   if (!event) throw new Error("不支持的生命周期阶段: " + stage);
-  event.status = stage === "purchase" ? "verified" : "verified";
+  event.status = "verified";
   event.updatedAt = now;
   event.detail = stage === "regulatory_review" ? "监管复核记录已同步，等待链上 receipt 或人工裁决。" : event.detail.replace("等待", "已完成");
   state.revision += 1;
@@ -496,6 +499,9 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
     rawAction === "raiseDispute" ? "dispute" :
     rawAction === "anchorEvidence" ? "evidence" :
     rawAction === "recordVerification" ? "verification" :
+    rawAction === "submitAuditFinding" ? "audit_finding" :
+    rawAction === "approveAuditFinding" ? "audit_approval" :
+    rawAction === "resolveChallenge" ? "resolve_challenge" :
     rawAction;
   const rawWallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
   const suppliedWallet = /^0x[0-9a-fA-F]{40}$/.test(rawWallet) ? rawWallet : "";
@@ -721,6 +727,84 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
       auditEscrow: true,
       stake,
       ids: { challengeId: disputeId, disputeId, targetKind, targetId, reasonHash, agentRunHash },
+      transaction,
+    };
+  }
+
+  if (action === "audit_finding") {
+    const challengeId = bytes32OrHash(body.challengeId, "challengeId", `challenge:${batchId}`);
+    const escrowAddress = BOT_CHAIN_MAINNET.auditEscrowAddress;
+    const transaction = buildAuditEscrowSubmitFindingTransaction({
+      challengeId,
+      evidenceRoot: bytes32OrHash(body.evidenceRoot, "evidenceRoot", `evidence-root:${batchId}`),
+      auditResultHash: bytes32OrHash(body.auditResultHash, "auditResultHash", `audit-result:${batchId}`),
+      verifierVersionHash: bytes32OrHash(body.verifierVersionHash, "verifierVersionHash", "truthpass-verifier-v1"),
+      agentAttestationHash: bytes32OrHash(body.agentAttestationHash, "agentAttestationHash", `audit-agent:${batchId}`),
+      escrowAddress,
+    }, config);
+    return {
+      schemaVersion: "truthpass.wallet.transaction.v1",
+      action,
+      eventName: "AuditFindingSubmitted",
+      batchId,
+      network: "bot-mainnet",
+      chainId,
+      contractAddress: escrowAddress,
+      anchorAddress: contractAddress,
+      explorerUrl,
+      signer: wallet,
+      requiredRole: "AUDIT_AGENT_ROLE",
+      auditEscrow: true,
+      ids: { challengeId },
+      transaction,
+    };
+  }
+
+  if (action === "audit_approval") {
+    const challengeId = bytes32OrHash(body.challengeId, "challengeId", `challenge:${batchId}`);
+    const escrowAddress = BOT_CHAIN_MAINNET.auditEscrowAddress;
+    const transaction = buildAuditEscrowApproveFindingTransaction({ challengeId, escrowAddress }, config);
+    return {
+      schemaVersion: "truthpass.wallet.transaction.v1",
+      action,
+      eventName: "AuditVerifierApproved",
+      batchId,
+      network: "bot-mainnet",
+      chainId,
+      contractAddress: escrowAddress,
+      anchorAddress: contractAddress,
+      explorerUrl,
+      signer: wallet,
+      requiredRole: "VERIFIER_ROLE",
+      auditEscrow: true,
+      ids: { challengeId },
+      transaction,
+    };
+  }
+
+  if (action === "resolve_challenge") {
+    const challengeId = bytes32OrHash(body.challengeId, "challengeId", `challenge:${batchId}`);
+    const escrowAddress = BOT_CHAIN_MAINNET.auditEscrowAddress;
+    const transaction = buildAuditEscrowResolveChallengeTransaction({
+      challengeId,
+      upheld: body.upheld !== false,
+      resolutionHash: bytes32OrHash(body.resolutionHash, "resolutionHash", `resolution:${batchId}`),
+      escrowAddress,
+    }, config);
+    return {
+      schemaVersion: "truthpass.wallet.transaction.v1",
+      action,
+      eventName: "ChallengeResolved",
+      batchId,
+      network: "bot-mainnet",
+      chainId,
+      contractAddress: escrowAddress,
+      anchorAddress: contractAddress,
+      explorerUrl,
+      signer: wallet,
+      requiredRole: "ARBITER_ROLE",
+      auditEscrow: true,
+      ids: { challengeId },
       transaction,
     };
   }
@@ -1192,6 +1276,26 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     effectiveMode = "deterministic_fallback";
     collaboration = await runAgentCollaboration(productionInput, inspectionInput, question, card, createDeterministicAgentInvoker());
   }
+  const reportHash = evidenceHash(JSON.stringify({ batchId, question, verification, production: collaboration.production, inspection: collaboration.inspection }));
+  const writePlan = verification.status === "accepted"
+    ? {
+        status: "pending_wallet_signature",
+        action: "verification",
+        eventName: "VerificationRecorded",
+        requiredRole: "VERIFIER_ROLE",
+        evidenceRoot: verification.evidenceRoot,
+        reportHash,
+        nextAction: "连接检测机构或监管审核钱包，调用 /api/wallet/prepare 后签名并回读 receipt。",
+      }
+    : {
+        status: "blocked_by_verifier",
+        action: "verification",
+        eventName: "VerificationRecorded",
+        requiredRole: "VERIFIER_ROLE",
+        evidenceRoot: verification.evidenceRoot,
+        reportHash,
+        nextAction: "先补充缺失或冲突证据，确定性验证通过后才能生成可上链核验计划。",
+      };
   return {
     schemaVersion: "truthpass.agent.collaboration.v1",
     batchId,
@@ -1203,6 +1307,7 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     contextRevision: lifecycle.contextRevision,
     syncedAt: lifecycle.syncedAt,
     verifierVersion: assessment ? "deterministic-verifier-v1" : null,
+    writePlan,
     verification,
     evidenceCard: card,
     selectedFacts: renderConsumerFacts(card, collaboration.consumer.selectedFactIds),
@@ -1255,7 +1360,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.collaborate", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "chain.status", "wallet.prepare", "wallet.broadcast", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
+      capabilities: ["agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
       endpoints: {
         inspection: `${origin}/api/cli/inspect?batchId={batchId}`,
         explanation: `${origin}/api/cli/explain?batchId={batchId}`,
@@ -1265,6 +1370,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         health: `${origin}/api/health`,
         status: `${origin}/api/agent/status`,
         collaboration: `${origin}/api/agent/v1/collaborate`,
+        lifecycle: `${origin}/api/products/{batchId}/lifecycle`,
+        lifecycleSimulation: `${origin}/api/simulator/lifecycle`,
         registration: `${origin}/api/agent/register`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,

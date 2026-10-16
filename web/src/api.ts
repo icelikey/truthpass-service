@@ -45,12 +45,31 @@ export const fetchJevDetection = (batchId?: string) =>
 
 export const fetchChainStatus = () => getJson<ChainStatusData>("/api/chain/status");
 export const fetchAgentStatus = () => getJson<{ status: string; agentMode: string; providerConfigured?: boolean; model?: string | null; dataMode?: string }>("/api/agent/status");
+export async function requestAgentReport(batchId: string, question = "请汇总当前批次生产、检测和公开证据，并给出下一步上链动作。") {
+  const res = await fetch("/api/agent/v1/collaborate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batchId, question }),
+  });
+  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+  return (await res.json()) as {
+    agentMode: string;
+    dataMode: string;
+    contextRevision?: number;
+    syncedAt?: string;
+    verification?: { status?: string; evidenceRoot?: string };
+    writePlan?: { status: string; action: string; eventName: string; requiredRole: string; evidenceRoot?: string; reportHash?: string; nextAction: string };
+    selectedFacts?: string[];
+    traceId?: string;
+  };
+}
 
 export async function prepareWalletTx(params: {
   action: WalletActionKind;
   batchId: string;
   wallet?: string;
   purchaseId?: string;
+  challengeId?: string;
   points?: number;
   reason?: string;
 }): Promise<WalletPrepareResponse> {
