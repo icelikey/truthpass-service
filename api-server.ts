@@ -877,11 +877,18 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   const baseUrl = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
   const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
   try {
+    // DeepSeek's current production models may spend the entire completion
+    // budget on hidden reasoning unless thinking is explicitly disabled. The
+    // customer service contract only consumes the bounded answer text, so do
+    // not let a reasoning-only response force an unnecessary fallback. Keep
+    // this provider-specific so other OpenAI-compatible gateways can reject
+    // unknown fields safely.
+    const providerOptions = /deepseek\.com/i.test(baseUrl) ? { thinking: { type: "disabled" } } : {};
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], temperature: 0.2, max_tokens: 400 }),
+      body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], temperature: 0.2, max_tokens: 400, ...providerOptions }),
     });
     if (!res.ok) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
