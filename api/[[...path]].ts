@@ -6,7 +6,7 @@ export default async function handler(request: IncomingMessage, response: Server
   try {
     const host = typeof request.headers.host === "string" ? request.headers.host : "localhost";
     const url = new URL(request.url ?? "/", `https://${host}`);
-    if (url.pathname.startsWith("/api/")) {
+    if (url.pathname.startsWith("/api/") || url.pathname === "/mcp") {
       if (await handleIntegratedApi(url, request, response)) return;
       if (await handleLegacyApi(url, request, response)) return;
     }

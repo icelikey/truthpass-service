@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
+import { verifyMessage } from "ethers";
 
 import { MemoryDataRepository } from "./src/data/repository.js";
 import { fishOilBatch, fishOilEvidence, fishOilProduct } from "./src/data/fixtures.js";
@@ -20,7 +21,7 @@ import { ConsumerParticipationRegistry } from "./src/consumer.js";
 import { TruthPassTools } from "./src/tools/truthpass-tools.js";
 import { TrustedIssuerKeyRegistry, type TrustedIssuerPublicKey } from "./src/security/evidence-signatures.js";
 import { resolveStaticFilePath } from "./src/static-path.js";
-import { createPostgresReplayGuard, persistConsumerRun, persistenceEnabled } from "./src/data/persistence.js";
+import { createPostgresReplayGuard, getDatabasePool, persistConsumerRun, persistenceEnabled } from "./src/data/persistence.js";
 import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from "./src/data/postgres-reader.js";
 import { answerConsumerQuestion, type ConsumerEvidenceSnapshot } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
@@ -62,6 +63,7 @@ import {
 } from "./src/standards/v1_4.js";
 import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
 import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/enterprise/pilot-store.js";
+import { createTruthPassMcpHttpHandler } from "./src/mcp/endpoint.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
@@ -836,6 +838,13 @@ type RpcReceipt = {
   logs?: Array<{ address?: string; topics?: string[]; data?: string }>;
 };
 
+type RpcTransaction = {
+  from?: string;
+  to?: string | null;
+  chainId?: string;
+  nonce?: string;
+};
+
 async function readMainnetReceipt(txHash: string): Promise<RpcReceipt> {
   const response = await fetch(BOT_CHAIN_MAINNET.rpcUrl, {
     method: "POST",
@@ -847,6 +856,20 @@ async function readMainnetReceipt(txHash: string): Promise<RpcReceipt> {
   const payload = await response.json() as { result?: RpcReceipt | null; error?: { message?: string } };
   if (payload.error) throw new Error(payload.error.message || "BOT Chain RPC error");
   if (!payload.result) throw new Error("交易尚未产生可验证回执");
+  return payload.result;
+}
+
+async function readMainnetTransaction(txHash: string): Promise<RpcTransaction> {
+  const response = await fetch(BOT_CHAIN_MAINNET.rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "eth_getTransactionByHash", params: [txHash] }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`BOT Chain RPC HTTP ${response.status}`);
+  const payload = await response.json() as { result?: RpcTransaction | null; error?: { message?: string } };
+  if (payload.error) throw new Error(payload.error.message || "BOT Chain RPC error");
+  if (!payload.result) throw new Error("交易尚未产生可验证详情");
   return payload.result;
 }
 
@@ -1190,6 +1213,158 @@ function requestTraceId(req: IncomingMessage): string {
   return sha256Hex32("truthpass:agent-request:" + Date.now() + ":" + Math.random());
 }
 
+type WalletBindingRole = "consumer" | "producer" | "inspection" | "logistics" | "review" | "arbitration" | "enterprise_agent";
+type WalletBindingRecord = { address: string; tenantId: string; role: WalletBindingRole; boundAt: string; bindingId: string; dataMode: "demo/synthetic" | "external" };
+const walletBindingChallenges = new Map<string, { message: string; expiresAt: number }>();
+const walletBindings = new Map<string, WalletBindingRecord>();
+const walletBindingRoles = new Set<WalletBindingRole>(["consumer", "producer", "inspection", "logistics", "review", "arbitration", "enterprise_agent"]);
+const walletActionRoles: Record<string, WalletBindingRole[]> = {
+  purchase: ["consumer"],
+  contribution: ["consumer"],
+  dispute: ["consumer"],
+  evidence: ["producer", "inspection", "logistics"],
+  verification: ["review"],
+  audit_finding: ["review"],
+  audit_approval: ["review"],
+  resolve_challenge: ["arbitration"],
+};
+
+function validTenantId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{2,128}$/.test(value.trim());
+}
+
+function walletBindingInput(body: Record<string, unknown>): { address: string; tenantId: string; role: WalletBindingRole; message: string; signature: string } {
+  const address = typeof body.address === "string" ? body.address.trim() : "";
+  const tenantId = typeof body.tenantId === "string" ? body.tenantId.trim() : "demo";
+  const role = typeof body.role === "string" ? body.role.trim() as WalletBindingRole : "consumer";
+  const message = typeof body.message === "string" ? body.message : "";
+  const signature = typeof body.signature === "string" ? body.signature : "";
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("WALLET_ADDRESS_INVALID");
+  if (!validTenantId(tenantId)) throw new Error("TENANT_ID_INVALID");
+  if (!walletBindingRoles.has(role)) throw new Error("WALLET_ROLE_INVALID");
+  if (!message || message.length > 512 || !signature) throw new Error("WALLET_BINDING_PROOF_REQUIRED");
+  return { address: address.toLowerCase(), tenantId, role, message, signature };
+}
+
+function walletBindingKey(address: string, tenantId: string, role: WalletBindingRole): string {
+  return `${tenantId}:${role}:${address.toLowerCase()}`;
+}
+
+function walletBindingMessage(address: string, tenantId: string, role: WalletBindingRole, nonce: string): string {
+  return [
+    "TruthPass 钱包身份绑定",
+    `钱包：${address.toLowerCase()}`,
+    `租户：${tenantId}`,
+    `身份：${role}`,
+    `一次性编号：${nonce}`,
+    "此签名只用于证明当前钱包控制权，不会发起交易或授权转账。",
+  ].join("\n");
+}
+
+async function persistWalletBinding(record: WalletBindingRecord): Promise<void> {
+  walletBindings.set(walletBindingKey(record.address, record.tenantId, record.role), record);
+  if (!persistenceEnabled()) return;
+  await getDatabasePool().query(
+    `create table if not exists truthpass_wallet_bindings (
+       address text not null, tenant_id text not null, role text not null,
+       bound_at timestamptz not null, binding_id text not null,
+       data_mode text not null, updated_at timestamptz not null default now(),
+       primary key (address, tenant_id, role)
+     )`,
+  );
+  await getDatabasePool().query(
+    `insert into truthpass_wallet_bindings (address, tenant_id, role, bound_at, binding_id, data_mode)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (address, tenant_id, role) do update set bound_at = excluded.bound_at, binding_id = excluded.binding_id, data_mode = excluded.data_mode, updated_at = now()`,
+    [record.address, record.tenantId, record.role, record.boundAt, record.bindingId, record.dataMode],
+  );
+}
+
+async function findWalletBinding(address: string, tenantId: string, roles?: WalletBindingRole[]): Promise<WalletBindingRecord | undefined> {
+  const local = [...walletBindings.values()].find((item) => item.address === address.toLowerCase() && item.tenantId === tenantId && (!roles || roles.includes(item.role)));
+  if (local || !persistenceEnabled()) return local;
+  await getDatabasePool().query(
+    `create table if not exists truthpass_wallet_bindings (
+       address text not null, tenant_id text not null, role text not null,
+       bound_at timestamptz not null, binding_id text not null,
+       data_mode text not null, updated_at timestamptz not null default now(),
+       primary key (address, tenant_id, role)
+     )`,
+  );
+  const result = await getDatabasePool().query(
+    `select address, tenant_id, role, bound_at, binding_id, data_mode
+       from truthpass_wallet_bindings
+      where address = $1 and tenant_id = $2
+        and ($3::text[] is null or role = any($3::text[]))
+      order by bound_at desc limit 1`,
+    [address.toLowerCase(), tenantId, roles && roles.length > 0 ? roles : null],
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  const record: WalletBindingRecord = {
+    address: String(row.address).toLowerCase(),
+    tenantId: String(row.tenant_id),
+    role: String(row.role) as WalletBindingRole,
+    boundAt: new Date(String(row.bound_at)).toISOString(),
+    bindingId: String(row.binding_id),
+    dataMode: row.data_mode === "external" ? "external" : "demo/synthetic",
+  };
+  walletBindings.set(walletBindingKey(record.address, record.tenantId, record.role), record);
+  return record;
+}
+
+async function assertWalletActionAuthorized(body: Record<string, unknown>, action: string): Promise<WalletBindingRecord | undefined> {
+  if (process.env.TRUTHPASS_ENFORCE_WALLET_BINDING !== "true") return undefined;
+  const wallet = typeof body.wallet === "string" ? body.wallet.trim().toLowerCase() : "";
+  const tenantId = typeof body.tenantId === "string" && body.tenantId.trim() ? body.tenantId.trim() : "demo";
+  if (!/^0x[0-9a-f]{40}$/.test(wallet)) throw new Error("WALLET_BINDING_REQUIRED");
+  if (!validTenantId(tenantId)) throw new Error("TENANT_ID_INVALID");
+  const roles = walletActionRoles[action];
+  if (!roles) throw new Error("WALLET_ACTION_ROLE_UNKNOWN");
+  const binding = await findWalletBinding(wallet, tenantId, roles);
+  if (!binding) throw new Error(`WALLET_ROLE_REQUIRED:${roles.join(",")}`);
+  return binding;
+}
+
+async function persistWalletChallenge(key: string, message: string, expiresAt: number): Promise<void> {
+  walletBindingChallenges.set(key, { message, expiresAt });
+  if (!persistenceEnabled()) return;
+  await getDatabasePool().query(
+    `create table if not exists truthpass_wallet_challenges (
+       challenge_key text primary key, message text not null,
+       expires_at timestamptz not null, consumed_at timestamptz
+     )`,
+  );
+  await getDatabasePool().query(
+    `insert into truthpass_wallet_challenges (challenge_key, message, expires_at, consumed_at)
+     values ($1, $2, to_timestamp($3 / 1000.0), null)
+     on conflict (challenge_key) do update set message = excluded.message, expires_at = excluded.expires_at, consumed_at = null`,
+    [key, message, expiresAt],
+  );
+}
+
+async function consumeWalletChallenge(key: string): Promise<{ message: string; expiresAt: number } | undefined> {
+  const local = walletBindingChallenges.get(key);
+  if (local) {
+    walletBindingChallenges.delete(key);
+    return local;
+  }
+  if (!persistenceEnabled()) return undefined;
+  const result = await getDatabasePool().query(
+    `update truthpass_wallet_challenges
+        set consumed_at = now()
+      where challenge_key = $1 and consumed_at is null and expires_at > now()
+      returning message, extract(epoch from expires_at) * 1000 as expires_at`,
+    [key],
+  );
+  const row = result.rows[0];
+  return row ? { message: String(row.message), expiresAt: Number(row.expires_at) } : undefined;
+}
+
+function walletBindingMode(): "postgres" | "memory_demo" {
+  return persistenceEnabled() ? "postgres" : "memory_demo";
+}
+
 
 const chatRateLimits = new Map<string, { startedAt: number; count: number }>();
 const CHAT_RATE_WINDOW_MS = 60_000;
@@ -1315,9 +1490,87 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
   };
 }
 
+async function mcpInspectBatch(batchId: string, traceId: string) {
+  if (repository.getBatch(batchId)) {
+    const result = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+    return { ...result, traceId, dataMode: result.verification.dataClass };
+  }
+  const fixture = FISH_OIL_BATCHES[batchId];
+  if (!fixture) throw new Error("BATCH_NOT_FOUND");
+  const status = fixture.passed ? "accepted" : "rejected";
+  const reasons = fixture.passed ? [] : ["演示批次存在未通过的指标，需人工复核"];
+  return {
+    schemaVersion: "truthpass.cli.inspect.v1",
+    command: "inspect",
+    batchId,
+    traceId,
+    dataMode: "demo/synthetic",
+    stages: [
+      { name: "读取演示批次", status: "completed", detail: "已加载 demo/synthetic 批次数据" },
+      { name: "确定性验收", status: "completed", detail: status },
+      { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
+    ],
+    verification: {
+      schemaVersion: "truthpass.cli.verification.v1",
+      command: "verify",
+      batchId,
+      status,
+      dataClass: "demo/synthetic",
+      policy: { id: policy.policyId, version: policy.version },
+      assessment: { status, reasons, epaDhaPercent: fixture.epaDha, peroxideValue: fixture.peroxide, coldChainGapHours: fixture.coldGap },
+      reasons,
+      evidence: [],
+      evidenceRoot: evidenceHash(`${batchId}:root`),
+      anchor: { status: "anchor_pending", network: BOT_CHAIN_MAINNET.network, submitted: false, chainId: BOT_CHAIN_MAINNET.chainId, contractAddress: BOT_CHAIN_MAINNET.contractAddress },
+    },
+  };
+}
+
+const mcpHttpHandler = createTruthPassMcpHttpHandler({
+  origin: () => "*",
+  defaultBatchId: BATCH_ID,
+  knownBatch: (batchId) => Boolean(FISH_OIL_BATCHES[batchId] || repository.getBatch(batchId)),
+  manifest: (origin) => ({
+    schemaVersion: "truthpass.agent.manifest.v1",
+    service: "truthpass-integrated-api",
+    protocol: "MCP_JSON_RPC",
+    origin,
+    dataMode: "demo/synthetic",
+    readOnly: true,
+    capabilities: ["truthpass.manifest", "truthpass.inspect_batch", "truthpass.explain_batch", "truthpass.lifecycle"],
+    writeBoundary: "protected_tools_return_pending_confirmation",
+  }),
+  inspectBatch: mcpInspectBatch,
+  explainBatch: async (batchId, question, traceId) => {
+    const result = await mcpInspectBatch(batchId, traceId);
+    const verification = result.verification;
+    const reasons = verification.assessment?.reasons ?? verification.reasons ?? [];
+    const accepted = verification.status === "accepted";
+    return {
+      schemaVersion: "truthpass.mcp.explanation.v1",
+      batchId,
+      question: question ?? "当前批次为什么是这个结论？",
+      status: verification.status,
+      explanation: accepted ? "当前批次通过确定性规则验收；链上写入仍需外部钱包确认。" : "当前批次未形成可接受的确定性结论，请先查看原因并补充证据。",
+      reasons,
+      nextAction: accepted ? "如需上链，请请求用户确认并使用外部钱包签名。" : "补充缺失或冲突证据后重新检查。",
+      verification,
+      dataMode: verification.dataClass,
+      traceId,
+    };
+  },
+  lifecycle: async (batchId, traceId) => ({ ...lifecyclePublicView(batchId), traceId }),
+  protectedAuthorized: (request) => agentGatewayAuthorized(request).authorized,
+});
+
 // ---------- 路由 ----------
 export async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const p = url.pathname;
+
+  if (p === "/mcp" || p === "/api/mcp") {
+    await mcpHttpHandler(req, res);
+    return true;
+  }
 
   if (p === "/api/health" && req.method === "GET") {
     sendJson(res, 200, {
@@ -1360,7 +1613,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
+      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
       endpoints: {
         inspection: `${origin}/api/cli/inspect?batchId={batchId}`,
         explanation: `${origin}/api/cli/explain?batchId={batchId}`,
@@ -1373,6 +1626,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         lifecycle: `${origin}/api/products/{batchId}/lifecycle`,
         lifecycleSimulation: `${origin}/api/simulator/lifecycle`,
         registration: `${origin}/api/agent/register`,
+        mcp: `${origin}/mcp`,
+        walletBindingChallenge: `${origin}/api/wallet/bind/challenge?address={address}&tenantId={tenantId}&role={role}`,
+        walletBinding: `${origin}/api/wallet/bind`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
         enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
@@ -1388,6 +1644,59 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       },
       publicDataBoundary: { rawReports: "off_chain", personalData: "off_chain", privateKeys: "off_chain" },
     });
+    return true;
+  }
+
+  if (p === "/api/wallet/bind/challenge" && req.method === "GET") {
+    const address = (url.searchParams.get("address") || "").trim().toLowerCase();
+    const tenantId = (url.searchParams.get("tenantId") || "demo").trim();
+    const role = (url.searchParams.get("role") || "consumer").trim() as WalletBindingRole;
+    if (!/^0x[0-9a-f]{40}$/.test(address) || !validTenantId(tenantId) || !walletBindingRoles.has(role)) {
+      sendJson(res, 400, { error: "WALLET_BINDING_INPUT_INVALID" });
+      return true;
+    }
+    const nonce = createHash("sha256").update(`wallet-binding:${address}:${tenantId}:${role}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 24);
+    const message = walletBindingMessage(address, tenantId, role, nonce);
+    const expiresAt = Date.now() + 5 * 60_000;
+    await persistWalletChallenge(`${address}:${tenantId}:${role}:${nonce}`, message, expiresAt);
+    sendJson(res, 200, { schemaVersion: "truthpass.wallet.binding-challenge.v1", address, tenantId, role, nonce, message, expiresAt, dataMode: "demo/synthetic" });
+    return true;
+  }
+
+  if (p === "/api/wallet/bind" && req.method === "POST") {
+    const body = await readBody(req);
+    try {
+      const input = walletBindingInput(body);
+      const institutionalRole = input.role !== "consumer";
+      if (institutionalRole && process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true" && process.env.TRUTHPASS_ALLOW_SELF_REGISTERED_INSTITUTION_ROLES !== "true") {
+        const expectedInvitation = process.env.TRUTHPASS_WALLET_ROLE_BINDING_TOKEN?.trim();
+        const providedInvitation = typeof body.authorizationToken === "string" ? body.authorizationToken.trim() : "";
+        if (!expectedInvitation || providedInvitation !== expectedInvitation) throw new Error("WALLET_ROLE_INVITATION_REQUIRED");
+      }
+      const nonceMatch = input.message.match(/一次性编号：([^\n]+)/);
+      const nonce = nonceMatch?.[1]?.trim() ?? "";
+      const challengeKey = `${input.address}:${input.tenantId}:${input.role}:${nonce}`;
+      const challenge = await consumeWalletChallenge(challengeKey);
+      if (!challenge || challenge.expiresAt < Date.now() || challenge.message !== input.message) throw new Error("WALLET_BINDING_CHALLENGE_EXPIRED");
+      const recovered = verifyMessage(input.message, input.signature).toLowerCase();
+      if (recovered !== input.address) throw new Error("WALLET_SIGNATURE_ADDRESS_MISMATCH");
+      walletBindingChallenges.delete(challengeKey);
+      const boundAt = new Date().toISOString();
+      const bindingId = `bind-${createHash("sha256").update(`${input.address}:${input.tenantId}:${input.role}:${boundAt}`).digest("hex").slice(0, 24)}`;
+      const record: WalletBindingRecord = { address: input.address, tenantId: input.tenantId, role: input.role, boundAt, bindingId, dataMode: "demo/synthetic" };
+      await persistWalletBinding(record);
+      sendJson(res, 200, { schemaVersion: "truthpass.wallet.binding.v1", status: "bound_verified", bindingMode: walletBindingMode(), binding: record, permissions: { role: input.role, canSign: true, canPrepareTransactions: true }, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 401, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (p === "/api/wallet/bind" && req.method === "GET") {
+    const address = (url.searchParams.get("address") || "").trim().toLowerCase();
+    const tenantId = (url.searchParams.get("tenantId") || "demo").trim();
+    const roles = [...walletBindings.values()].filter((item) => item.address === address && item.tenantId === tenantId);
+    sendJson(res, 200, { schemaVersion: "truthpass.wallet.binding-list.v1", address, tenantId, bindingMode: walletBindingMode(), bindings: roles });
     return true;
   }
 
@@ -1672,9 +1981,21 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (p === "/api/wallet/prepare" && req.method === "POST") {
     try {
       const body = await readBody(req);
+      const rawAction = typeof body.action === "string" ? body.action.trim() : "";
+      const normalizedAction = rawAction === "recordPurchase" ? "purchase"
+        : rawAction === "recordContribution" ? "contribution"
+          : rawAction === "raiseDispute" ? "dispute"
+            : rawAction === "anchorEvidence" ? "evidence"
+              : rawAction === "recordVerification" ? "verification"
+                : rawAction === "submitAuditFinding" ? "audit_finding"
+                  : rawAction === "approveAuditFinding" ? "audit_approval"
+                    : rawAction === "resolveChallenge" ? "resolve_challenge" : rawAction;
+      const binding = await assertWalletActionAuthorized(body, normalizedAction);
       const prepared = prepareWalletTransaction(body);
       sendJson(res, 200, {
         ok: true,
+        tenantId: typeof body.tenantId === "string" ? body.tenantId : "demo",
+        binding: binding ? { bindingId: binding.bindingId, role: binding.role, address: binding.address } : undefined,
         ...prepared,
         event: prepared.eventName,
         txRequest: {
@@ -1686,7 +2007,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         },
       });
     } catch (error) {
-      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.startsWith("WALLET_") || message.startsWith("TENANT_") ? 403 : 400;
+      sendJson(res, status, { error: message, status: status === 403 ? "wallet_authorization_required" : "invalid_request" });
     }
     return true;
   }
@@ -1704,6 +2027,16 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       sendJson(res, 400, { error: "必须提供预期合约地址和业务事件" });
       return true;
     }
+    const requestedAction = typeof body.action === "string" ? body.action.trim() : "purchase";
+    try {
+      await assertWalletActionAuthorized(body, requestedAction);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true") {
+        sendJson(res, 403, { error: message, status: "wallet_authorization_required" });
+        return true;
+      }
+    }
     let receipt: RpcReceipt;
     try {
       receipt = await readMainnetReceipt(txHash);
@@ -1715,6 +2048,27 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}`,
       });
       return true;
+    }
+    if (process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true") {
+      try {
+        const transaction = await readMainnetTransaction(txHash);
+        const suppliedWallet = typeof body.wallet === "string" ? body.wallet.trim().toLowerCase() : "";
+        if (!/^0x[0-9a-f]{40}$/.test(suppliedWallet) || String(transaction.from ?? "").toLowerCase() !== suppliedWallet) {
+          sendJson(res, 422, { error: "transaction.from 与已绑定钱包不一致", status: "transaction_sender_mismatch", txHash });
+          return true;
+        }
+        if (transaction.to && transaction.to.toLowerCase() !== expectedContract.toLowerCase()) {
+          sendJson(res, 422, { error: "transaction.to 与预期交易目标不一致", status: "transaction_target_mismatch", txHash });
+          return true;
+        }
+        if (transaction.chainId && Number.parseInt(transaction.chainId.replace(/^0x/i, ""), 16) !== BOT_CHAIN_MAINNET.chainId) {
+          sendJson(res, 422, { error: "交易 Chain ID 与 BOT Chain Mainnet 不一致", status: "transaction_chain_mismatch", txHash });
+          return true;
+        }
+      } catch (error) {
+        sendJson(res, 409, { error: error instanceof Error ? error.message : String(error), status: "transaction_unverified", txHash });
+        return true;
+      }
     }
     const expectedIds = (body.ids && typeof body.ids === "object" ? body.ids : {}) as Record<string, unknown>;
     const validation = expectedReceiptEventCheck(receipt, eventName, expectedContract, expectedIds);
@@ -2293,10 +2647,18 @@ export async function handleStatic(url: URL, res: ServerResponse): Promise<void>
   const isLegacy = pathname === "/web-demo" || pathname.startsWith("/web-demo/");
   const root = isLegacy ? LEGACY_WEB : WEB;
   const relativePath = isLegacy ? pathname.slice("/web-demo".length) || "/" : pathname;
-  const filePath = resolveStaticFilePath(root, relativePath);
-  if (!filePath) {
+  const requestedFilePath = resolveStaticFilePath(root, relativePath);
+  if (!requestedFilePath) {
     res.writeHead(403);
     res.end("Forbidden");
+    return;
+  }
+  const filePath = existsSync(requestedFilePath)
+    ? requestedFilePath
+    : (!isLegacy ? resolveStaticFilePath(root, "/index.html") : null);
+  if (!filePath || !existsSync(filePath)) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
     return;
   }
   try {
@@ -2319,6 +2681,10 @@ export function createApiServer(): ReturnType<typeof createServer> {
   return createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
+      await mcpHttpHandler(req, res);
+      return;
+    }
     if (url.pathname.startsWith("/api/")) {
       const handled = await handleApi(url, req, res);
       if (!handled) sendJson(res, 404, { error: "not found" });

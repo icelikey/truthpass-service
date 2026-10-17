@@ -3,6 +3,7 @@ import { AuthModal } from "./components/AuthModal";
 import { AfterSalesPanel } from "./components/AfterSalesPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { ConsumerFlowBar, type ConsumerAgentStage } from "./components/ConsumerFlowBar";
+import { ConsumerActionDock } from "./components/ConsumerActionDock";
 import { CliReferencePanel } from "./components/CliReferencePanel";
 import { MerchantApp } from "./components/MerchantApp";
 import { Community } from "./components/Community";
@@ -19,6 +20,7 @@ import { useAuth } from "./hooks/useAuth";
 import { fetchProduct, fetchVerification } from "./api";
 import { saveVerificationRecord } from "./lib/supabase";
 import type { VerifyState } from "./types";
+import { PublicPageRouter } from "./PublicPages";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -33,7 +35,10 @@ export default function App() {
   const { user, signUp, signIn, signOut, configured: authConfigured } = useAuth();
   const toastTimer = useRef<number | undefined>(undefined);
   const inQueryMode = !!batchId;
-  const isMerchantRoute = window.location.pathname.startsWith("/merchant");
+  const pathname = window.location.pathname;
+  const isMerchantRoute = pathname.startsWith("/merchant");
+  const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
+  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname) && !(pathname === "/" && isConsumerView);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -88,6 +93,10 @@ export default function App() {
     else await signUp(email, password);
   };
 
+  if (isPublicPageRoute) {
+    return <PublicPageRouter pathname={pathname} />;
+  }
+
   if (isMerchantRoute) {
     return (
       <ModalProvider>
@@ -125,6 +134,7 @@ export default function App() {
         <Hero />
         <CliReferencePanel />
         <ConsumerFlowBar stage={consumerStage} batchId={batchId} />
+        <ConsumerActionDock stage={consumerStage} batchId={batchId} />
         <main className={inQueryMode ? "layout" : "assistant-only"}>
           <ChatPanel
             onStart={() => {

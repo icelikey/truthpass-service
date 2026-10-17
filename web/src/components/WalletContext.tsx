@@ -13,11 +13,25 @@ import {
 } from "../lib/wallet";
 import type { ChainStatusData, SessionChainTx, WalletActionKind } from "../types";
 
+export type WalletRole = "consumer" | "producer" | "inspection" | "logistics" | "review" | "arbitration" | "enterprise_agent";
+export const WALLET_ROLE_LABELS: Record<WalletRole, string> = {
+  consumer: "消费者",
+  producer: "生产方",
+  inspection: "检测机构",
+  logistics: "物流方",
+  review: "审核机构",
+  arbitration: "仲裁方",
+  enterprise_agent: "企业 Agent",
+};
+
 export interface WalletContextValue {
   address: string | null;
   chainId: number | null;
   walletName: string | null;
   walletKind: WalletKind | null;
+  walletRole: WalletRole | null;
+  bindingStatus: "unbound" | "binding" | "bound_verified" | "error";
+  bindWalletRole: (role: WalletRole, tenantId?: string) => Promise<boolean>;
   connecting: boolean;
   txBusy: boolean;
   lastTx: SessionChainTx | null;
@@ -58,6 +72,8 @@ export function WalletProvider({
   const [chainId, setChainId] = useState<number | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
   const [walletKind, setWalletKind] = useState<WalletKind | null>(null);
+  const [walletRole, setWalletRole] = useState<WalletRole | null>(null);
+  const [bindingStatus, setBindingStatus] = useState<"unbound" | "binding" | "bound_verified" | "error">("unbound");
   // Selection is UI intent; walletKind is only set after a real provider
   // returns an authorized account. Keeping them separate prevents a failed
   // connection from being rendered as a connected wallet.
@@ -218,6 +234,8 @@ export function WalletProvider({
     setChainId(null);
     setWalletName(null);
     setWalletKind(null);
+    setWalletRole(null);
+    setBindingStatus("unbound");
     setSelectedWalletKind(null);
     setProvider(null);
     setLatestPurchaseId(null);
@@ -225,6 +243,41 @@ export function WalletProvider({
     setTxStage(null);
     onToast("已断开钱包连接");
   }, [onToast]);
+
+  const bindWalletRole = useCallback(async (role: WalletRole, tenantId = "demo"): Promise<boolean> => {
+    if (!provider || !address) {
+      const msg = "请先连接真实钱包，再绑定身份";
+      setTxError(msg);
+      onToast(msg);
+      return false;
+    }
+    setBindingStatus("binding");
+    setTxError(null);
+    try {
+      const query = new URLSearchParams({ address, tenantId, role });
+      const challengeResponse = await fetch(`/api/wallet/bind/challenge?${query.toString()}`);
+      const challenge = await challengeResponse.json() as { message?: string; error?: string };
+      if (!challengeResponse.ok || !challenge.message) throw new Error(challenge.error || "身份绑定挑战获取失败");
+      const signature = await provider.request({ method: "personal_sign", params: [challenge.message, address] }) as string;
+      const bindResponse = await fetch("/api/wallet/bind", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address, tenantId, role, message: challenge.message, signature }),
+      });
+      const bound = await bindResponse.json() as { status?: string; error?: string };
+      if (!bindResponse.ok || bound.status !== "bound_verified") throw new Error(bound.error || "身份绑定失败");
+      setWalletRole(role);
+      setBindingStatus("bound_verified");
+      onToast(`已验证并绑定身份：${WALLET_ROLE_LABELS[role]}`);
+      return true;
+    } catch (err: any) {
+      const message = err?.message || "身份签名被拒绝或失败";
+      setBindingStatus("error");
+      setTxError(message);
+      onToast(`钱包身份绑定提示：${message}`);
+      return false;
+    }
+  }, [address, onToast, provider]);
 
   const executeOnChainAction = useCallback(
     async (params: {
@@ -237,6 +290,25 @@ export function WalletProvider({
     }): Promise<SessionChainTx> => {
       setTxError(null);
       setActiveAction(params.action);
+      const allowedRoles: Partial<Record<WalletActionKind, WalletRole[]>> = {
+        purchase: ["consumer"],
+        contribution: ["consumer"],
+        dispute: ["consumer"],
+        evidence: ["producer", "inspection", "logistics"],
+        verification: ["review"],
+        audit_finding: ["review"],
+        audit_approval: ["review"],
+        resolve_challenge: ["arbitration"],
+      };
+      const requiredRoles = allowedRoles[params.action];
+      if (requiredRoles && !walletRole || (requiredRoles && walletRole && !requiredRoles.includes(walletRole))) {
+        const expected = requiredRoles.map((role) => WALLET_ROLE_LABELS[role]).join(" / ");
+        const message = `请先绑定对应身份：${expected}`;
+        setTxError(message);
+        onToast(message);
+        setActiveAction(null);
+        throw new Error(message);
+      }
       if (!provider || !address) {
         const message = "请先连接真实 EVM 钱包；未检测到插件时只提供只读演示，不能发起主网交易。";
         setTxError(message);
@@ -313,11 +385,11 @@ export function WalletProvider({
         setActiveAction(null);
       }
     },
-    [provider, address, walletName, latestPurchaseId, onToast, queryClient],
+    [provider, address, walletName, walletRole, latestPurchaseId, onToast, queryClient],
   );
 
   const targetBatch = selectedBatch || activeBatchId || "FO-2026-001";
-  const walletReady = Boolean(address && chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec);
+  const walletReady = Boolean(address && chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec && walletRole);
   const batchOptions = [
     "FO-2026-001",
     "FO-2026-002",
@@ -336,6 +408,9 @@ export function WalletProvider({
         chainId,
         walletName,
         walletKind,
+        walletRole,
+        bindingStatus,
+        bindWalletRole,
         connecting,
         txBusy,
         lastTx,
@@ -367,6 +442,34 @@ export function WalletProvider({
               <strong>BOT Chain Mainnet (Chain ID: 677)</strong> 主网合约进行真实 ABI 编码、钱包签名与交易核验。
             </p>
 
+            <div className="wallet-identity-card">
+              <div className="wallet-section-head">
+                <div>
+                  <b>先确认你代表谁</b>
+                  <small>签名只证明当前钱包的控制权，不会发起转账。绑定后，页面会按身份显示可做的事。</small>
+                </div>
+                <span className={bindingStatus === "bound_verified" ? "wallet-connected-pill" : "wallet-disconnected-pill"}>
+                  {bindingStatus === "bound_verified" ? `✓ 已绑定：${walletRole ? WALLET_ROLE_LABELS[walletRole] : "已验证"}` : "尚未绑定身份"}
+                </span>
+              </div>
+              <div className="wallet-role-picker" role="list" aria-label="选择钱包身份">
+                {(Object.keys(WALLET_ROLE_LABELS) as WalletRole[]).map((role) => (
+                  <button
+                    key={role}
+                    type="button"
+                    className={walletRole === role ? "wallet-role-chip active" : "wallet-role-chip"}
+                    disabled={!address || bindingStatus === "binding"}
+                    onClick={() => void bindWalletRole(role)}
+                  >
+                    {WALLET_ROLE_LABELS[role]}
+                  </button>
+                ))}
+              </div>
+              <small className="wallet-binding-note">
+                {bindingStatus === "binding" ? "请在钱包弹窗中确认身份签名…" : bindingStatus === "error" ? "绑定未完成，请重新选择身份并签名。" : "没有对应身份权限时，相关操作不会完成。"}
+              </small>
+            </div>
+
             {/* 1. 钱包选择器 */}
             <div className="wallet-section">
               <div className="wallet-section-head">
@@ -376,7 +479,7 @@ export function WalletProvider({
                     ● 已连接 {walletName} · {shortHex(address)} · Chain {chainId ?? 677}
                   </span>
                 ) : (
-                  <span className="wallet-disconnected-pill">未连接钱包（交易按钮将在连接真实钱包后启用）</span>
+                  <span className="wallet-disconnected-pill">未连接或未绑定身份（绑定后才会启用对应操作）</span>
                 )}
               </div>
               <div className="wallet-grid">

@@ -14,7 +14,7 @@ const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "anchor" | "replay" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "anchor" | "replay" | "manifest" | "status" | "collaborate" | "register" | "help";
 
 interface NormalizedService {
   serviceId: string;
@@ -36,6 +36,15 @@ interface ParsedArgs {
   network: "testnet" | "mainnet";
   dryRun: boolean;
   help: boolean;
+  remoteUrl?: string;
+  token?: string;
+  tenantId?: string;
+  requestId?: string;
+  agentId?: string;
+  agentName?: string;
+  capabilities: string[];
+  publicKey?: string;
+  question?: string;
 }
 
 export interface CliResult {
@@ -53,6 +62,9 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass recommend --batch FO-2026-001 [--json]
   truthpass order --batch FO-2026-001 [--json]
   truthpass inspect --batch FO-2026-001 [--json]
+  truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
+  truthpass collaborate --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
+  truthpass register --remote https://truthpass-service.vercel.app --tenant demo --token <TOKEN> --agent-id my-agent --name "我的 Agent" --capability consumer.inspect [--json]
   truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
   truthpass replay --batch FO-2026-001 [--json]
 
@@ -60,6 +72,7 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   verify 复用仓库中的 ServiceRegistry 和 Verifier，输出可审计结果。
   anchor 当前只生成离线锚定计划；没有 --dry-run 时不会提交交易。
   --json 输出稳定 JSON；错误也使用机器可读结构，且不包含密钥。
+  --remote 让 CLI 直接访问 TruthPass 服务；--token 只用于请求头，不会写入输出。
 `;
 
 function parseArgs(argv: string[]): ParsedArgs | { error: string } {
@@ -70,12 +83,40 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
   let network: "testnet" | "mainnet" = "testnet";
   let dryRun = false;
   let help = false;
+  let remoteUrl: string | undefined;
+  let token: string | undefined;
+  let tenantId: string | undefined;
+  let requestId: string | undefined;
+  let agentId: string | undefined;
+  let agentName: string | undefined;
+  let publicKey: string | undefined;
+  let question: string | undefined;
+  const capabilities: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--json") { json = true; continue; }
     if (arg === "--dry-run") { dryRun = true; continue; }
     if (arg === "--help" || arg === "-h") { help = true; continue; }
+    if (["--remote", "--token", "--tenant", "--request-id", "--agent-id", "--name", "--public-key", "--question"].includes(arg)) {
+      const value = argv[++index];
+      if (!value) return { error: `${arg} 需要一个值` };
+      if (arg === "--remote") remoteUrl = value;
+      else if (arg === "--token") token = value;
+      else if (arg === "--tenant") tenantId = value;
+      else if (arg === "--request-id") requestId = value;
+      else if (arg === "--agent-id") agentId = value;
+      else if (arg === "--name") agentName = value;
+      else if (arg === "--public-key") publicKey = value;
+      else question = value;
+      continue;
+    }
+    if (arg === "--capability") {
+      const value = argv[++index];
+      if (!value) return { error: "--capability 需要一个值" };
+      capabilities.push(value);
+      continue;
+    }
     if (arg === "--batch") {
       const value = argv[++index];
       if (!value) return { error: "--batch 需要一个批次 ID" };
@@ -91,7 +132,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
       continue;
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
-    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "anchor", "replay", "help"].includes(arg);
+    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "anchor", "replay", "manifest", "status", "collaborate", "register", "help"].includes(arg);
     if (knownCommand) {
       if (command) return { error: `只能指定一个命令，收到: ${arg}` };
       command = arg as Command;
@@ -113,7 +154,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     return { error: `未知命令: ${arg}` };
   }
 
-  return { command: help ? "help" : command ?? "help", json, batchId, network, dryRun, help };
+  return { command: help ? "help" : command ?? "help", json, batchId, network, dryRun, help, remoteUrl, token, tenantId, requestId, agentId, agentName, capabilities, publicKey, question };
 }
 
 function makeTask(batchId: string): Record<string, unknown> {
@@ -358,6 +399,79 @@ async function doctor(): Promise<Record<string, unknown>> {
     },
     warnings: ["当前 CLI 使用合成鱼油数据；anchor 仅支持 dry-run，不会发送交易。"],
   };
+}
+
+function normalizeRemoteUrl(value: string): string {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new Error("--remote 必须是完整的 http(s) URL"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("--remote 只支持 http(s) URL");
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function remoteHeaders(args: ParsedArgs, requireTenant = false): Record<string, string> {
+  const headers: Record<string, string> = { accept: "application/json", "x-truthpass-request-id": args.requestId ?? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+  if (args.token) headers.authorization = `Bearer ${args.token}`;
+  if (args.tenantId) headers["x-truthpass-tenant"] = args.tenantId;
+  if (requireTenant && (!args.token || !args.tenantId)) throw new Error("远程 Agent 请求需要 --token 和 --tenant");
+  return headers;
+}
+
+async function fetchRemoteJson(args: ParsedArgs, path: string, init: RequestInit = {}, requireTenant = false): Promise<Record<string, unknown>> {
+  if (!args.remoteUrl) throw new Error("该命令需要 --remote 服务地址");
+  const url = new URL(path, normalizeRemoteUrl(args.remoteUrl) + "/");
+  const headers = { ...remoteHeaders(args, requireTenant), ...(init.headers as Record<string, string> | undefined) };
+  const response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
+  const text = await response.text();
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(text) as Record<string, unknown>; } catch { body = { error: "REMOTE_INVALID_JSON", raw: text.slice(0, 400) }; }
+  if (!response.ok) {
+    const errorCode = typeof body.error === "string" ? body.error : `HTTP_${response.status}`;
+    throw new Error(`远程服务返回 ${response.status}: ${errorCode}`);
+  }
+  return body;
+}
+
+async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>> {
+  const command = args.command;
+  if (command === "manifest") return fetchRemoteJson(args, "/api/agent/manifest");
+  if (command === "status" || command === "doctor") {
+    const [status, manifest] = await Promise.all([
+      fetchRemoteJson(args, "/api/agent/status"),
+      fetchRemoteJson(args, "/api/agent/manifest"),
+    ]);
+    return { schemaVersion: "truthpass.cli.remote-doctor.v1", command: "doctor", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), status, manifest, authConfigured: manifest.authMode === "bearer_token", registrationAuthConfigured: manifest.registrationAuthMode === "bearer_token" };
+  }
+  if (command === "register") {
+    if (!args.agentId || !args.agentName || args.capabilities.length === 0) throw new Error("register 需要 --agent-id、--name 和至少一个 --capability");
+    return fetchRemoteJson(args, "/api/agent/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: args.agentId, tenantId: args.tenantId, name: args.agentName, capabilities: args.capabilities, publicKey: args.publicKey }),
+    }, true);
+  }
+  const batchId = encodeURIComponent(args.batchId.toUpperCase());
+  if (command === "inspect" || command === "verify") {
+    const result = await fetchRemoteJson(args, `/api/cli/inspect?batchId=${batchId}`);
+    const verification = result.verification && typeof result.verification === "object" ? result.verification as Record<string, unknown> : {};
+    return { ...result, command: command === "verify" ? "verify" : "inspect", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), verificationStatus: verification.status ?? result.status ?? null, dataMode: result.dataClass ?? verification.dataClass ?? null };
+  }
+  if (command === "explain") {
+    const result = await fetchRemoteJson(args, `/api/cli/explain?batchId=${batchId}`);
+    const inspection = result.inspection && typeof result.inspection === "object" ? result.inspection as Record<string, unknown> : {};
+    return { ...result, command: "explain", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), verificationStatus: result.status ?? inspection.status ?? null, dataMode: result.dataClass ?? inspection.dataClass ?? null };
+  }
+  if (command === "collaborate") {
+    return fetchRemoteJson(args, "/api/agent/v1/collaborate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ batchId: args.batchId.toUpperCase(), tenantId: args.tenantId, question: args.question ?? "请解释当前批次证据状态，并说明下一步由谁确认。" }),
+    }, true);
+  }
+  if (command === "discover") {
+    const manifest = await fetchRemoteJson(args, "/api/agent/manifest");
+    return { schemaVersion: "truthpass.cli.remote-discovery.v1", command: "discover", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), batchId: args.batchId, manifest };
+  }
+  throw new Error(`命令 ${command} 暂不支持远程模式`);
 }
 
 interface ReplayManifestResult {
@@ -625,6 +739,14 @@ function agentTranslation(result: Record<string, unknown>): string {
 
 export function textFor(result: Record<string, unknown>): string {
   if (result.command === "doctor") return `真验 CLI ${result.version}\nfixture: ${result.fixtureMode}\nJEV: ${((result.jev as Record<string, unknown>).mode)}\n链上: ${((result.chain as Record<string, unknown>).status)}\n`;
+  if (result.schemaVersion === "truthpass.cli.remote-doctor.v1") {
+    const status = (result.status ?? {}) as Record<string, unknown>;
+    const manifest = (result.manifest ?? {}) as Record<string, unknown>;
+    return `远程服务：${result.remoteUrl ?? "未知"}\n状态：${status.status ?? "未知"}\nAgent：${status.agentMode ?? "未知"}\n认证：${manifest.authMode ?? "未知"}\n注册认证：${manifest.registrationAuthMode ?? "未知"}\n`;
+  }
+  if (result.schemaVersion === "truthpass.agent.manifest.v1") return `TruthPass Agent Manifest\n服务：${result.publicUrl ?? "未知"}\n状态：${result.status ?? "未知"}\n认证：${result.authMode ?? "未知"}\n数据：${result.dataClass ?? "未知"}\n`;
+  if (result.command === "collaborate" || result.schemaVersion === "truthpass.agent.collaboration.v1") return `Agent 协作结果\n批次：${result.batchId ?? "未知"}\n数据：${result.dataMode ?? "未知"}\n下一步：${((result.writePlan as Record<string, unknown> | undefined)?.nextAction) ?? "查看 JSON 结果"}\n`;
+  if (result.schemaVersion === "truthpass.agent.registration.v1") return `Agent 已注册：${((result.agent as Record<string, unknown> | undefined)?.agentId) ?? "未知"}\n状态：${result.status ?? "未知"}\n注册模式：${result.registryMode ?? "未知"}\n`;
   if (result.command === "discover") return `批次 ${result.batchId} 的候选服务：\n${(result.services as Array<Record<string, unknown>>).map((item) => `- ${item.id} ${item.name} (${item.kind})`).join("\n")}\n`;
   if (result.command === "anchor") return `锚定计划已生成：${result.status}\n批次：${result.batchId}\n网络：${result.network}\nrequestId：${result.requestId}\n不会发送交易。\n`;
   if (result.command === "replay") {
@@ -648,6 +770,15 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   const parsed = parseArgs(argv);
   if ("error" in parsed) return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "INVALID_INPUT", message: parsed.error } };
   if (parsed.command === "help") return { exitCode: 0, value: HELP };
+  if (parsed.remoteUrl) {
+    try {
+      const result = await remoteCommand(parsed);
+      const status = typeof result.status === "string" ? result.status : typeof (result.verification as Record<string, unknown> | undefined)?.status === "string" ? (result.verification as Record<string, unknown>).status : undefined;
+      return { exitCode: status === "rejected" ? 10 : 0, value: result };
+    } catch (error) {
+      return { exitCode: 70, value: { schemaVersion: "truthpass.cli.error.v1", code: "REMOTE_REQUEST_FAILED", message: error instanceof Error ? error.message : String(error), remoteUrl: parsed.remoteUrl } };
+    }
+  }
   if (parsed.command !== "doctor" && parsed.batchId !== DEMO_BATCH_ID) {
     return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "BATCH_NOT_FOUND", message: `当前演示只提供 ${DEMO_BATCH_ID}` } };
   }

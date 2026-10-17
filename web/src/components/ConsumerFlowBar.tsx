@@ -1,18 +1,14 @@
 export type ConsumerAgentStage = "idle" | "searching" | "batch_selected" | "evidence_review" | "purchase_prepared" | "wallet_pending" | "receipt_verified" | "after_sales" | "feedback_submitted";
 
-const stages: Array<{ id: ConsumerAgentStage; label: string }> = [
-  { id: "searching", label: "查询" },
-  { id: "batch_selected", label: "批次" },
-  { id: "evidence_review", label: "证据" },
-  { id: "purchase_prepared", label: "购买准备" },
-  { id: "wallet_pending", label: "钱包确认" },
-  { id: "receipt_verified", label: "交易确认" },
-  { id: "after_sales", label: "售后" },
-  { id: "feedback_submitted", label: "反馈" },
+const stages: Array<{ id: ConsumerAgentStage; label: string; includes: ConsumerAgentStage[] }> = [
+  { id: "searching", label: "了解商品", includes: ["idle", "searching", "batch_selected"] },
+  { id: "evidence_review", label: "查看依据", includes: ["evidence_review"] },
+  { id: "purchase_prepared", label: "准备购买", includes: ["purchase_prepared", "wallet_pending", "receipt_verified"] },
+  { id: "after_sales", label: "售后反馈", includes: ["after_sales", "feedback_submitted"] },
 ];
 
 export function ConsumerFlowBar({ stage, batchId }: { stage: ConsumerAgentStage; batchId: string | null }) {
-  const current = stages.findIndex((item) => item.id === stage);
+  const current = stages.findIndex((item) => item.includes.includes(stage));
   return (
     <section className="consumer-flow" aria-label="消费者 Agent 旅程">
       <div className="consumer-flow-head">

@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "web/dist",
   "rewrites": [
+    { "source": "/mcp", "destination": "/api/mcp" },
     { "source": "/api/:path*", "destination": "/api/[[...path]].ts" },
     { "source": "/web-demo", "destination": "/legacy/index.html" },
     { "source": "/web-demo/", "destination": "/legacy/index.html" },
