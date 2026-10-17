@@ -1055,6 +1055,7 @@ async function streamChatWithReply(
     ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
     ...(baseMeta.syncedAt ? { syncedAt: baseMeta.syncedAt } : {}),
     ...(result.sources?.length ? { sources: result.sources } : {}),
+    ...(baseMeta.chainContext ? { chainContext: baseMeta.chainContext } : {}),
     ...(result.chainContext ? { chainContext: result.chainContext } : {}),
   });
   for (const line of script) send({ kind: "line", ...line });
