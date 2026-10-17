@@ -63,6 +63,7 @@ import {
 } from "./src/standards/v1_4.js";
 import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
 import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/enterprise/pilot-store.js";
+import { prepareMediaEvidence, type MediaKind } from "./src/enterprise/media-intake.js";
 import { createTruthPassMcpHttpHandler } from "./src/mcp/endpoint.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -1687,6 +1688,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         walletBindingChallenge: `${origin}/api/wallet/bind/challenge?address={address}&tenantId={tenantId}&role={role}`,
         walletBinding: `${origin}/api/wallet/bind`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
+        enterpriseMediaIntake: `${origin}/api/tenants/{tenantId}/evidence/intake`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
         enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
         enterpriseAuditExport: `${origin}/api/tenants/{tenantId}/audit/export`,
@@ -1795,6 +1797,48 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         traceId: requestTraceId(req),
         idempotent: result.idempotent,
         evidence: { ...result.record, payload: undefined },
+      });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, requestId: ctx.requestId });
+    }
+    return true;
+  }
+
+  const enterpriseMediaIntakeMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/intake$/);
+  if (enterpriseMediaIntakeMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseMediaIntakeMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const body = await readBody(req);
+    try {
+      const prepared = prepareMediaEvidence({
+        tenantId,
+        brandId: typeof body.brandId === "string" ? body.brandId : "",
+        productId: typeof body.productId === "string" ? body.productId : "",
+        batchId: typeof body.batchId === "string" ? body.batchId : "",
+        sampleId: typeof body.sampleId === "string" ? body.sampleId : undefined,
+        evidenceId: typeof body.evidenceId === "string" ? body.evidenceId : undefined,
+        evidenceKind: body.evidenceKind as "production" | "inspection" | "cold_chain" | "shipment",
+        mediaKind: body.mediaKind as MediaKind,
+        issuerId: typeof body.issuerId === "string" ? body.issuerId : "",
+        sourceKind: body.sourceKind as "manufacturer" | "third_party" | "platform_device" | "consumer",
+        capturedAt: typeof body.capturedAt === "string" ? body.capturedAt : "",
+        contentHash: typeof body.contentHash === "string" ? body.contentHash : "",
+        rawObjectRef: typeof body.rawObjectRef === "string" ? body.rawObjectRef : undefined,
+        dataMode: body.dataMode === "external" ? "external" : "demo/synthetic",
+        note: typeof body.note === "string" ? body.note : undefined,
+      });
+      sendJson(res, 200, {
+        schemaVersion: "truthpass.enterprise.media-intake.v1",
+        tenantId,
+        requestId: ctx.requestId,
+        traceId: requestTraceId(req),
+        status: "awaiting_confirmation",
+        nextAction: "由商家确认后调用 /evidence/import；原始媒体仍保留在链下对象存储。",
+        evidence: prepared,
       });
     } catch (error) {
       sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, requestId: ctx.requestId });
