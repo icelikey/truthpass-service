@@ -1530,6 +1530,35 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
         reportHash,
         nextAction: "先补充缺失或冲突证据，确定性验证通过后才能生成可上链核验计划。",
       };
+  const agentAudit = {
+    schemaVersion: "truthpass.agent.audit.v1",
+    runId: reportHash,
+    verifierVersion: assessment ? "deterministic-verifier-v1" : null,
+    records: [
+      {
+        role: "production",
+        inputEvidenceIds: productionInput.view.context.evidence.map((item) => item.evidenceId),
+        citedEvidenceIds: collaboration.production.findings.flatMap((finding) => finding.sourceIds),
+        outputStatus: "contract_validated",
+        writeBoundary: "read_only_analysis",
+      },
+      {
+        role: "inspection",
+        inputEvidenceIds: inspectionInput.view.context.evidence.map((item) => item.evidenceId),
+        citedEvidenceIds: collaboration.inspection.findings.flatMap((finding) => finding.sourceIds),
+        outputStatus: "contract_validated",
+        writeBoundary: "read_only_analysis",
+      },
+      {
+        role: "consumer",
+        inputEvidenceIds: card.evidenceIds,
+        selectedFactIds: collaboration.consumer.selectedFactIds,
+        outputStatus: "fact_selection_validated",
+        writeBoundary: "no_purchase_or_payment",
+      },
+    ],
+    finalDecisionSource: "deterministic_verifier",
+  };
   return {
     schemaVersion: "truthpass.agent.collaboration.v1",
     batchId,
@@ -1541,6 +1570,7 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     contextRevision: lifecycle.contextRevision,
     syncedAt: lifecycle.syncedAt,
     verifierVersion: assessment ? "deterministic-verifier-v1" : null,
+    agentAudit,
     writePlan,
     verification,
     evidenceCard: card,
