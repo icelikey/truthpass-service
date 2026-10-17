@@ -64,6 +64,7 @@ import {
 import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
 import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/enterprise/pilot-store.js";
 import { prepareMediaEvidence, type MediaKind } from "./src/enterprise/media-intake.js";
+import { reconcileBatch } from "./src/enterprise/reconciliation.js";
 import { createTruthPassMcpHttpHandler } from "./src/mcp/endpoint.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -1689,6 +1690,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         walletBinding: `${origin}/api/wallet/bind`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
         enterpriseMediaIntake: `${origin}/api/tenants/{tenantId}/evidence/intake`,
+        enterpriseEvidenceReconcile: `${origin}/api/tenants/{tenantId}/evidence/reconcile`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
         enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
         enterpriseAuditExport: `${origin}/api/tenants/{tenantId}/audit/export`,
@@ -1865,6 +1867,25 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     } catch (error) {
       sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), tenantId, batchId });
     }
+    return true;
+  }
+
+  const enterpriseReconcileMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/reconcile$/);
+  if (enterpriseReconcileMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseReconcileMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const body = await readBody(req);
+    const batchId = typeof body.batchId === "string" ? body.batchId.trim() : "";
+    if (!batchId) {
+      sendJson(res, 400, { error: "BATCH_ID_REQUIRED", tenantId, requestId: ctx.requestId });
+      return true;
+    }
+    const records = await enterprisePilotStore.listEvidence(tenantId, batchId);
+    sendJson(res, 200, { ...reconcileBatch(batchId, records), tenantId, requestId: ctx.requestId, traceId: requestTraceId(req) });
     return true;
   }
 
