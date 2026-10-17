@@ -250,6 +250,14 @@ export function ChatPanel({
   const [batchOpen, setBatchOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [iotBusy, setIotBusy] = useState(false);
+  const [sensorRun, setSensorRun] = useState<{
+    mode: IotSimulationMode;
+    evidenceId: string;
+    payloadHash: string;
+    message: string;
+    pipeline: string[];
+    verification?: { status?: string; reasons?: string[] };
+  } | null>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
@@ -360,8 +368,8 @@ export function ChatPanel({
     setIotBusy(true);
     try {
       const result = await postIotSimulation(target, mode);
+      setSensorRun({ mode, evidenceId: result.evidenceId, payloadHash: result.payloadHash, message: result.message, pipeline: result.pipeline ?? ["设备发送", "服务端接收", "批次关联", "确定性校验"], verification: result.verification });
       await ask(`已上传 IoT 模拟数据：${mode}`, target);
-      void result;
     } catch (error) {
       console.error("IoT 模拟上传失败", error);
     } finally {
@@ -509,6 +517,14 @@ export function ChatPanel({
             <button type="button" aria-label="模拟正常温度" onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
             <button type="button" aria-label="模拟冷链异常" onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
             <button type="button" aria-label="模拟设备离线" onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
+          </div>
+        )}
+        {sensorRun && (
+          <div className="sensor-transfer-card" aria-live="polite">
+            <div className="sensor-transfer-head"><div><span className="chat-quick-label">服务器模拟传感</span><strong>{sensorRun.mode === "normal" ? "温控正常" : sensorRun.mode === "cold_chain_gap" ? "冷链异常" : "设备离线"}</strong></div><span className={`sensor-check-pill ${sensorRun.verification?.status === "accepted" ? "pass" : "review"}`}>{sensorRun.verification?.status === "accepted" ? "校验通过" : "进入复核"}</span></div>
+            <div className="sensor-transfer-steps">{sensorRun.pipeline.map((step, index) => <span key={step} className={index === sensorRun.pipeline.length - 1 ? "done" : ""}><b>{index + 1}</b>{step}{index < sensorRun.pipeline.length - 1 && <i>→</i>}</span>)}</div>
+            <p>{sensorRun.message}</p>
+            <small>证据编号 {sensorRun.evidenceId} · payload 已生成摘要 · {sensorRun.verification?.status ?? "待校验"}</small>
           </div>
         )}
       </div>

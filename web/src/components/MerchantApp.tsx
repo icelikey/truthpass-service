@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchAgentStatus, fetchLifecycle, postChat, requestAgentReport, simulateLifecycleStage } from "../api";
+import { fetchAgentStatus, fetchLifecycle, postChat, postIotSimulation, requestAgentReport, simulateLifecycleStage, type IotSimulationMode } from "../api";
 import { useWallet } from "./WalletContext";
 import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, validateMerchantBatch } from "../merchant/merchantApi";
 import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary } from "../merchant/types";
@@ -36,6 +36,8 @@ export function MerchantApp() {
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [agentReport, setAgentReport] = useState<Awaited<ReturnType<typeof requestAgentReport>> | null>(null);
+  const [sensorDemo, setSensorDemo] = useState<Awaited<ReturnType<typeof postIotSimulation>> | null>(null);
+  const [sensorMode, setSensorMode] = useState<IotSimulationMode | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -104,6 +106,20 @@ export function MerchantApp() {
       setAgentReport(await requestAgentReport(selectedBatch?.batchId ?? "FO-2026-001"));
     } catch {
       setMessage("Agent 汇报暂时无法生成，请检查 Agent Gateway 状态。");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const runSensorDemo = async (mode: IotSimulationMode) => {
+    setLifecycleBusy(true);
+    setSensorMode(mode);
+    try {
+      setSensorDemo(await postIotSimulation(selectedBatch?.batchId ?? "FO-2026-001", mode));
+      await refreshLifecycle(selectedBatch?.batchId ?? "FO-2026-001");
+      setMessage("传感器模拟数据已传到服务器，完成批次关联和确定性校验。页面已刷新最新上下文。 ");
+    } catch {
+      setMessage("传感器模拟失败，当前批次没有被修改。 ");
     } finally {
       setLifecycleBusy(false);
     }
@@ -303,6 +319,12 @@ export function MerchantApp() {
                     {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span></div><small>{agentReport.writePlan?.nextAction}</small><button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
                   </>
                 ) : <div className="merchant-empty">尚未读取生命周期上下文。</div>}
+              </section>
+
+              <section className="merchant-section merchant-sensor-section" aria-label="传感器数据回放">
+                <div className="merchant-section-head"><div><span className="eyebrow">服务器回放</span><h2>传感器资料怎么进入证据卡</h2><p>用一条模拟温控数据，完整展示“设备发送 → 服务端校验 → 批次更新”。</p></div><span className="merchant-demo-pill">DEMO / SYNTHETIC</span></div>
+                <div className="merchant-sensor-actions"><button type="button" className="merchant-secondary" onClick={() => void runSensorDemo("normal")} disabled={lifecycleBusy}>模拟正常温控</button><button type="button" className="merchant-secondary" onClick={() => void runSensorDemo("cold_chain_gap")} disabled={lifecycleBusy}>模拟冷链异常</button><button type="button" className="merchant-secondary" onClick={() => void runSensorDemo("device_offline")} disabled={lifecycleBusy}>模拟设备离线</button></div>
+                {sensorDemo && <div className="merchant-sensor-result"><div className="merchant-sensor-steps">{(sensorDemo.pipeline ?? ["设备发送", "服务端接收", "批次关联", "确定性校验"]).map((step, index, all) => <span key={step} className={index === all.length - 1 ? "done" : ""}><b>{index + 1}</b>{step}{index < all.length - 1 && <i>→</i>}</span>)}</div><div className="merchant-sensor-result-copy"><strong>{sensorMode === "normal" ? "温控正常" : sensorMode === "cold_chain_gap" ? "冷链异常" : "设备离线"} · {sensorDemo.verification?.status === "accepted" ? "校验通过" : "进入复核"}</strong><p>{sensorDemo.message}</p><small>{sensorDemo.evidenceId} · payloadHash {sensorDemo.payloadHash}</small></div></div>}
               </section>
 
               <section className="merchant-section merchant-batch-table-section">

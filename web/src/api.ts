@@ -160,13 +160,20 @@ export interface CliInspectData {
 export const fetchCliInspect = (batchId: string) => getJson<CliInspectData>(`/api/cli/inspect?batchId=${encodeURIComponent(batchId)}`);
 
 export type IotSimulationMode = "normal" | "cold_chain_gap" | "device_offline";
-export async function postIotSimulation(batchId: string, mode: IotSimulationMode): Promise<{ ok: boolean; evidenceId: string; payloadHash: string; message: string }> {
+export async function postIotSimulation(batchId: string, mode: IotSimulationMode): Promise<{
+  ok: boolean;
+  evidenceId: string;
+  payloadHash: string;
+  message: string;
+  pipeline?: string[];
+  verification?: { status?: string; dataMode?: string; evidenceRoot?: string; reasons?: string[] };
+}> {
   const res = await fetch("/api/simulator/iot", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ batchId, mode }),
   });
   if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
-  return (await res.json()) as { ok: boolean; evidenceId: string; payloadHash: string; message: string };
+  return (await res.json()) as { ok: boolean; evidenceId: string; payloadHash: string; message: string; pipeline?: string[]; verification?: { status?: string; dataMode?: string; evidenceRoot?: string; reasons?: string[] } };
 }
 
 export async function postChat(

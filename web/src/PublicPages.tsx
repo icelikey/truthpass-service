@@ -79,6 +79,25 @@ const developerCopy = {
     stepsBody: ["让 Agent 了解可用的查询能力", "获取公开的商品依据", "基于结果继续分析与行动"],
     note: ["只读查询公开资料", "需要身份的操作必须签名", "不会把私钥交给 TruthPass"],
     noteBody: ["对所有人开放，支持 AI 与开发者获取可信信息。", "涉及写入或敏感操作时，必须经过身份验证与签名。", "你的私钥始终由自己保管，我们从不接触。"],
+    installTitle: "先装上，再开始查询",
+    installBody: "没有开发环境也没关系。复制一行命令，或下载 CLI 压缩包。",
+    installCommand: "npm install -g truthpass",
+    runCommand: "npx truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001",
+    install: "下载 CLI 安装包",
+    source: "查看源代码",
+    copyCommand: "复制命令",
+    copiedCommand: "已复制命令",
+    mcpConfig: "复制 MCP 配置",
+    runtimeTitle: "Agent 在哪里运行？",
+    runtimeBody: "TruthPass 不替你保管一个黑箱 Agent。你可以直接用网站里的 Agent，也可以让自己的 Agent 读取同一份公开资料。",
+    runtimeSteps: ["网站里的 Agent", "你的 Agent", "企业 Agent"],
+    runtimeStepBody: ["帮你理解商品、批次和下一步。", "通过 MCP 或 CLI 读取公开证据，再由你自己的模型决定如何使用。", "在获得企业授权后提交资料、生成汇报，写入和交易仍需对应钱包确认。"],
+    checkTitle: "检查服务是否在线",
+    check: "检查连接",
+    checking: "正在检查…",
+    ready: "已连接",
+    unavailable: "暂时无法连接",
+    statusHint: "公开查询无需 Token；受保护操作会要求企业身份。",
   },
   en: {
     eyebrow: "DEVELOPER ACCESS · OPEN EVIDENCE",
@@ -97,14 +116,59 @@ const developerCopy = {
     stepsBody: ["Learn which public queries are available", "Read the product record and evidence", "Continue analysis with an explicit result"],
     note: ["Read public evidence", "Sign identity-bound actions", "Keep your private key"],
     noteBody: ["Open to everyone, for agents and builders who need reliable context.", "Writes and sensitive actions require identity verification and a signature.", "Your private key stays with you. TruthPass never touches it."],
+    installTitle: "Install first. Then inspect.",
+    installBody: "Copy one command or download the CLI package and run it locally.",
+    installCommand: "npm install -g truthpass",
+    runCommand: "npx truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001",
+    install: "Download CLI package",
+    source: "View source",
+    copyCommand: "Copy command",
+    copiedCommand: "Command copied",
+    mcpConfig: "Copy MCP config",
+    runtimeTitle: "Where does the agent run?",
+    runtimeBody: "TruthPass does not keep a hidden agent on your behalf. Use the agent on this site, or let your own agent read the same public record.",
+    runtimeSteps: ["The site agent", "Your agent", "An enterprise agent"],
+    runtimeStepBody: ["Explains products, batches, and the next step.", "Reads public evidence through MCP or the CLI; your model decides how to use it.", "Submits evidence and drafts reports after enterprise authorization. Writes and trades still need the right wallet."],
+    checkTitle: "Check the live service",
+    check: "Check connection",
+    checking: "Checking…",
+    ready: "Connected",
+    unavailable: "Unavailable",
+    statusHint: "Public inspection is open. Protected actions require an enterprise identity.",
   },
 };
+
+type DeveloperCopy = (typeof developerCopy)["zh"];
+
+function CopyButton({ value, label, copiedLabel }: { value: string; label: string; copiedLabel: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard?.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return <button type="button" className="tp-copy-btn" onClick={copy}>{copied ? copiedLabel : label}</button>;
+}
+
+function AgentRuntime({ copy }: { copy: DeveloperCopy }) {
+  return <section className="tp-agent-runtime" aria-labelledby="agent-runtime-title">
+    <div className="tp-runtime-heading"><p className="tp-kicker">{copy.runtimeTitle}</p><p>{copy.runtimeBody}</p></div>
+    <div className="tp-runtime-grid">{copy.runtimeSteps.map((step, index) => <article key={step}>
+      <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step}</strong><p>{copy.runtimeStepBody[index]}</p></div>
+    </article>)}</div>
+  </section>;
+}
 
 function DeveloperCard({ route, kind }: { route: PublicRoute; kind: "mcp" | "cli" }) {
   const zh = routeMap[route].zh;
   const copy = zh ? developerCopy.zh : developerCopy.en;
   const [copied, setCopied] = useState(false);
   const endpoint = "https://truthpass-service.vercel.app/mcp";
+  const mcpConfig = JSON.stringify({ mcpServers: { truthpass: { url: endpoint } } }, null, 2);
   const copyEndpoint = async () => {
     try {
       await navigator.clipboard?.writeText(endpoint);
@@ -127,6 +191,7 @@ function DeveloperCard({ route, kind }: { route: PublicRoute; kind: "mcp" | "cli
         </div>
         <div className="tp-endpoint-row"><span><small>{copy.endpoint}</small><code>{endpoint}</code></span><button type="button" onClick={copyEndpoint} aria-label={copy.copy}>{copied ? (zh ? "已复制" : "Copied") : "⧉"}</button></div>
         <button className="tp-red-btn" type="button" onClick={copyEndpoint}>{copied ? (zh ? "已复制连接地址" : "Endpoint copied") : `${copy.copy}  →`}</button>
+        <div className="tp-dev-inline-actions"><CopyButton value={mcpConfig} label={copy.mcpConfig} copiedLabel={zh ? "已复制配置" : "Config copied"} /><a className="tp-text-link" href={endpoint} target="_blank" rel="noreferrer">{zh ? "打开 MCP 入口" : "Open MCP endpoint"} ↗</a></div>
         <small className="tp-card-note">{copy.use}</small>
       </article>
     );
@@ -135,7 +200,10 @@ function DeveloperCard({ route, kind }: { route: PublicRoute; kind: "mcp" | "cli
     <article id="cli" className="tp-dev-card tp-dev-card-cli">
       <div className="tp-dev-card-head"><span className="tp-dev-icon tp-dev-icon-cli" aria-hidden="true">›_</span><div><h2>{copy.cliTitle}</h2><p>{copy.cliBody}</p></div><span className="tp-side-seal">{zh ? "一行命令" : "ONE COMMAND"}<br />{zh ? "连接真实" : "CONNECT REAL"}</span></div>
       <pre className="tp-terminal" aria-label="TruthPass CLI example"><code><span># {zh ? "查询某个批次的公开资料" : "Inspect a public batch record"}</span>{"\n"}<em>$ truthpass inspect --remote https://truthpass-service.vercel.app</em>{"\n  --batch FO-2026-001"}{"\n\n"}<span># {zh ? "在你的应用中进行协作分析" : "Collaborate from your app"}</span>{"\n"}<em>$ truthpass collaborate --remote https://truthpass-service.vercel.app</em>{"\n  --tenant demo"}</code></pre>
-      <a className="tp-red-btn tp-btn-link" href={`${routeMap[route].developers}#cli`}>{copy.docs}  →</a>
+      <div className="tp-install-command"><code>{copy.installCommand}</code><CopyButton value={copy.installCommand} label={copy.copyCommand} copiedLabel={copy.copiedCommand} /></div>
+      <div className="tp-dev-inline-actions"><a className="tp-red-btn tp-btn-link" href="/downloads/truthpass-cli.zip" download>{copy.install} ↓</a><a className="tp-paper-btn tp-btn-link" href="https://github.com/icelikey/truthpass-service" target="_blank" rel="noreferrer">{copy.source} ↗</a></div>
+      <div className="tp-install-command tp-install-command-secondary"><code>{copy.runCommand}</code><CopyButton value={copy.runCommand} label={copy.copyCommand} copiedLabel={copy.copiedCommand} /></div>
+      <a className="tp-text-link" href={`${routeMap[route].developers}#cli`}>{copy.docs}  →</a>
       <small className="tp-card-note">{zh ? "安装简单，面向开发者设计，帮助你在自己的工具与工作流中使用 TruthPass。" : "A small, explicit interface for bringing TruthPass into your own tools and workflows."}</small>
     </article>
   );
@@ -144,9 +212,27 @@ function DeveloperCard({ route, kind }: { route: PublicRoute; kind: "mcp" | "cli
 export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-developers" | "en-developers" }) {
   const zh = routeMap[route].zh;
   const copy = zh ? developerCopy.zh : developerCopy.en;
+  const [status, setStatus] = useState<"idle" | "checking" | "ready" | "error">("idle");
+  const [statusText, setStatusText] = useState("");
+  const checkStatus = async () => {
+    setStatus("checking");
+    try {
+      const response = await fetch("/api/agent/status", { headers: { Accept: "application/json" } });
+      const data = await response.json() as { status?: string; agentMode?: string; dataMode?: string };
+      if (!response.ok || data.status !== "ready") throw new Error("unavailable");
+      setStatus("ready");
+      setStatusText(`${data.agentMode ?? "ready"} · ${data.dataMode ?? "demo/synthetic"}`);
+    } catch {
+      setStatus("error");
+      setStatusText("");
+    }
+  };
   return <PageFrame route={route} active="developers"><main className="tp-developer-main">
     <section className="tp-developer-hero"><p className="tp-kicker">{copy.eyebrow}</p><h1>{copy.title}<span aria-hidden="true">{zh ? "。" : ""}</span></h1><p>{copy.intro}</p><div className="tp-hero-rule" /></section>
     <section className="tp-developer-grid" aria-label={zh ? "开发者工具" : "Developer tools"}><DeveloperCard route={route} kind="mcp" /><DeveloperCard route={route} kind="cli" /></section>
+    <section className="tp-install-panel" aria-labelledby="install-title"><div><p className="tp-kicker" id="install-title">{copy.installTitle}</p><p>{copy.installBody}</p></div><div className="tp-install-panel-actions"><CopyButton value={copy.installCommand} label={copy.copyCommand} copiedLabel={copy.copiedCommand} /><a className="tp-text-link" href="/downloads/truthpass-cli.zip" download>{copy.install} ↓</a></div></section>
+    <AgentRuntime copy={copy} />
+    <section className="tp-agent-check"><div><p className="tp-kicker">{copy.checkTitle}</p><p>{copy.statusHint}</p></div><div className="tp-agent-check-action"><button type="button" className="tp-outline-btn tp-check-button" onClick={() => void checkStatus()} disabled={status === "checking"}>{status === "checking" ? copy.checking : copy.check}</button>{status === "ready" && <span className="tp-status-ok">● {copy.ready} · {statusText}</span>}{status === "error" && <span className="tp-status-error">● {copy.unavailable}</span>}</div></section>
     <section className="tp-developer-notes">{copy.note.map((note, index) => <article key={note}><span className="tp-note-icon" aria-hidden="true">{["▤", "♙", "♢"][index]}</span><div><strong>{note}</strong><p>{copy.noteBody[index]}</p></div></article>)}</section>
   </main></PageFrame>;
 }

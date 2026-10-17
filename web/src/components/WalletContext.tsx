@@ -487,29 +487,33 @@ export function WalletProvider({
                   const isSelected = selectedWalletKind === opt.kind;
                   const isConnected = Boolean(address && walletKind === opt.kind);
                   return (
-                    <button
-                      key={opt.kind}
-                      type="button"
-                      className={isSelected ? "wallet-option-btn active" : "wallet-option-btn"}
-                      disabled={connecting}
-                      onClick={() => connectWallet(opt.kind)}
-                    >
-                      <div className="wallet-option-top">
-                        <strong>{opt.name}</strong>
-                        <span className={opt.detected ? "wallet-badge detected" : "wallet-badge"}>
-                          {isConnected
-                            ? "✓ 当前已连接"
-                            : connecting && isSelected
-                              ? "⏳ 正在请求授权…"
-                              : isSelected
-                                ? "已选中"
-                                : opt.detected
-                                  ? "已检测到插件"
-                                  : "未检测到插件"}
-                        </span>
-                      </div>
-                      <small>{opt.subtitle}</small>
-                    </button>
+                    <div key={opt.kind} className="wallet-option-wrap">
+                      <button
+                        type="button"
+                        className={isSelected ? "wallet-option-btn active" : "wallet-option-btn"}
+                        disabled={connecting}
+                        onClick={() => connectWallet(opt.kind)}
+                      >
+                        <div className="wallet-option-top">
+                          <strong>{opt.name}</strong>
+                          <span className={opt.detected ? "wallet-badge detected" : "wallet-badge"}>
+                            {isConnected
+                              ? "✓ 当前已连接"
+                              : connecting && isSelected
+                                ? "⏳ 正在请求授权…"
+                                : isSelected
+                                  ? "已选中"
+                                  : opt.detected
+                                    ? "已检测到插件"
+                                    : "未检测到插件"}
+                          </span>
+                        </div>
+                        <small>{opt.subtitle}</small>
+                      </button>
+                      {!opt.detected && <a className="wallet-install-link" href={opt.installUrl} target="_blank" rel="noreferrer">
+                        安装 {opt.name} 插件 ↗
+                      </a>}
+                    </div>
                   );
                 })}
               </div>

@@ -1084,7 +1084,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
 
 async function freeChatReply(question: string): Promise<ChatReplyResult> {
   return callCustomerModel(
-    "你是 TruthPass 商品客服。只能依据提供的商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据时明确说不知道，并建议转人工。回答不超过 5 句纯文本。",
+    "你是 TruthPass 商品客服。说人话，先给结论，再给最多两条依据，最后只给一个最明确的下一步。语气像一名负责成交的顾问：直接、克制、让用户马上知道该不该继续了解；不要绕圈、不要堆术语、不要制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。回答最多 4 句纯文本，格式可用“结论：… 依据：… 下一步：…”。",
     question,
     ["customer_policy"],
   );
@@ -1101,12 +1101,12 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
   const verification = collaboration?.verification && typeof collaboration.verification === "object" ? collaboration.verification as Record<string, unknown> : {};
   const assessment = verification.assessment && typeof verification.assessment === "object" ? verification.assessment as Record<string, unknown> : {};
   const fallbackText = selectedFacts.length
-    ? "当前证据摘要：" + selectedFacts.join("；") + "。数据模式为 demo/synthetic，详细结论仍以确定性验证结果为准。"
+    ? `结论：${verification.status === "accepted" ? "这批资料可以继续了解" : "这批资料暂时不要急着下单"}。依据：${selectedFacts.slice(0, 2).join("；")}。下一步：${verification.status === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "先补齐缺失项或转人工复核"}。当前是 demo/synthetic，不能替代真实商品认证。`
     : b.passed
-      ? b.name + "（" + batchId + "）按当前规则通过验收；当前数据为 demo/synthetic，不能替代真实商品认证。"
-      : b.name + "（" + batchId + "）未通过当前规则，建议转人工复核。";
+      ? `结论：${b.name}（${batchId}）按当前规则可以继续了解。依据：检测、生产和冷链记录已登记。下一步：打开证据卡看来源；当前是 demo/synthetic，不能替代真实商品认证。`
+      : `结论：${b.name}（${batchId}）暂时不要急着下单。依据：当前规则仍有未通过项。下一步：补证或转人工复核；当前是 demo/synthetic。`;
   const modelResult = await callCustomerModel(
-    "你是 TruthPass 的商品客服。只能使用下面的确定性验证结果和证据卡回答。不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；如果资料不足，明确说资料不足。回答不超过 5 句纯文本。",
+    "你是 TruthPass 的商品客服。说人话，像负责成交的顾问：先回应用户真正想知道的结论，再用最多两条事实说明为什么，最后给一个能马上执行的下一步。不要夸大、不要制造紧迫感、不要把“通过当前规则”说成“商品安全”或“官方认证”。只能使用下面的确定性验证结果和证据卡；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。回答最多 4 句纯文本，优先使用“结论：… 依据：… 下一步：…”结构。",
     JSON.stringify({
       batchId,
       dataMode: "demo/synthetic",
@@ -2283,14 +2283,28 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         schemaVersion: "evidence.v1", evidenceId: `iot-${batchId}-${suffix}`, batchId, kind: "cold_chain",
         issuerId: payload.deviceId, sourceKind: "platform_device", occurredAt: now, dataMode: "demo/synthetic", payload,
       });
-      sendJson(res, 201, { ok: true, persisted: false, evidenceId: evidence.evidenceId, batchId, mode, payloadHash: evidence.payloadHash, message: "模拟 IoT 数据已写入证据仓库，标记为 demo/synthetic" });
+      const inspection = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+      const simulatedStatus = mode === "cold_chain_gap" ? "rejected" : mode === "device_offline" ? "missing_evidence" : inspection.verification.status;
+      const simulatedReasons = mode === "cold_chain_gap" ? ["模拟温控中断 6 小时，超过当前批次冷链规则"] : mode === "device_offline" ? ["设备离线，当前没有新的温控证据"] : inspection.verification.reasons;
+      sendJson(res, 201, {
+        ok: true,
+        persisted: false,
+        evidenceId: evidence.evidenceId,
+        batchId,
+        mode,
+        payloadHash: evidence.payloadHash,
+        message: "模拟 IoT 数据已到达服务器，并完成批次关联与确定性校验；标记为 demo/synthetic。",
+        pipeline: ["设备发送", "服务端接收", "批次关联", "确定性校验"],
+        verification: { status: simulatedStatus, dataMode: inspection.verification.dataClass, evidenceRoot: inspection.verification.evidenceRoot, reasons: simulatedReasons },
+      });
     } else {
       if (demoBatch) {
         demoBatch.coldGap = mode === "cold_chain_gap" ? 6 : mode === "normal" ? 1.5 : demoBatch.coldGap;
       }
       const syntheticId = `iot-${batchId}-${suffix}`;
       const syntheticHash = evidenceHash(`${syntheticId}:${JSON.stringify(payload)}`);
-      sendJson(res, 201, { ok: true, persisted: false, evidenceId: syntheticId, batchId, mode, payloadHash: syntheticHash, message: "模拟 IoT 数据已写入批次冷链状态，标记为 demo/synthetic" });
+      const simulatedStatus = mode === "cold_chain_gap" ? "rejected" : mode === "device_offline" ? "missing_evidence" : demoBatch.passed ? "accepted" : "rejected";
+      sendJson(res, 201, { ok: true, persisted: false, evidenceId: syntheticId, batchId, mode, payloadHash: syntheticHash, message: "模拟 IoT 数据已到达服务器，并完成规则校验；标记为 demo/synthetic。", pipeline: ["设备发送", "服务端接收", "批次关联", "确定性校验"], verification: { status: simulatedStatus, dataMode: "demo/synthetic", reasons: simulatedStatus === "accepted" ? [] : [mode === "device_offline" ? "设备离线，当前没有新的温控证据" : "冷链模拟数据超出当前规则"] } });
     }
     return true;
   }
