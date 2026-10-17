@@ -6,6 +6,7 @@ import { ConsumerFlowBar, type ConsumerAgentStage } from "./components/ConsumerF
 import { ConsumerActionDock } from "./components/ConsumerActionDock";
 import { CliReferencePanel } from "./components/CliReferencePanel";
 import { MerchantApp } from "./components/MerchantApp";
+import { InstitutionReviewPanel } from "./components/InstitutionReviewPanel";
 import { Community } from "./components/Community";
 import { EvidencePanel } from "./components/EvidencePanel";
 import { Hero } from "./components/Hero";
@@ -37,6 +38,7 @@ export default function App() {
   const inQueryMode = !!batchId;
   const pathname = window.location.pathname;
   const isMerchantRoute = pathname.startsWith("/merchant");
+  const isInstitutionRoute = pathname.startsWith("/institution");
   const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
   const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname) && !(pathname === "/" && isConsumerView);
 
@@ -95,6 +97,16 @@ export default function App() {
 
   if (isPublicPageRoute) {
     return <PublicPageRouter pathname={pathname} />;
+  }
+
+  if (isInstitutionRoute) {
+    return (
+      <ModalProvider>
+        <WalletProvider activeBatchId="FO-2026-001" onToast={showToast}>
+          <InstitutionReviewPanel />
+        </WalletProvider>
+      </ModalProvider>
+    );
   }
 
   if (isMerchantRoute) {

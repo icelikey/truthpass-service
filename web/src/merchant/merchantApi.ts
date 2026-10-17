@@ -1,4 +1,4 @@
-import type { AgentAuditRun, AuditExport, EvidenceIssue, MediaIntakePreview, MerchantBatchSummary, MerchantSource, MerchantSummary, ReconciliationResult } from "./types";
+import type { AgentAuditRun, AuditExport, EvidenceIssue, MediaIntakePreview, MediaPresignResponse, MerchantBatchSummary, MerchantSource, MerchantSummary, ReconciliationResult } from "./types";
 
 const TENANT_ID = "demo-tenant";
 const DEMO_BATCH = "FO-2026-001";
@@ -104,6 +104,17 @@ export async function exportMerchantAudit(tenantId: string): Promise<AuditExport
       events: [{ eventId: "demo-audit-001", eventType: "batch_validated", requestId: "demo-request", batchId: DEMO_BATCH, createdAt: new Date().toISOString() }],
     };
   }
+}
+
+export async function requestMediaPresign(
+  tenantId: string,
+  input: { fileName: string; contentType: string; size: number; contentHash?: string },
+): Promise<MediaPresignResponse> {
+  return request<MediaPresignResponse>(`/api/tenants/${encodeURIComponent(tenantId)}/media/presign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function prepareMediaIntake(

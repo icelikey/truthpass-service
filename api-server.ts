@@ -1461,6 +1461,7 @@ function consumeChatRateLimit(req: IncomingMessage): { allowed: boolean; retryAf
 }
 
 const agentAuditRuns = new Map<string, Record<string, unknown>>();
+const mediaUploadSessions = new Map<string, { tenantId: string; rawObjectRef: string; expectedHash?: string; expiresAt: number; fileName: string; contentType: string; size: number; receivedAt?: string; receivedHash?: string }>();
 
 async function persistAgentAuditRun(runId: string, tenantId: string, run: Record<string, unknown>): Promise<void> {
   if (!persistenceEnabled()) return;
@@ -1765,6 +1766,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         walletBindingChallenge: `${origin}/api/wallet/bind/challenge?address={address}&tenantId={tenantId}&role={role}`,
         walletBinding: `${origin}/api/wallet/bind`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
+        enterpriseMediaPresign: `${origin}/api/tenants/{tenantId}/media/presign`,
+        enterpriseMediaUpload: `${origin}/api/tenants/{tenantId}/media/upload/{uploadId}`,
         enterpriseMediaIntake: `${origin}/api/tenants/{tenantId}/evidence/intake`,
         enterpriseEvidenceReconcile: `${origin}/api/tenants/{tenantId}/evidence/reconcile`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
@@ -1879,6 +1882,88 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     } catch (error) {
       sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, requestId: ctx.requestId });
     }
+    return true;
+  }
+
+  const enterpriseMediaUploadMatch = p.match(/^\/api\/tenants\/([^/]+)\/media\/upload\/([^/]+)$/);
+  if (enterpriseMediaUploadMatch && req.method === "PUT") {
+    const tenantId = decodeURIComponent(enterpriseMediaUploadMatch[1]!);
+    const uploadId = decodeURIComponent(enterpriseMediaUploadMatch[2]!);
+    const session = mediaUploadSessions.get(uploadId);
+    if (!session || session.tenantId !== tenantId) {
+      sendJson(res, 404, { error: "MEDIA_UPLOAD_NOT_FOUND", tenantId, uploadId });
+      return true;
+    }
+    if (session.expiresAt < Date.now()) {
+      mediaUploadSessions.delete(uploadId);
+      sendJson(res, 410, { error: "MEDIA_UPLOAD_EXPIRED", tenantId, uploadId });
+      return true;
+    }
+    const hash = createHash("sha256");
+    let total = 0;
+    try {
+      for await (const chunk of req) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+        total += buffer.length;
+        if (total > session.size || total > 50 * 1024 * 1024) throw new Error("MEDIA_SIZE_MISMATCH");
+        hash.update(buffer);
+      }
+      const receivedHash = `0x${hash.digest("hex")}`;
+      if (total !== session.size || (session.expectedHash && session.expectedHash !== receivedHash)) {
+        sendJson(res, 422, { error: "MEDIA_HASH_MISMATCH", tenantId, uploadId, expectedHash: session.expectedHash ?? null, receivedHash, size: total });
+        return true;
+      }
+      session.receivedAt = new Date().toISOString();
+      session.receivedHash = receivedHash;
+      mediaUploadSessions.set(uploadId, session);
+      sendJson(res, 200, { schemaVersion: "truthpass.media.upload.v1", status: "uploaded", tenantId, uploadId, rawObjectRef: session.rawObjectRef, contentHash: receivedHash, dataMode: "demo/synthetic", storageMode: "presign_preview", nextAction: "调用 evidence/intake 生成待确认证据。" });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : "MEDIA_UPLOAD_FAILED", tenantId, uploadId });
+    }
+    return true;
+  }
+
+  const enterpriseMediaPresignMatch = p.match(/^\/api\/tenants\/([^/]+)\/media\/presign$/);
+  if (enterpriseMediaPresignMatch && req.method === "POST") {
+    const tenantId = decodeURIComponent(enterpriseMediaPresignMatch[1]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const body = await readBody(req);
+    const fileName = typeof body.fileName === "string" ? body.fileName.trim().slice(0, 160) : "";
+    const contentType = typeof body.contentType === "string" ? body.contentType.trim().toLowerCase() : "application/octet-stream";
+    const size = typeof body.size === "number" && Number.isFinite(body.size) ? Math.floor(body.size) : 0;
+    const contentHash = typeof body.contentHash === "string" ? body.contentHash.trim().toLowerCase() : "";
+    if (!fileName || size <= 0 || size > 50 * 1024 * 1024) {
+      sendJson(res, 422, { error: "MEDIA_METADATA_INVALID", message: "请提供文件名和 1-50MB 的文件大小", tenantId });
+      return true;
+    }
+    if (contentHash && !/^0x[0-9a-f]{64}$/.test(contentHash)) {
+      sendJson(res, 422, { error: "MEDIA_HASH_INVALID", message: "contentHash 必须是 32 字节 SHA-256 哈希", tenantId });
+      return true;
+    }
+    const uploadId = createHash("sha256").update(`media-upload:${tenantId}:${fileName}:${size}:${contentHash}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 32);
+    const rawObjectRef = `demo://media/${tenantId}/${uploadId}/${encodeURIComponent(fileName)}`;
+    const expiresAt = Date.now() + 15 * 60_000;
+    mediaUploadSessions.set(uploadId, { tenantId, rawObjectRef, expectedHash: contentHash || undefined, expiresAt, fileName, contentType, size });
+    const origin = `${url.protocol}//${url.host}`;
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.media.presign.v1",
+      tenantId,
+      uploadId,
+      method: "PUT",
+      uploadUrl: `${origin}/api/tenants/${encodeURIComponent(tenantId)}/media/upload/${uploadId}`,
+      headers: { "content-type": contentType, "x-truthpass-content-hash": contentHash || undefined },
+      rawObjectRef,
+      expiresAt: new Date(expiresAt).toISOString(),
+      dataMode: process.env.TRUTHPASS_MEDIA_STORAGE === "object_storage" ? "external" : "demo/synthetic",
+      storageMode: process.env.TRUTHPASS_MEDIA_STORAGE === "object_storage" ? "object_storage" : "presign_preview",
+      nextAction: "上传完成后，用返回的 rawObjectRef 和 contentHash 调用证据预览；商家确认后再导入证据库。",
+      requestId: ctx.requestId,
+      traceId: requestTraceId(req),
+    });
     return true;
   }
 

@@ -37,6 +37,22 @@ export interface MerchantSummary {
   batches: MerchantBatchSummary[];
 }
 
+export interface MediaPresignResponse {
+  schemaVersion: "truthpass.media.presign.v1";
+  tenantId: string;
+  uploadId: string;
+  method: "PUT";
+  uploadUrl: string;
+  headers: Record<string, string | undefined>;
+  rawObjectRef: string;
+  expiresAt: string;
+  dataMode: MerchantSource;
+  storageMode: "object_storage" | "presign_preview";
+  nextAction: string;
+  requestId: string;
+  traceId: string;
+}
+
 export interface MediaIntakePreview {
   schemaVersion: "truthpass.enterprise.media-intake.v1";
   tenantId: string;

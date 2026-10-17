@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchAgentStatus, fetchLifecycle, postChat, postIotSimulation, requestAgentReport, simulateLifecycleStage, type IotSimulationMode } from "../api";
 import { useWallet } from "./WalletContext";
-import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, reconcileMerchantBatch, validateMerchantBatch } from "../merchant/merchantApi";
-import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary, ReconciliationResult } from "../merchant/types";
+import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, reconcileMerchantBatch, requestMediaPresign, prepareMediaIntake, validateMerchantBatch } from "../merchant/merchantApi";
+import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary, ReconciliationResult, MediaIntakePreview, MediaPresignResponse } from "../merchant/types";
 import type { ChatEvent, LifecycleView } from "../types";
 
 type MerchantTab = "overview" | "import" | "review" | "preview" | "audit";
@@ -39,6 +39,10 @@ export function MerchantApp() {
   const [agentReport, setAgentReport] = useState<Awaited<ReturnType<typeof requestAgentReport>> | null>(null);
   const [sensorDemo, setSensorDemo] = useState<Awaited<ReturnType<typeof postIotSimulation>> | null>(null);
   const [sensorMode, setSensorMode] = useState<IotSimulationMode | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaPresign, setMediaPresign] = useState<MediaPresignResponse | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<MediaIntakePreview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -165,6 +169,65 @@ export function MerchantApp() {
       setAgentReply("客服 Agent 暂时无法连接，已保留确定性证据卡。请稍后重试或转人工。");
     } finally {
       setAgentBusy(false);
+    }
+  };
+
+  const prepareSelectedMedia = async () => {
+    if (!selectedMedia) {
+      setMessage("先选择一张照片、视频、报告或传感器文件。");
+      return;
+    }
+    setMediaBusy(true);
+    setMediaPresign(null);
+    setMediaPreview(null);
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", await selectedMedia.arrayBuffer());
+      const hash = `0x${Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+      if (import.meta.env.VITE_TRUTHPASS_MERCHANT_API_ENABLED !== "true") {
+        setMessage(`已在演示模式完成文件 Hash：${hash.slice(0, 18)}…；原文件未上传，也未写入真实企业数据。`);
+        setMediaPreview({
+          schemaVersion: "truthpass.enterprise.media-intake.v1",
+          tenantId: (summary?.tenantId ?? "demo-tenant"),
+          requestId: "demo-media-request",
+          traceId: "demo-media-trace",
+          status: "awaiting_confirmation",
+          nextAction: "演示模式只展示 Hash 和批次绑定；接入企业凭证后再上传到对象存储。",
+          evidence: {
+            evidenceId: `media-${hash.slice(2, 18)}`,
+            batchId: selectedBatch?.batchId ?? "FO-2026-001",
+            kind: "production",
+            issuerId: "demo-merchant",
+            sourceKind: "manufacturer",
+            occurredAt: new Date().toISOString(),
+            dataMode: "demo/synthetic",
+            payload: { mediaKind: selectedMedia.type.startsWith("image/") ? "photo" : selectedMedia.type.startsWith("video/") ? "video" : "pdf", contentHash: hash },
+          },
+        });
+        return;
+      }
+      const presign = await requestMediaPresign((summary?.tenantId ?? "demo-tenant"), { fileName: selectedMedia.name, contentType: selectedMedia.type || "application/octet-stream", size: selectedMedia.size, contentHash: hash });
+      setMediaPresign(presign);
+      const uploadResponse = await fetch(presign.uploadUrl, { method: presign.method, headers: Object.fromEntries(Object.entries(presign.headers).flatMap(([key, value]) => value ? [[key, value]] : [])) as Record<string, string>, body: selectedMedia });
+      if (!uploadResponse.ok) throw new Error(`媒体上传失败：HTTP ${uploadResponse.status}`);
+      const preview = await prepareMediaIntake((summary?.tenantId ?? "demo-tenant"), {
+        brandId: "brand-demo",
+        productId: "product-fish-oil",
+        batchId: selectedBatch?.batchId ?? "FO-2026-001",
+        evidenceKind: "production",
+        mediaKind: selectedMedia.type.startsWith("image/") ? "photo" : selectedMedia.type.startsWith("video/") ? "video" : "pdf",
+        issuerId: "merchant-operator",
+        sourceKind: "manufacturer",
+        capturedAt: new Date().toISOString(),
+        contentHash: hash,
+        rawObjectRef: presign.rawObjectRef,
+        dataMode: presign.dataMode,
+      });
+      setMediaPreview(preview);
+      setMessage("文件上传准备完成；请先确认批次和来源，再提交证据。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "文件 Hash 或上传准备失败。");
+    } finally {
+      setMediaBusy(false);
     }
   };
 
@@ -326,7 +389,7 @@ export function MerchantApp() {
                         </div>
                       ))}
                     </div>
-                    {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span><span>审计：{agentReport.agentAudit ? "已记录" : "待读取"}</span></div><small>{agentReport.writePlan?.nextAction}</small><button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
+                    {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span><span>审计：{agentReport.agentAudit ? "已记录" : "待读取"}</span></div><small>{agentReport.writePlan?.nextAction}</small>{agentReport.agentAudit?.records?.length ? <div className="merchant-audit-trace" aria-label="Agent 审计轨迹">{agentReport.agentAudit.records.map((record, index) => <div key={`${record.role}-${index}`}><b>{record.role}</b><span>{record.outputStatus}</span><small>引用 {record.citedEvidenceIds?.length ?? 0} 条证据 · {record.writeBoundary}</small></div>)}</div> : null}<button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
                   </>
                 ) : <div className="merchant-empty">尚未读取生命周期上下文。</div>}
               </section>
@@ -375,7 +438,7 @@ export function MerchantApp() {
               <div className="merchant-import-card">
                 <span className="eyebrow">资料导入</span><h2>导入批次资料</h2>
                 <p>首期支持 CSV、Excel 映射和 API 接入。当前浏览器演示使用明确的 Demo fixture，不保存企业 Token。</p>
-                <div className="merchant-dropzone"><span>⇧</span><strong>拖入文件或选择数据源</strong><small>CSV / XLSX / JSON · 原始报告保留在链下</small><button type="button" className="merchant-secondary" onClick={() => setMessage("文件导入界面已准备，等待企业数据映射。")}>选择文件</button></div>
+                <div className="merchant-dropzone"><span>⇧</span><strong>{selectedMedia ? selectedMedia.name : "拖入文件或选择数据源"}</strong><small>照片 / 视频 / PDF / 语音 / 传感器 · 原始媒体保留在链下</small><input className="merchant-file-input" type="file" accept="image/*,video/*,audio/*,.pdf,.csv,.json" onChange={(event) => setSelectedMedia(event.target.files?.[0] ?? null)} aria-label="选择批次资料文件" /><button type="button" className="merchant-secondary" onClick={() => void prepareSelectedMedia()} disabled={!selectedMedia || mediaBusy}>{mediaBusy ? "正在计算 Hash…" : "生成上传准备"}</button>{mediaPreview && <div className="merchant-media-preview" role="status"><strong>已生成待确认证据</strong><small>{mediaPreview.evidence.evidenceId} · {mediaPreview.evidence.dataMode}</small><small>Hash：{mediaPreview.evidence.payload.contentHash}</small><em>{mediaPreview.nextAction}</em></div>}{mediaPresign && <small className="merchant-presign-note">存储：{mediaPresign.storageMode} · 上传地址已生成，15 分钟内有效</small>}</div>
                 <div className="merchant-import-actions">{([["production", "生产记录"], ["inspection", "检测报告"], ["cold_chain", "冷链记录"], ["shipment", "出货记录"]] as const).map(([kind, label]) => <button type="button" key={kind} onClick={() => void importEvidence(kind)}>导入 Demo · {label}</button>)}</div>
               </div>
               <div className="merchant-mapping-card"><span className="eyebrow">资料对应</span><h3>首期必需信息</h3>{["企业和品牌", "商品和批次", "样品和资料编号", "资料提供方", "发生时间和更新时间"].map((field) => <div className="merchant-field-row" key={field}><span>{field}</span><b>待对应</b></div>)}<small>真实企业接入需要先固定批次号和样品号，避免检测报告放错批次。</small></div>
