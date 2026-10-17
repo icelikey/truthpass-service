@@ -2161,7 +2161,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           { name: "读取批次数据", status: "completed", detail: "demo/synthetic 批次数据" },
           { name: "确定性验收", status: "completed", detail: demoBatch.passed ? "accepted" : "rejected" },
           { name: "证据根哈希", status: "completed", detail: evidenceHash(`${batchId}:root`) },
-          { name: "链上锚定状态", status: "completed", detail: `BOT Chain Mainnet (677) · 合约 ${BOT_CHAIN_MAINNET.contractAddress.slice(0, 10)}… · 交易 ${primaryTx.txHash.slice(0, 14)}…` },
+          { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
         ],
         verification: {
           schemaVersion: "truthpass.cli.verify.v1",
@@ -2174,14 +2174,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           evidence: [],
           assessment: demoBatch.passed ? undefined : { score: 89, checks: {}, reasons: ["部分指标未达验收标准"] },
           anchor: {
-            status: "anchored",
-            submitted: true,
+            status: "anchor_pending",
+            submitted: false,
             network: "bot-mainnet",
             chainId: BOT_CHAIN_MAINNET.chainId,
             contractAddress: BOT_CHAIN_MAINNET.contractAddress,
-            txHash: primaryTx.txHash,
-            verificationTxHash: verifyTx.txHash,
-            explorerUrl: primaryTx.explorerUrl,
           },
           reasons: demoBatch.passed ? [] : ["部分指标未达验收标准"],
         },
@@ -2197,24 +2194,37 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     }
     try {
       const inspectResult = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+      const synthetic = inspectResult.verification.dataClass === "demo/synthetic";
       sendJson(res, 200, {
         ...inspectResult,
         stages: inspectResult.stages.map((stage, idx) =>
           idx === inspectResult.stages.length - 1
-            ? { ...stage, status: "completed", detail: `BOT Chain Mainnet (677) 已锚定 · Tx ${primaryTx.txHash.slice(0, 14)}…` }
+            ? synthetic
+              ? { ...stage, status: "pending", detail: "dry-run：未广播交易，需外部签名" }
+              : { ...stage, status: "completed", detail: `BOT Chain Mainnet (677) 已锚定 · Tx ${primaryTx.txHash.slice(0, 14)}…` }
             : stage
         ),
         verification: {
           ...inspectResult.verification,
-          anchor: {
-            ...inspectResult.verification.anchor,
-            status: "anchored",
-            submitted: true,
-            contractAddress: BOT_CHAIN_MAINNET.contractAddress,
-            txHash: primaryTx.txHash,
-            verificationTxHash: verifyTx.txHash,
-            explorerUrl: primaryTx.explorerUrl,
-          },
+          anchor: synthetic
+            ? {
+                ...inspectResult.verification.anchor,
+                status: "anchor_pending",
+                submitted: false,
+                contractAddress: BOT_CHAIN_MAINNET.contractAddress,
+                txHash: undefined,
+                verificationTxHash: undefined,
+                explorerUrl: undefined,
+              }
+            : {
+                ...inspectResult.verification.anchor,
+                status: "anchored",
+                submitted: true,
+                contractAddress: BOT_CHAIN_MAINNET.contractAddress,
+                txHash: primaryTx.txHash,
+                verificationTxHash: verifyTx.txHash,
+                explorerUrl: primaryTx.explorerUrl,
+              },
         },
         chain: {
           chainId: BOT_CHAIN_MAINNET.chainId,
