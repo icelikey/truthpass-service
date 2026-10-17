@@ -1,4 +1,4 @@
-import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSource, MerchantSummary } from "./types";
+import type { AgentAuditRun, AuditExport, EvidenceIssue, MediaIntakePreview, MerchantBatchSummary, MerchantSource, MerchantSummary, ReconciliationResult } from "./types";
 
 const TENANT_ID = "demo-tenant";
 const DEMO_BATCH = "FO-2026-001";
@@ -104,6 +104,29 @@ export async function exportMerchantAudit(tenantId: string): Promise<AuditExport
       events: [{ eventId: "demo-audit-001", eventType: "batch_validated", requestId: "demo-request", batchId: DEMO_BATCH, createdAt: new Date().toISOString() }],
     };
   }
+}
+
+export async function prepareMediaIntake(
+  tenantId: string,
+  input: { brandId: string; productId: string; batchId: string; evidenceKind: "production" | "inspection" | "cold_chain" | "shipment"; mediaKind: "photo" | "video" | "pdf" | "voice" | "sensor"; issuerId: string; sourceKind: string; capturedAt: string; contentHash: string; rawObjectRef?: string; dataMode?: MerchantSource },
+): Promise<MediaIntakePreview> {
+  return request<MediaIntakePreview>(`/api/tenants/${encodeURIComponent(tenantId)}/evidence/intake`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function reconcileMerchantBatch(tenantId: string, batchId: string): Promise<ReconciliationResult> {
+  return request<ReconciliationResult>(`/api/tenants/${encodeURIComponent(tenantId)}/evidence/reconcile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batchId }),
+  });
+}
+
+export async function loadAgentAuditRun(tenantId: string, runId: string): Promise<AgentAuditRun> {
+  return request<AgentAuditRun>(`/api/tenants/${encodeURIComponent(tenantId)}/agent-runs/${encodeURIComponent(runId)}`);
 }
 
 export { DEMO_BATCH, TENANT_ID };

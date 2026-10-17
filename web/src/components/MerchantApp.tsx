@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchAgentStatus, fetchLifecycle, postChat, postIotSimulation, requestAgentReport, simulateLifecycleStage, type IotSimulationMode } from "../api";
 import { useWallet } from "./WalletContext";
-import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, validateMerchantBatch } from "../merchant/merchantApi";
-import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary } from "../merchant/types";
+import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, reconcileMerchantBatch, validateMerchantBatch } from "../merchant/merchantApi";
+import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary, ReconciliationResult } from "../merchant/types";
 import type { ChatEvent, LifecycleView } from "../types";
 
 type MerchantTab = "overview" | "import" | "review" | "preview" | "audit";
@@ -26,6 +26,7 @@ export function MerchantApp() {
   const [summary, setSummary] = useState<MerchantSummary | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<MerchantBatchSummary | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<EvidenceIssue | null>(null);
+  const [reconciliation, setReconciliation] = useState<ReconciliationResult | null>(null);
   const [audit, setAudit] = useState<AuditExport | null>(null);
   const [message, setMessage] = useState("");
   const [agentInput, setAgentInput] = useState("");
@@ -75,6 +76,15 @@ export function MerchantApp() {
     );
     setSelectedBatch(next);
     setLifecycle(await fetchLifecycle(next.batchId).catch(() => null));
+  };
+
+  const runReconciliation = async () => {
+    try {
+      setReconciliation(await reconcileMerchantBatch(summary?.tenantId ?? "demo-tenant", selectedBatch?.batchId ?? "FO-2026-001"));
+      setMessage("已完成生产、检测、冷链和出货对账；冲突项不会自动改写批次状态。");
+    } catch {
+      setMessage("对账暂时无法完成，请先确认企业 API 凭证和批次资料。");
+    }
   };
 
   const refreshLifecycle = async (batchId = selectedBatch?.batchId ?? "FO-2026-001") => {
@@ -316,7 +326,7 @@ export function MerchantApp() {
                         </div>
                       ))}
                     </div>
-                    {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span></div><small>{agentReport.writePlan?.nextAction}</small><button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
+                    {agentReport && <div className="merchant-agent-report-card"><div className="merchant-agent-report-head"><div><span className="eyebrow">AGENT REPORT</span><strong>生产 / 检测 / 消费者协作汇报</strong></div><span className="merchant-report-status">{agentReport.writePlan?.status === "pending_wallet_signature" ? "待机构钱包签名" : "等待补证"}</span></div><p>{(agentReport.selectedFacts ?? []).slice(0, 3).join("；") || "Agent 没有选择可公开的事实。"}</p><div className="merchant-agent-report-meta"><span>验证：{agentReport.verification?.status ?? "unknown"}</span><span>上链事件：{agentReport.writePlan?.eventName ?? "—"}</span><span>角色：{agentReport.writePlan?.requiredRole ?? "—"}</span><span>上下文：v{agentReport.contextRevision ?? "—"}</span><span>审计：{agentReport.agentAudit ? "已记录" : "待读取"}</span></div><small>{agentReport.writePlan?.nextAction}</small><button type="button" className="merchant-primary" onClick={() => setWalletModalOpen(true)}>打开机构钱包 →</button></div>}
                   </>
                 ) : <div className="merchant-empty">尚未读取生命周期上下文。</div>}
               </section>
@@ -375,7 +385,7 @@ export function MerchantApp() {
           {tab === "review" && (
             <section className="merchant-section">
               <div className="merchant-section-head"><div><span className="eyebrow">待处理问题</span><h2>资料审核列表</h2></div><span className="merchant-count">{reviewItems.length} 个待处理项</span></div>
-              <div className="merchant-review-layout"><div className="merchant-review-list">{reviewItems.map((issue) => <button className={selectedIssue?.id === issue.id ? "merchant-review-item active" : "merchant-review-item"} key={issue.id} type="button" onClick={() => setSelectedIssue(issue)}><div><strong>{issue.title}</strong><span>{issue.batchId} · {issue.issuer}</span></div><StatusPill status={issue.status} /></button>)}</div><div className="merchant-review-detail">{selectedIssue ? <><div className="merchant-detail-head"><div><span className="eyebrow">EVIDENCE DETAIL</span><h3>{selectedIssue.title}</h3><p>{selectedIssue.batchId} · {selectedIssue.issuer}</p></div><StatusPill status={selectedIssue.status} /></div><dl><div><dt>签名状态</dt><dd>{selectedIssue.signature}</dd></div><div><dt>证据哈希</dt><dd className="mono">{selectedIssue.hash}</dd></div><div><dt>当前事实</dt><dd>{selectedIssue.detail}</dd></div><div><dt>下一步</dt><dd>{selectedIssue.nextAction}</dd></div></dl><button className="merchant-primary" type="button" onClick={() => setMessage("已生成复核任务；真实生产环境将进入机构签名和人工审核流程。")}>创建复核任务</button></> : <div className="merchant-empty">选择一个证据问题查看详情。</div>}</div></div>
+              <div className="merchant-review-layout"><div className="merchant-review-list">{reviewItems.map((issue) => <button className={selectedIssue?.id === issue.id ? "merchant-review-item active" : "merchant-review-item"} key={issue.id} type="button" onClick={() => setSelectedIssue(issue)}><div><strong>{issue.title}</strong><span>{issue.batchId} · {issue.issuer}</span></div><StatusPill status={issue.status} /></button>)}</div><div className="merchant-review-detail">{selectedIssue ? <><div className="merchant-detail-head"><div><span className="eyebrow">EVIDENCE DETAIL</span><h3>{selectedIssue.title}</h3><p>{selectedIssue.batchId} · {selectedIssue.issuer}</p></div><StatusPill status={selectedIssue.status} /></div><dl><div><dt>签名状态</dt><dd>{selectedIssue.signature}</dd></div><div><dt>证据哈希</dt><dd className="mono">{selectedIssue.hash}</dd></div><div><dt>当前事实</dt><dd>{selectedIssue.detail}</dd></div><div><dt>下一步</dt><dd>{selectedIssue.nextAction}</dd></div></dl><div className="merchant-review-actions"><button className="merchant-primary" type="button" onClick={() => setMessage("已生成复核任务；真实生产环境将进入机构签名和人工审核流程。")}>创建复核任务</button><button className="merchant-secondary" type="button" onClick={() => void runReconciliation()}>运行批次对账</button><button className="merchant-secondary" type="button" onClick={() => setWalletModalOpen(true)}>打开机构钱包</button></div>{reconciliation && <div className={`merchant-reconciliation-result ${reconciliation.status}`} role="status"><strong>对账结果：{reconciliation.status}</strong><small>{reconciliation.reasons.length ? reconciliation.reasons.join("；") : "没有发现当前规则覆盖范围内的冲突。"}</small></div>}</> : <div className="merchant-empty">选择一个证据问题查看详情。</div>}</div></div>
             </section>
           )}
 

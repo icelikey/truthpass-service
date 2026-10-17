@@ -1460,7 +1460,50 @@ function consumeChatRateLimit(req: IncomingMessage): { allowed: boolean; retryAf
   return { allowed: retryAfterSeconds === 0, retryAfterSeconds };
 }
 
-async function runPublicAgentCollaboration(batchId: string, question: string): Promise<Record<string, unknown>> {
+const agentAuditRuns = new Map<string, Record<string, unknown>>();
+
+async function persistAgentAuditRun(runId: string, tenantId: string, run: Record<string, unknown>): Promise<void> {
+  if (!persistenceEnabled()) return;
+  await getDatabasePool().query(`
+    create table if not exists truthpass_agent_audit_runs (
+      run_id text primary key,
+      tenant_id text not null,
+      batch_id text not null,
+      trace_id text,
+      run jsonb not null,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists truthpass_agent_audit_runs_tenant_idx
+      on truthpass_agent_audit_runs (tenant_id, created_at desc);
+  `);
+  await getDatabasePool().query(
+    `insert into truthpass_agent_audit_runs (run_id, tenant_id, batch_id, trace_id, run, created_at)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (run_id) do nothing`,
+    [runId, tenantId, String(run.batchId ?? ""), typeof run.traceId === "string" ? run.traceId : null, JSON.stringify(run), new Date(String(run.createdAt ?? new Date().toISOString()))],
+  );
+}
+
+async function loadAgentAuditRun(tenantId: string, runId: string): Promise<Record<string, unknown> | undefined> {
+  const memory = agentAuditRuns.get(runId);
+  if (memory && memory.tenantId === tenantId) return structuredClone(memory);
+  if (!persistenceEnabled()) return undefined;
+  await getDatabasePool().query(`
+    create table if not exists truthpass_agent_audit_runs (
+      run_id text primary key,
+      tenant_id text not null,
+      batch_id text not null,
+      trace_id text,
+      run jsonb not null,
+      created_at timestamptz not null default now()
+    )
+  `);
+  const result = await getDatabasePool().query(`select run from truthpass_agent_audit_runs where tenant_id = $1 and run_id = $2`, [tenantId, runId]);
+  const row = result.rows[0];
+  return row?.run && typeof row.run === "object" ? structuredClone(row.run as Record<string, unknown>) : undefined;
+}
+
+async function runPublicAgentCollaboration(batchId: string, question: string, tenantId = "demo"): Promise<Record<string, unknown>> {
   const batch = repository.getBatch(batchId);
   if (!batch) throw new Error("批次不存在: " + batchId);
   const inspection = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
@@ -1559,6 +1602,9 @@ async function runPublicAgentCollaboration(batchId: string, question: string): P
     ],
     finalDecisionSource: "deterministic_verifier",
   };
+  const auditRun = { ...agentAudit, tenantId, batchId, question, dataMode: verification.dataClass, createdAt: new Date().toISOString() };
+  agentAuditRuns.set(reportHash, auditRun);
+  await persistAgentAuditRun(reportHash, tenantId, auditRun);
   return {
     schemaVersion: "truthpass.agent.collaboration.v1",
     batchId,
@@ -1972,10 +2018,28 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" && body.batchId.trim() ? body.batchId.trim().toUpperCase() : BATCH_ID;
     const question = typeof body.question === "string" && body.question.trim() ? body.question.trim() : "请解释当前批次证据状态。";
-    const result = await runPublicAgentCollaboration(batchId, question);
     const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"] : "";
     const tenantId = headerTenant || (typeof body.tenantId === "string" ? body.tenantId : "demo");
+    const result = await runPublicAgentCollaboration(batchId, question, tenantId);
     sendJson(res, 200, { ...result, traceId: requestTraceId(req), authMode: access.authMode, tenantId });
+    return true;
+  }
+
+  const agentRunMatch = p.match(/^\/api\/tenants\/([^/]+)\/agent-runs\/([^/]+)$/);
+  if (agentRunMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(agentRunMatch[1]!);
+    const runId = decodeURIComponent(agentRunMatch[2]!);
+    const ctx = enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const run = await loadAgentAuditRun(tenantId, runId);
+    if (!run || run.tenantId !== tenantId) {
+      sendJson(res, 404, { error: "AGENT_RUN_NOT_FOUND", tenantId, runId });
+      return true;
+    }
+    sendJson(res, 200, { schemaVersion: "truthpass.agent.audit-read.v1", tenantId, runId, traceId: requestTraceId(req), run });
     return true;
   }
 

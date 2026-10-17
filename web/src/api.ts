@@ -60,6 +60,7 @@ export async function requestAgentReport(batchId: string, question = "请汇总�
     verification?: { status?: string; evidenceRoot?: string };
     writePlan?: { status: string; action: string; eventName: string; requiredRole: string; evidenceRoot?: string; reportHash?: string; nextAction: string };
     selectedFacts?: string[];
+    agentAudit?: { runId?: string; records?: Array<{ role: string; inputEvidenceIds: string[]; citedEvidenceIds?: string[]; selectedFactIds?: string[]; outputStatus: string; writeBoundary: string }>; finalDecisionSource?: string };
     traceId?: string;
   };
 }
