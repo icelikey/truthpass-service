@@ -983,6 +983,19 @@ type ChatReplyResult = {
   status: ChatServiceStatus;
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
+  chainContext?: ChainQueryContext;
+};
+
+type ChainQueryContext = {
+  queried: true;
+  chainId: number;
+  chainName: string;
+  rpcReachable: boolean;
+  latestBlockNumber?: number;
+  anchorStatus: string;
+  explorerUrl: string;
+  batchId: string | null;
+  transaction?: { txHash: string; event: string; explorerUrl: string; blockNumber?: number };
 };
 
 type ChatMeta = {
@@ -996,6 +1009,7 @@ type ChatMeta = {
   contextRevision?: number;
   syncedAt?: string;
   sources?: string[];
+  chainContext?: ChainQueryContext;
 };
 
 function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
@@ -1041,6 +1055,7 @@ async function streamChatWithReply(
     ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
     ...(baseMeta.syncedAt ? { syncedAt: baseMeta.syncedAt } : {}),
     ...(result.sources?.length ? { sources: result.sources } : {}),
+    ...(result.chainContext ? { chainContext: result.chainContext } : {}),
   });
   for (const line of script) send({ kind: "line", ...line });
   for (const line of result.lines) {
@@ -1082,15 +1097,49 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   }
 }
 
-async function freeChatReply(question: string): Promise<ChatReplyResult> {
+function isChainStatusQuestion(question: string): boolean {
+  return /(链上|交易|receipt|区块|主网|确认|合约|钱包广播|锚定|上链|rpc)/i.test(question);
+}
+
+async function buildChainQueryContext(batchId: string | null): Promise<ChainQueryContext> {
+  const chain = await getBotChainMainnetStatus();
+  let anchorStatus = "anchor_pending";
+  let transaction: ChainQueryContext["transaction"];
+  if (batchId) {
+    try {
+      const inspection = await mcpInspectBatch(batchId, requestTraceId({ headers: {} } as IncomingMessage));
+      anchorStatus = String((inspection.verification as Record<string, unknown>).anchor && ((inspection.verification as Record<string, unknown>).anchor as Record<string, unknown>).status || "anchor_pending");
+    } catch {
+      // Keep the safe pending state when a batch cannot be inspected.
+    }
+    const session = sessionChainTxs.find((item) => item.batchId === batchId);
+    if (session) transaction = { txHash: session.txHash, event: session.event, explorerUrl: session.explorerUrl, blockNumber: session.blockNumber };
+  }
+  return {
+    queried: true,
+    chainId: chain.chainId,
+    chainName: chain.chainName,
+    rpcReachable: Boolean(chain.liveRpc?.reachable),
+    latestBlockNumber: chain.liveRpc?.latestBlockNumber,
+    anchorStatus,
+    explorerUrl: chain.explorerUrl,
+    batchId,
+    transaction,
+  };
+}
+
+async function freeChatReply(question: string, chainContext?: ChainQueryContext): Promise<ChatReplyResult> {
+  const chainPrompt = chainContext
+    ? "如果用户问链状态，只能引用提供的链状态；明确区分 RPC 可达、批次锚定、真实 receipt 和历史记录，不得编造交易结果。"
+    : "";
   return callCustomerModel(
-    "你是 TruthPass 商品客服。说人话，先给结论，再给最多两条依据，最后只给一个最明确的下一步。语气像一名负责成交的顾问：直接、克制、让用户马上知道该不该继续了解；不要绕圈、不要堆术语、不要制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。回答最多 4 句纯文本，格式可用“结论：… 依据：… 下一步：…”。",
-    question,
-    ["customer_policy"],
+    `你是 TruthPass 商品客服。说人话，先给结论，再给最多两条依据，最后只给一个最明确的下一步。语气像一名负责成交的顾问：直接、克制、让用户马上知道该不该继续了解；不要绕圈、不要堆术语、不要制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。回答最多 4 句纯文本，格式可用“结论：… 依据：… 下一步：…”。${chainPrompt}`,
+    chainContext ? JSON.stringify({ question, chainContext, dataMode: "demo/synthetic" }) : question,
+    ["customer_policy", ...(chainContext ? ["chain_status"] : [])],
   );
 }
 
-async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[string], question: string): Promise<ChatReplyResult> {
+async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[string], question: string, chainContext?: ChainQueryContext): Promise<ChatReplyResult> {
   let collaboration: Record<string, unknown> | undefined;
   try {
     collaboration = await runPublicAgentCollaboration(batchId, question);
@@ -1114,15 +1163,21 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
       selectedFacts,
       verification: { status: verification.status ?? (b.passed ? "accepted" : "rejected"), reasons: assessment.reasons ?? verification.reasons ?? [] },
       deterministicFacts: { product: b.name, epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, coldChainGapHours: b.coldGap },
+      chainContext: chainContext ?? null,
       question,
     }),
     ["evidence_card", "deterministic_verifier"],
   );
-  return modelResult.lines.length ? modelResult : { ...modelResult, lines: [{ cls: "conclusion", text: fallbackText }] };
+  if (modelResult.lines.length) return chainContext ? { ...modelResult, chainContext } : modelResult;
+  const chainFallback = chainContext
+    ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：Chain ${chainContext.chainId} · ${chainContext.chainName}${chainContext.transaction ? `，已找到本次会话交易 ${chainContext.transaction.event}` : "，当前没有本次会话交易 receipt"}。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
+    : fallbackText;
+  return { ...modelResult, lines: [{ cls: "conclusion", text: chainFallback }], ...(chainContext ? { chainContext } : {}) };
 }
 
 async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse): Promise<void> {
   const traceId = requestTraceId(req);
+  const chainContext = isChainStatusQuestion(question) ? await buildChainQueryContext(batchId || null) : undefined;
   const rate = consumeChatRateLimit(req);
   if (!rate.allowed) {
     console.info(JSON.stringify({ event: "customer_service_rate_limited", traceId, status: "rate_limited" }));
@@ -1139,7 +1194,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
       dataMode: "demo/synthetic",
       sources: ["customer_fallback"],
     };
-    const reply = freeChatReply(question).then((result) => result.lines.length ? result : fallback);
+    const reply = freeChatReply(question, chainContext).then((result) => result.lines.length ? { ...result, ...(chainContext ? { chainContext } : {}) } : fallback);
     await streamChatWithReply(res, "consumer_query", [], reply, { batchId: null, traceId });
     return;
   }
@@ -1157,7 +1212,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
     return;
   }
 
-  const reply = demoConsumerChat(batchId, b, question);
+  const reply = demoConsumerChat(batchId, b, question, chainContext);
   const lifecycle = lifecyclePublicView(batchId);
   await streamChatWithReply(res, "consumer_evidence", [], reply, {
     batchId,
@@ -1166,6 +1221,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
     contextSource: lifecycle.contextSource,
     contextRevision: lifecycle.contextRevision,
     syncedAt: lifecycle.syncedAt,
+    ...(chainContext ? { chainContext } : {}),
   });
 }
 

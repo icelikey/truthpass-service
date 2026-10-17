@@ -2692,6 +2692,10 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .sensor-transfer-steps i { margin-left: 2px; color: #6485a0; font-style: normal; }
 .sensor-transfer-card p { margin: 9px 0 4px; color: #bed3e4; font-size: 11px; line-height: 1.45; }
 .sensor-transfer-card small { color: #6f91ac; font: 10px var(--font-num); }
+.chain-chat-chip.live { border-color: rgba(126,210,154,.35); color: #8dd27b; }
+.chain-chat-chip.offline { border-color: rgba(255,194,89,.35); color: #ffd477; }
+.chat-chain-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(93,213,213,.2); border-radius: 8px; color: #a9c6d8; background: rgba(3,20,36,.34); font-size: 10px; }
+.chat-chain-context a { color: #9fe3d8; text-underline-offset: 3px; }
 .merchant-agent-response { grid-column: 1 / -1; margin-top: 4px; padding: 11px 13px; border: 1px solid rgba(93,213,213,.24); border-radius: 10px; color: #e3f5ff; background: rgba(3,22,46,.48); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
 .merchant-agent-response small { display: block; margin-top: 7px; color: #86abc9; font-size: 10px; }
 .merchant-lifecycle-section { margin: 0 30px 16px; padding: 17px 18px 16px; border-color: rgba(93,175,244,.22); background: rgba(9,39,73,.64); }

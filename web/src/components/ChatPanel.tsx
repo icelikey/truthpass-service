@@ -24,6 +24,7 @@ const QUICK_PROMPTS = [
   { label: "签名状态", q: "检测报告的签名能核验吗？" },
   { label: "能买吗", q: "这批现在能放心买吗？" },
   { label: "数据来源", q: "这些证据来自谁？" },
+  { label: "链上状态", q: "查看这批商品的链上状态" },
 ];
 
 function extractBatchId(text: string): string | null {
@@ -120,6 +121,11 @@ function MessageView({
         {message.meta?.contextRevision !== undefined && (
           <span className="batch-id-chip">资料更新 v{message.meta.contextRevision}</span>
         )}
+        {message.meta?.chainContext && (
+          <span className={`batch-id-chip chain-chat-chip ${message.meta.chainContext.rpcReachable ? "live" : "offline"}`}>
+            {message.meta.chainContext.rpcReachable ? "链在线" : "链暂不可读"} · {message.meta.chainContext.anchorStatus}
+          </span>
+        )}
       </div>
 
       {isLoading && (
@@ -207,6 +213,13 @@ function MessageView({
         {message.meta?.sources && message.meta.sources.length > 0 && (
           <div className="chat-sources">
             <b>来源</b> · {message.meta.sources.join(" · ")}
+          </div>
+        )}
+        {message.meta?.chainContext && (
+          <div className="chat-chain-context">
+            <span>Chain {message.meta.chainContext.chainId} · {message.meta.chainContext.chainName}</span>
+            <span>{message.meta.chainContext.latestBlockNumber ? `最新区块 #${message.meta.chainContext.latestBlockNumber}` : "最新区块未读取"}</span>
+            {message.meta.chainContext.transaction ? <a href={message.meta.chainContext.transaction.explorerUrl} target="_blank" rel="noreferrer">查看 receipt ↗</a> : <span>当前没有本次会话 receipt</span>}
           </div>
         )}
         {showHandoff && (

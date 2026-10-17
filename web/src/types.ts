@@ -114,6 +114,17 @@ export interface ChatEvent {
   contextRevision?: number;
   syncedAt?: string;
   sources?: string[];
+  chainContext?: {
+    queried: true;
+    chainId: number;
+    chainName: string;
+    rpcReachable: boolean;
+    latestBlockNumber?: number;
+    anchorStatus: string;
+    explorerUrl: string;
+    batchId: string | null;
+    transaction?: { txHash: string; event: string; explorerUrl: string; blockNumber?: number };
+  };
 }
 
 export interface ChatLine {

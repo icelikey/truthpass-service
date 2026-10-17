@@ -517,6 +517,12 @@ export function WalletProvider({
                   );
                 })}
               </div>
+              {!options.some((option) => option.detected) && (
+                <div className="wallet-plugin-notice" role="status">
+                  <div><strong>未检测到钱包插件</strong><small>先安装官方插件，安装完成后回到这里重新检测。</small></div>
+                  <button type="button" className="wallet-action-ghost" onClick={() => setOptions(discoverWalletOptions())}>重新检测插件</button>
+                </div>
+              )}
               {address && (
                 <div className="wallet-bar-actions">
                   {chainId !== 677 && (

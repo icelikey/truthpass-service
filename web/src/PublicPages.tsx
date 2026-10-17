@@ -64,8 +64,8 @@ function PageFrame({ route, active, children, footer = true }: { route: PublicRo
 const developerCopy = {
   zh: {
     eyebrow: "开发者入口 · OPEN EVIDENCE",
-    title: "让 Agent 直接读懂商品依据",
-    intro: "同一份公开资料，可通过 MCP 或 CLI 使用。",
+    title: "让 Agent 看得懂，也查得到",
+    intro: "同一份公开资料，可以查批次，也可以查链上状态。",
     mcpTitle: "MCP Server",
     mcpBody: "让你的 Agent 安全、稳定地访问 TruthPass 的公开资料。",
     cliTitle: "TruthPass CLI",
@@ -101,7 +101,7 @@ const developerCopy = {
   },
   en: {
     eyebrow: "DEVELOPER ACCESS · OPEN EVIDENCE",
-    title: "Let agents read product evidence directly.",
+    title: "Let agents read the record and check the chain.",
     intro: "One public record, available through MCP or the CLI.",
     mcpTitle: "MCP Server",
     mcpBody: "Give your agent a safe, stable way to read TruthPass public evidence.",
@@ -239,17 +239,17 @@ export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-develop
 
 function EnglishLandingPage() {
   return <PageFrame route="en-home" active="home"><main className="tp-landing-main">
-    <section className="tp-landing-hero"><div><p className="tp-kicker">OPEN EVIDENCE · TRUSTPASS</p><h1>Evidence you can see.<br /><span>Choices you can make.</span></h1><p className="tp-landing-lead">Production, testing, delivery — clearly recorded for people and agents.</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/en#evidence">I’m a consumer&nbsp; →</a><a className="tp-paper-btn" href="/en/merchant">I’m a business&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>FROM EVERY ACTION</span><b>TO A MORE VALUABLE TOMORROW</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>Evidence from production to aftercare.</h2><p>Understand a product record before you choose, buy, or ask what happens next.</p><a href="/#cli-reference">Explore a sample record →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>Built for people and agents.</h2><p>Use a clear public record in the consumer console, your workflow, or an MCP client.</p><a href="/en/developers">Open developer access →</a></article><article><span className="tp-panel-symbol">◉</span><h2>One product. A complete record.</h2><p>From production to testing, delivery, and aftercare, each step stays visible.</p><a href="/en/merchant">For business →</a></article></section>
-    <section id="about" className="tp-landing-strip"><span>01</span><b>EXPLORE</b><small>Search products. See the bigger picture.</small><span>02</span><b>CHOOSE</b><small>Check the evidence. Make an informed decision.</small><span>03</span><b>PARTICIPATE</b><small>Keep the record useful after purchase.</small></section>
+    <section className="tp-landing-hero"><div><p className="tp-kicker">OPEN EVIDENCE · TRUSTPASS</p><h1>Check first.<br /><span>Buy next.</span></h1><p className="tp-landing-lead">Production, testing, delivery — show the record.</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/en#evidence">View the record&nbsp; →</a><a className="tp-paper-btn" href="/en/merchant">For business&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>SHOW THE RECORD</span><b>MAKE THE CHOICE</b></aside></section>
+    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>Show the record.</h2><p>Production, testing, delivery — each step has a source.</p><a href="/en#cli-reference">View a sample record →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>Ask once. Get the evidence.</h2><p>Your agent can read the same public record through MCP or CLI.</p><a href="/en/developers">Open developer access →</a></article><article><span className="tp-panel-symbol">◉</span><h2>Make one product explainable.</h2><p>Keep the record clear from production to aftercare.</p><a href="/en/merchant">For business →</a></article></section>
+    <section id="about" className="tp-landing-strip"><span>01</span><b>CHECK</b><small>See the record.</small><span>02</span><b>CHOOSE</b><small>Make the call.</small><span>03</span><b>CONTINUE</b><small>Keep help after purchase.</small></section>
   </main></PageFrame>;
 }
 
 function ChineseLandingPage() {
   return <PageFrame route="zh-home" active="home"><main className="tp-landing-main">
-    <section className="tp-landing-hero"><div><p className="tp-kicker">公开证据 · TRUTHPASS</p><h1>看得见依据。<br /><span>做得出选择。</span></h1><p className="tp-landing-lead">生产、检测、运输，一件件说清楚。</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/?view=consumer#agent">我是消费者&nbsp; →</a><a className="tp-paper-btn" href="/merchant">我是企业&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>从每一条记录</span><b>到更值得信任的市场</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>从生产到售后，依据一直在。</h2><p>先看清楚，再决定要不要继续了解、购买和反馈。</p><a href="/?view=consumer#cli-reference">看一份演示资料 →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>给人看，也给 Agent 用。</h2><p>同一份公开资料，可以在消费者页面、企业流程或 MCP 中使用。</p><a href="/developers">进入开发者入口 →</a></article><article><span className="tp-panel-symbol">◉</span><h2>一件商品，一条完整记录。</h2><p>生产、检测、运输和售后，每一步都有来源，每一步都能继续追问。</p><a href="/merchant">查看企业入口 →</a></article></section>
-    <section id="about" className="tp-landing-strip"><span>01</span><b>看依据</b><small>查询商品，先把事实看清楚。</small><span>02</span><b>做选择</b><small>查看缺口，再决定下一步。</small><span>03</span><b>留记录</b><small>购买之后，继续反馈和复核。</small></section>
+    <section className="tp-landing-hero"><div><p className="tp-kicker">公开证据 · TRUTHPASS</p><h1>先看清。<br /><span>再下单。</span></h1><p className="tp-landing-lead">生产、检测、运输，一件件摆出来。</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/?view=consumer#agent">查看依据&nbsp; →</a><a className="tp-paper-btn" href="/merchant">我是企业&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>有凭有据</span><b>大家看得见</b></aside></section>
+    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>有凭有据，大家看得见。</h2><p>生产、检测、运输，一件件摆出来。</p><a href="/?view=consumer#cli-reference">看一份演示资料 →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>你问什么，我查什么。</h2><p>同一份公开资料，人和 Agent 都能看。</p><a href="/developers">进入开发者入口 →</a></article><article><span className="tp-panel-symbol">◉</span><h2>把一件商品，说清楚。</h2><p>每一步有来源，每个缺口有人处理。</p><a href="/merchant">查看企业入口 →</a></article></section>
+    <section id="about" className="tp-landing-strip"><span>01</span><b>看依据</b><small>先把事实看清楚。</small><span>02</span><b>做选择</b><small>缺什么，明白补上。</small><span>03</span><b>留记录</b><small>买完还有事，照样找得到人。</small></section>
   </main></PageFrame>;
 }
 
