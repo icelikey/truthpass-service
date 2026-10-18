@@ -38,7 +38,7 @@ export default function App() {
   const inQueryMode = !!batchId;
   const pathname = window.location.pathname;
   const isMerchantRoute = pathname.startsWith("/merchant");
-  const isInstitutionRoute = pathname.startsWith("/institution");
+  const isInstitutionRoute = pathname === "/institution" || pathname === "/en/institution";
   const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
   const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname) && !(pathname === "/" && isConsumerView);
 
@@ -103,7 +103,7 @@ export default function App() {
     return (
       <ModalProvider>
         <WalletProvider activeBatchId="FO-2026-001" onToast={showToast}>
-          <InstitutionReviewPanel />
+          <InstitutionReviewPanel locale={pathname === "/en/institution" ? "en" : "zh"} />
         </WalletProvider>
       </ModalProvider>
     );

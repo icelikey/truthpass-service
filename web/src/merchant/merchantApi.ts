@@ -1,4 +1,5 @@
 import type { AgentAuditRun, AuditExport, EvidenceIssue, MediaIntakePreview, MediaPresignResponse, MerchantBatchSummary, MerchantSource, MerchantSummary, ReconciliationResult } from "./types";
+import { supabase } from "../lib/supabase";
 
 const TENANT_ID = "demo-tenant";
 const DEMO_BATCH = "FO-2026-001";
@@ -27,19 +28,70 @@ const demoSummary: MerchantSummary = {
   ],
 };
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+export class MerchantApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(status: number, message: string, code?: string) {
+    super(message);
+    this.name = "MerchantApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function requestId(): string {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+  return `merchant-web-${Date.now().toString(36)}-${random}`.replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 120);
+}
+
+async function resolveTenantId(defaultTenantId: string): Promise<string> {
+  if (!supabase) return defaultTenantId;
+  const { data } = await supabase.auth.getSession();
+  const metadata = data.session?.user.app_metadata ?? {};
+  const userMetadata = data.session?.user.user_metadata ?? {};
+  const claimed = metadata.tenantId ?? metadata.tenant_id ?? userMetadata.tenantId ?? userMetadata.tenant_id;
+  return typeof claimed === "string" && /^[A-Za-z0-9._:-]{2,128}$/.test(claimed.trim()) ? claimed.trim() : defaultTenantId;
+}
+
+/** Enterprise calls carry the Supabase access token and the tenant scope.
+ * The gateway token never enters browser code. */
+export async function merchantRequestHeaders(tenantId: string, includeContentType = false): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    "X-TruthPass-Tenant": tenantId,
+    "X-TruthPass-Request-Id": requestId(),
+  };
+  if (includeContentType) headers["Content-Type"] = "application/json";
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function request<T>(url: string, init: RequestInit & { tenantId?: string } = {}): Promise<T> {
+  const { tenantId, headers: requestHeaders, ...requestInit } = init;
+  const authHeaders = tenantId ? await merchantRequestHeaders(tenantId) : {};
+  const response = await fetch(url, { ...requestInit, headers: { ...authHeaders, ...(requestHeaders ?? {}) } });
+  if (!response.ok) {
+    let body: { error?: string; message?: string } = {};
+    try { body = await response.json() as typeof body; } catch { /* non-json error */ }
+    const message = body.message || body.error || `HTTP ${response.status}`;
+    throw new MerchantApiError(response.status, message, body.error);
+  }
   return response.json() as Promise<T>;
 }
 
 export async function loadMerchantSummary(tenantId = TENANT_ID): Promise<MerchantSummary> {
-  if (!MERCHANT_API_ENABLED) return { ...demoSummary, tenantId, source: "demo/synthetic" };
+  const effectiveTenantId = await resolveTenantId(tenantId);
+  if (!MERCHANT_API_ENABLED) return { ...demoSummary, tenantId: effectiveTenantId, source: "demo/synthetic" };
   try {
-    const result = await request<MerchantSummary>(`/api/tenants/${encodeURIComponent(tenantId)}/summary`);
+    const result = await request<MerchantSummary>(`/api/tenants/${encodeURIComponent(effectiveTenantId)}/summary`, { tenantId: effectiveTenantId });
     return { ...result, source: "external" };
-  } catch {
-    return { ...demoSummary, tenantId, source: "demo/synthetic" };
+  } catch (error) {
+    if (error instanceof MerchantApiError && [401, 403, 503].includes(error.status)) throw error;
+    return { ...demoSummary, tenantId: effectiveTenantId, source: "demo/synthetic" };
   }
 }
 
@@ -51,9 +103,11 @@ export async function validateMerchantBatch(tenantId: string, batchId: string): 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ batchId }),
+      tenantId,
     });
     return { ...fallback, batchId: result.batchId, status: result.status, source: result.dataMode, lastUpdated: new Date().toLocaleString("zh-CN") };
-  } catch {
+  } catch (error) {
+    if (error instanceof MerchantApiError && [401, 403, 503].includes(error.status)) throw error;
     return { ...fallback, source: "demo/synthetic", lastUpdated: new Date().toLocaleString("zh-CN") };
   }
 }
@@ -65,6 +119,7 @@ export async function importDemoEvidence(tenantId: string, batchId: string, kind
     await request(`/api/tenants/${encodeURIComponent(tenantId)}/evidence/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      tenantId,
       body: JSON.stringify({
         schemaVersion: "evidence.v1",
         brandId: "brand-demo",
@@ -80,7 +135,8 @@ export async function importDemoEvidence(tenantId: string, batchId: string, kind
       }),
     });
     return { ok: true, source: "external", message: "证据已提交到企业 API。" };
-  } catch {
+  } catch (error) {
+    if (error instanceof MerchantApiError && [401, 403, 503].includes(error.status)) throw error;
     return { ok: true, source: "demo/synthetic", message: `已在 Demo 模式导入${item.title}，未写入真实企业数据。` };
   }
 }
@@ -95,8 +151,9 @@ export async function exportMerchantAudit(tenantId: string): Promise<AuditExport
     };
   }
   try {
-    return await request<AuditExport>(`/api/tenants/${encodeURIComponent(tenantId)}/audit/export`);
-  } catch {
+    return await request<AuditExport>(`/api/tenants/${encodeURIComponent(tenantId)}/audit/export`, { tenantId });
+  } catch (error) {
+    if (error instanceof MerchantApiError && [401, 403, 503].includes(error.status)) throw error;
     return {
       tenantId,
       exportedAt: new Date().toISOString(),
@@ -114,6 +171,7 @@ export async function requestMediaPresign(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    tenantId,
   });
 }
 
@@ -125,6 +183,7 @@ export async function prepareMediaIntake(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    tenantId,
   });
 }
 
@@ -133,11 +192,12 @@ export async function reconcileMerchantBatch(tenantId: string, batchId: string):
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ batchId }),
+    tenantId,
   });
 }
 
 export async function loadAgentAuditRun(tenantId: string, runId: string): Promise<AgentAuditRun> {
-  return request<AgentAuditRun>(`/api/tenants/${encodeURIComponent(tenantId)}/agent-runs/${encodeURIComponent(runId)}`);
+  return request<AgentAuditRun>(`/api/tenants/${encodeURIComponent(tenantId)}/agent-runs/${encodeURIComponent(runId)}`, { tenantId });
 }
 
 export { DEMO_BATCH, TENANT_ID };

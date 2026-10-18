@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchAgentStatus, fetchLifecycle, postChat, postIotSimulation, requestAgentReport, simulateLifecycleStage, type IotSimulationMode } from "../api";
+import { AuthModal } from "./AuthModal";
+import { useAuth } from "../hooks/useAuth";
 import { useWallet } from "./WalletContext";
-import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, reconcileMerchantBatch, requestMediaPresign, prepareMediaIntake, validateMerchantBatch } from "../merchant/merchantApi";
+import { exportMerchantAudit, importDemoEvidence, loadMerchantSummary, MerchantApiError, merchantRequestHeaders, reconcileMerchantBatch, requestMediaPresign, prepareMediaIntake, validateMerchantBatch } from "../merchant/merchantApi";
 import type { AuditExport, EvidenceIssue, MerchantBatchSummary, MerchantSummary, ReconciliationResult, MediaIntakePreview, MediaPresignResponse } from "../merchant/types";
 import type { ChatEvent, LifecycleView } from "../types";
 
@@ -22,6 +24,7 @@ function StatusPill({ status }: { status: keyof typeof statusLabel }) {
 
 export function MerchantApp() {
   const { setWalletModalOpen, address, chainId } = useWallet();
+  const { user, loading: authLoading, configured: authConfigured, signIn, signUp } = useAuth();
   const [tab, setTab] = useState<MerchantTab>("overview");
   const [summary, setSummary] = useState<MerchantSummary | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<MerchantBatchSummary | null>(null);
@@ -44,10 +47,21 @@ export function MerchantApp() {
   const [mediaPresign, setMediaPresign] = useState<MediaPresignResponse | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaIntakePreview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const merchantApiEnabled = import.meta.env.VITE_TRUTHPASS_MERCHANT_API_ENABLED === "true";
 
   useEffect(() => {
+    if (merchantApiEnabled && authConfigured && !user) {
+      setLoading(false);
+      return;
+    }
+    if (merchantApiEnabled && authLoading) return;
+    let active = true;
+    setAccessError(null);
     loadMerchantSummary()
       .then(async (next) => {
+        if (!active) return;
         setSummary(next);
         setSelectedBatch(next.batches[0] ?? null);
         const [status, nextLifecycle] = await Promise.all([
@@ -57,8 +71,14 @@ export function MerchantApp() {
         setAgentStatus(status);
         setLifecycle(nextLifecycle);
       })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const code = error instanceof MerchantApiError ? error.code : undefined;
+        setAccessError(code === "TENANT_SCOPE_MISMATCH" ? "当前账号没有这个企业租户的权限，请让管理员邀请你后再进入。" : code === "SUPABASE_SESSION_REQUIRED" ? "请先登录企业账号，再查看企业证据。" : "企业证据服务暂时不可用，请稍后再试或联系管理员。 ");
+      })
       .finally(() => setLoading(false));
-  }, []);
+    return () => { active = false; };
+  }, [authConfigured, authLoading, merchantApiEnabled, user]);
 
   const reviewItems = useMemo(
     () =>
@@ -207,7 +227,8 @@ export function MerchantApp() {
       }
       const presign = await requestMediaPresign((summary?.tenantId ?? "demo-tenant"), { fileName: selectedMedia.name, contentType: selectedMedia.type || "application/octet-stream", size: selectedMedia.size, contentHash: hash });
       setMediaPresign(presign);
-      const uploadResponse = await fetch(presign.uploadUrl, { method: presign.method, headers: Object.fromEntries(Object.entries(presign.headers).flatMap(([key, value]) => value ? [[key, value]] : [])) as Record<string, string>, body: selectedMedia });
+      const uploadHeaders = await merchantRequestHeaders(summary?.tenantId ?? "demo-tenant");
+      const uploadResponse = await fetch(presign.uploadUrl, { method: presign.method, headers: { ...uploadHeaders, ...Object.fromEntries(Object.entries(presign.headers).flatMap(([key, value]) => value ? [[key, value]] : [])) } as Record<string, string>, body: selectedMedia });
       if (!uploadResponse.ok) throw new Error(`媒体上传失败：HTTP ${uploadResponse.status}`);
       const preview = await prepareMediaIntake((summary?.tenantId ?? "demo-tenant"), {
         brandId: "brand-demo",
@@ -245,6 +266,18 @@ export function MerchantApp() {
     setAudit(await exportMerchantAudit(summary?.tenantId ?? "demo-tenant"));
     setTab("audit");
   };
+
+  if (merchantApiEnabled && !authConfigured) {
+    return <main className="merchant-shell merchant-dashboard-shell"><div className="merchant-access-state"><p className="eyebrow">企业证据工作台</p><h1>企业服务尚未配置</h1><p>当前部署没有启用 Supabase 账号服务，企业资料不会退回演示数据。请先配置账号和租户授权。</p></div></main>;
+  }
+
+  if (merchantApiEnabled && authConfigured && !user) {
+    return <><main className="merchant-shell merchant-dashboard-shell"><div className="merchant-access-state"><p className="eyebrow">企业证据工作台</p><h1>先登录，再看企业资料</h1><p>企业批次、媒体和审计记录只对已授权租户开放。</p><button type="button" className="merchant-wallet-button" onClick={() => setAuthOpen(true)}>登录企业账号</button></div></main><AuthModal open={authOpen} onClose={() => setAuthOpen(false)} configured={authConfigured} onAuth={async (mode, email, password) => mode === "signin" ? signIn(email, password) : signUp(email, password)} /></>;
+  }
+
+  if (accessError) {
+    return <><main className="merchant-shell merchant-dashboard-shell"><div className="merchant-access-state"><p className="eyebrow">企业证据工作台</p><h1>当前账号还不能访问这里</h1><p>{accessError}</p><button type="button" className="merchant-wallet-button" onClick={() => window.location.reload()}>重新检查权限</button></div></main><AuthModal open={authOpen} onClose={() => setAuthOpen(false)} configured={authConfigured} onAuth={async (mode, email, password) => mode === "signin" ? signIn(email, password) : signUp(email, password)} /></>;
+  }
 
   if (loading || !summary) {
     return (

@@ -20,12 +20,37 @@ const FISH_OIL_BATCHES = [
 ];
 
 const QUICK_PROMPTS = [
-  { label: "证据缺口", q: "这批还缺什么证据？" },
-  { label: "签名状态", q: "检测报告的签名能核验吗？" },
-  { label: "能买吗", q: "这批现在能放心买吗？" },
-  { label: "数据来源", q: "这些证据来自谁？" },
-  { label: "链上状态", q: "查看这批商品的链上状态" },
+  { label: "这批是什么？", q: "这批是什么？" },
+  { label: "检测结果怎么看？", q: "检测结果怎么看？" },
+  { label: "运输有没有问题？", q: "运输有没有问题？" },
+  { label: "还缺什么资料？", q: "还缺什么资料？" },
+  { label: "现在能不能继续了解？", q: "现在能不能继续了解？" },
+  { label: "链上有没有记录？", q: "查看这批商品的链上状态" },
 ];
+
+type AgentSection = { label: "结论" | "依据" | "不确定" | "下一步"; text: string };
+
+function parseAgentSections(lines: ChatLine[]): AgentSection[] {
+  const content = lines.map((line) => line.text.trim()).filter(Boolean).join(" ");
+  if (!content) return [];
+  const matches = [...content.matchAll(/(结论|依据|不确定|下一步)\s*[:：]/g)];
+  if (matches.length >= 2) {
+    return matches.map((match, index) => ({
+      label: match[1] as AgentSection["label"],
+      text: content.slice(match.index! + match[0].length, matches[index + 1]?.index ?? content.length).trim(),
+    })).filter((section) => section.text.length > 0);
+  }
+  return lines.map((line): AgentSection => {
+    const label: AgentSection["label"] = line.cls === "conclusion" || line.cls === "lead"
+      ? "结论"
+      : line.cls === "disclaimer"
+        ? "不确定"
+        : line.cls === "cmd"
+          ? "下一步"
+          : "依据";
+    return { label, text: line.text.trim() };
+  }).filter((section) => section.text.length > 0);
+}
 
 function extractBatchId(text: string): string | null {
   const full = text.match(/([A-Z]{2,3}-\d{4}-\d{3})/i);
@@ -104,6 +129,7 @@ function MessageView({
     serviceStatus === "rate_limited" ||
     serviceStatus === "deterministic_fallback" ||
     Boolean(message.error);
+  const structuredSections = message.done ? parseAgentSections(message.lines) : [];
 
   return (
     <div className="msg agent">
@@ -145,7 +171,16 @@ function MessageView({
       )}
 
       <div className="msg-bubble">
-        {message.lines.map((line, i) => (
+        {structuredSections.length > 0 ? (
+          <div className="agent-structured-answer" aria-label="Agent 回答结构">
+            {structuredSections.map((section, index) => (
+              <section key={`${section.label}-${index}`} className={`agent-answer-section agent-answer-${section.label}`}>
+                <strong>{section.label}</strong>
+                <p>{section.text}</p>
+              </section>
+            ))}
+          </div>
+        ) : message.lines.map((line, i) => (
           <LineView key={i} line={line} />
         ))}
         {!message.done && message.lines.length === 0 && (
@@ -449,12 +484,11 @@ export function ChatPanel({
             <span className="status-pill pending">商品助手</span>
           </div>
           <div className="msg-bubble">
-            <div className="reason-line">
-              你好，我是 TruthPass 商品助手。我可以帮你看懂生产、检测、运输和售后资料，
-              也可以帮你准备购买。当前鱼油批次是演示资料。
-            </div>
-            <div className="disclaimer">
-              你可以先选择一个批次，也可以直接问“这批还缺什么”或“我能不能继续了解”。
+            <div className="agent-structured-answer" aria-label="Agent 回答结构">
+              <section className="agent-answer-section agent-answer-结论"><strong>结论</strong><p>我帮你看商品依据，不替任何一方做质量承诺。</p></section>
+              <section className="agent-answer-section agent-answer-依据"><strong>依据</strong><p>生产、检测、运输和售后资料都按批次整理。</p></section>
+              <section className="agent-answer-section agent-answer-不确定"><strong>不确定</strong><p>当前鱼油资料是演示资料，不能替代真实认证。</p></section>
+              <section className="agent-answer-section agent-answer-下一步"><strong>下一步</strong><p>先选择批次，或者直接问我“还缺什么资料”。</p></section>
             </div>
           </div>
         </div>

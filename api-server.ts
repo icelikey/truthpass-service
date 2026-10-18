@@ -11,6 +11,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
 import { verifyMessage } from "ethers";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { MemoryDataRepository } from "./src/data/repository.js";
 import { fishOilBatch, fishOilEvidence, fishOilProduct } from "./src/data/fixtures.js";
@@ -1070,7 +1071,28 @@ async function streamChatWithReply(
 }
 
 
-async function callCustomerModel(systemPrompt: string, userPrompt: string, sources: string[]): Promise<ChatReplyResult> {
+type ConsumerModelContract = {
+  batchId?: string;
+  dataMode: "demo/synthetic" | "external";
+  chainContext?: ChainQueryContext;
+};
+
+function validConsumerModelText(text: string, contract?: ConsumerModelContract): boolean {
+  const value = text.trim();
+  if (!value || value.length > 2_000) return false;
+  // Keep the public answer machine-readable and short enough for a consumer.
+  const sectionBoundary = "(?:^|[\\s。；;、])";
+  if (!new RegExp(sectionBoundary + "结论：").test(value) || !new RegExp(sectionBoundary + "依据：").test(value) || !new RegExp(sectionBoundary + "不确定：").test(value) || !new RegExp(sectionBoundary + "下一步：").test(value)) return false;
+  if (contract?.dataMode === "demo/synthetic" && /(真实认证|官方认证|已证明安全|安全无疑)/.test(value)) return false;
+  if (contract?.batchId) {
+    const batchIds = value.match(/\b[A-Z]{2,12}-\d{4}-\d{2,6}\b/g) ?? [];
+    if (batchIds.some((id) => id !== contract.batchId)) return false;
+  }
+  if (contract?.chainContext && /(已上链|交易成功|receipt 已确认|交易已确认)/i.test(value) && !contract.chainContext.transaction) return false;
+  return true;
+}
+
+async function callCustomerModel(systemPrompt: string, userPrompt: string, sources: string[], contract?: ConsumerModelContract): Promise<ChatReplyResult> {
   const apiKey = process.env.AGENT_API_KEY?.trim();
   const model = process.env.AGENT_MODEL?.trim();
   if (!apiKey || !model) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
@@ -1093,7 +1115,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     if (!res.ok) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
     const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
+    if (typeof content !== "string" || !validConsumerModelText(content, contract)) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
     return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
   } catch {
     return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
@@ -1136,9 +1158,10 @@ async function freeChatReply(question: string, chainContext?: ChainQueryContext)
     ? "如果用户问链状态，只能引用提供的链状态；明确区分 RPC 可达、批次锚定、真实 receipt 和历史记录，不得编造交易结果。"
     : "";
   return callCustomerModel(
-    `你是 TruthPass 商品客服。说人话，先给结论，再给最多两条依据，最后只给一个最明确的下一步。语气像一名负责成交的顾问：直接、克制、让用户马上知道该不该继续了解；不要绕圈、不要堆术语、不要制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。回答最多 4 句纯文本，格式可用“结论：… 依据：… 下一步：…”。${chainPrompt}`,
+    `你是 TruthPass 商品客服。说人话，用四段短句回答，且必须严格按“结论：… 依据：… 不确定：… 下一步：…”顺序输出。依据必须写明来源（例如商品说明、售后政策、公开证据或链状态）；只引用当前输入，禁止跨批次拼接。语气直接、克制，不堆术语，不制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。${chainPrompt}`,
     chainContext ? JSON.stringify({ question, chainContext, dataMode: "demo/synthetic" }) : question,
     ["customer_policy", ...(chainContext ? ["chain_status"] : [])],
+    { dataMode: "demo/synthetic", chainContext },
   );
 }
 
@@ -1152,13 +1175,14 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
   const selectedFacts = Array.isArray(collaboration?.selectedFacts) ? collaboration.selectedFacts.filter((item): item is string => typeof item === "string") : [];
   const verification = collaboration?.verification && typeof collaboration.verification === "object" ? collaboration.verification as Record<string, unknown> : {};
   const assessment = verification.assessment && typeof verification.assessment === "object" ? verification.assessment as Record<string, unknown> : {};
+  const sourceText = selectedFacts.length ? "来源：当前批次 evidence_card 与 deterministic_verifier" : "来源：当前批次登记信息";
   const fallbackText = selectedFacts.length
-    ? `结论：${verification.status === "accepted" ? "这批资料可以继续了解" : "这批资料暂时不要急着下单"}。依据：${selectedFacts.slice(0, 2).join("；")}。下一步：${verification.status === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "先补齐缺失项或转人工复核"}。当前是 demo/synthetic，不能替代真实商品认证。`
+    ? `结论：${verification.status === "accepted" ? "这批资料可以继续了解" : "这批资料暂时不要急着下单"}。依据：${selectedFacts.slice(0, 2).join("；")}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${verification.status === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "先补齐缺失项或转人工复核"}。`
     : b.passed
-      ? `结论：${b.name}（${batchId}）按当前规则可以继续了解。依据：检测、生产和冷链记录已登记。下一步：打开证据卡看来源；当前是 demo/synthetic，不能替代真实商品认证。`
-      : `结论：${b.name}（${batchId}）暂时不要急着下单。依据：当前规则仍有未通过项。下一步：补证或转人工复核；当前是 demo/synthetic。`;
+      ? `结论：${b.name}（${batchId}）按当前规则可以继续了解。依据：检测、生产和冷链记录已登记；来源：当前批次登记信息。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：打开证据卡核对来源。`
+      : `结论：${b.name}（${batchId}）暂时不要急着下单。依据：当前规则仍有未通过项；来源：deterministic_verifier。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：补证或转人工复核。`;
   const modelResult = await callCustomerModel(
-    "你是 TruthPass 的商品客服。说人话，像负责成交的顾问：先回应用户真正想知道的结论，再用最多两条事实说明为什么，最后给一个能马上执行的下一步。不要夸大、不要制造紧迫感、不要把“通过当前规则”说成“商品安全”或“官方认证”。只能使用下面的确定性验证结果和证据卡；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。回答最多 4 句纯文本，优先使用“结论：… 依据：… 下一步：…”结构。",
+    "你是 TruthPass 的商品客服。说人话，严格输出四段短句：“结论：… 依据：… 不确定：… 下一步：…”。依据必须写明来源。只能使用下面当前批次的确定性验证结果和证据卡，禁止跨批次拼接；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。不要把“通过当前规则”说成“商品安全”或“官方认证”。链上内容只能引用 chainContext；没有 transaction 时不得声称交易或 receipt 已确认。",
     JSON.stringify({
       batchId,
       dataMode: "demo/synthetic",
@@ -1170,10 +1194,11 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
       question,
     }),
     ["evidence_card", "deterministic_verifier"],
+    { batchId, dataMode: "demo/synthetic", chainContext },
   );
   if (modelResult.lines.length) return chainContext ? { ...modelResult, chainContext } : modelResult;
   const chainFallback = chainContext
-    ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：Chain ${chainContext.chainId} · ${chainContext.chainName}${chainContext.transaction ? `，已找到本次会话交易 ${chainContext.transaction.event}` : "，当前没有本次会话交易 receipt"}。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
+    ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：来源为 chain_status（Chain ${chainContext.chainId} · ${chainContext.chainName}）${chainContext.transaction ? `，本次会话交易为 ${chainContext.transaction.event}` : "，没有本次会话交易 receipt"}。不确定：链节点可读取不等于批次已锚定；当前 dataMode 为 demo/synthetic。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
     : fallbackText;
   return { ...modelResult, lines: [{ cls: "conclusion", text: chainFallback }], ...(chainContext ? { chainContext } : {}) };
 }
@@ -1192,7 +1217,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
   if (!batchId) {
     const available = Object.keys(FISH_OIL_BATCHES).filter((id) => repository.getBatch(id));
     const fallback: ChatReplyResult = {
-      lines: [{ cls: "plain", text: available.length ? "我是你的 TruthPass 商品助手。需要查询商品、批次或售后规则时告诉我即可；查询证据请提供批次号。" : "请提供商品名和批次号，我会先检查系统是否登记了对应证据。" }],
+      lines: [{ cls: "plain", text: available.length ? "结论：我可以帮你查商品和批次。依据：当前服务已登记可查询批次；来源：customer_fallback。不确定：未提供批次号时无法核对具体证据。下一步：请提供商品名和批次号。" : "结论：目前不能核对具体批次。依据：系统未收到有效批次号；来源：customer_fallback。不确定：没有批次号就不能判断证据状态。下一步：请提供商品名和批次号。" }],
       status: "deterministic_fallback",
       dataMode: "demo/synthetic",
       sources: ["customer_fallback"],
@@ -1204,7 +1229,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
 
   const b = FISH_OIL_BATCHES[batchId];
   if (!b) {
-    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "系统没有找到批次 " + batchId + " 的已登记证据，不会用其他批次的数据代替。" }], {
+    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "结论：暂时不能判断批次 " + batchId + "。依据：当前批次没有已登记证据；来源：batch_lookup。不确定：不会用其他批次的数据代替。下一步：请核对批次号，或转人工登记证据。" }], {
       agentMode: "deterministic_fallback",
       serviceStatus: "deterministic_fallback",
       dataMode: "demo/synthetic",
@@ -1246,24 +1271,86 @@ type EnterpriseRequestContext = {
   tenantId: string;
   requestId: string;
   error?: string;
+  authMode?: "gateway_token" | "supabase_session";
+  userId?: string;
 };
 
-function enterpriseRequestContext(req: IncomingMessage, tenantId: string): EnterpriseRequestContext {
+type SupabaseAuthUser = {
+  id?: string;
+  app_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+};
+
+function supabaseAuthConfig(): { url: string; anonKey: string } | undefined {
+  const url = (process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim() || "").replace(/\/+$/, "");
+  const anonKey = (process.env.SUPABASE_ANON_KEY?.trim() || process.env.VITE_SUPABASE_ANON_KEY?.trim() || "");
+  return url && anonKey ? { url, anonKey } : undefined;
+}
+
+function supabaseServiceConfig(): { url: string; serviceKey: string; bucket: string } | undefined {
+  const url = (process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim() || "").replace(/\/+$/, "");
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SECRET_KEY?.trim() || "");
+  const bucket = (process.env.TRUTHPASS_MEDIA_BUCKET?.trim() || "truthpass-evidence").replace(/[^A-Za-z0-9._-]/g, "");
+  return url && serviceKey && bucket ? { url, serviceKey, bucket } : undefined;
+}
+
+let supabaseStorageAdmin: SupabaseClient | undefined;
+function getSupabaseStorageAdmin(): { client: SupabaseClient; bucket: string } | undefined {
+  const config = supabaseServiceConfig();
+  if (!config) return undefined;
+  supabaseStorageAdmin ??= createClient(config.url, config.serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  return { client: supabaseStorageAdmin, bucket: config.bucket };
+}
+
+async function resolveSupabaseUser(req: IncomingMessage): Promise<SupabaseAuthUser | undefined> {
+  const authorization = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+  if (!authorization.startsWith("Bearer ")) return undefined;
+  const token = authorization.slice("Bearer ".length).trim();
+  const config = supabaseAuthConfig();
+  if (!token || !config) return undefined;
+  try {
+    const response = await fetch(`${config.url}/auth/v1/user`, {
+      headers: { apikey: config.anonKey, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return undefined;
+    const user = await response.json() as SupabaseAuthUser;
+    return typeof user.id === "string" && user.id ? user : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function claimedTenantIds(user: SupabaseAuthUser): string[] {
+  const claims = [user.app_metadata?.tenantId, user.app_metadata?.tenant_id, user.user_metadata?.tenantId, user.user_metadata?.tenant_id];
+  return claims.filter((value): value is string => typeof value === "string" && validTenantId(value)).map((value) => value.trim());
+}
+
+async function enterpriseRequestContext(req: IncomingMessage, tenantId: string): Promise<EnterpriseRequestContext> {
   const configured = Boolean(process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN?.trim());
   const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"].trim() : "";
   const requestId = typeof req.headers["x-truthpass-request-id"] === "string" ? req.headers["x-truthpass-request-id"].trim() : "";
   const authorization = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
-  if (!configured) return { authorized: false, tenantId, requestId, error: "TENANT_AUTH_NOT_CONFIGURED" };
-  if (authorization !== "Bearer " + process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN!.trim()) {
-    return { authorized: false, tenantId, requestId, error: "AGENT_AUTH_REQUIRED" };
-  }
+  const supabaseConfig = supabaseAuthConfig();
+  if (!configured && !supabaseConfig) return { authorized: false, tenantId, requestId, error: "TENANT_AUTH_NOT_CONFIGURED" };
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tenantId) || headerTenant !== tenantId) {
     return { authorized: false, tenantId, requestId, error: "TENANT_SCOPE_MISMATCH" };
   }
   if (!/^[A-Za-z0-9._:-]{3,128}$/.test(requestId)) {
     return { authorized: false, tenantId, requestId, error: "REQUEST_ID_REQUIRED" };
   }
-  return { authorized: true, tenantId, requestId };
+  if (configured && authorization === "Bearer " + process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN!.trim()) {
+    return { authorized: true, tenantId, requestId, authMode: "gateway_token" };
+  }
+  const user = await resolveSupabaseUser(req);
+  if (user) {
+    const claimedTenants = claimedTenantIds(user);
+    if (!claimedTenants.includes(tenantId)) {
+      return { authorized: false, tenantId, requestId, error: "TENANT_SCOPE_MISMATCH", userId: user.id };
+    }
+    return { authorized: true, tenantId, requestId, authMode: "supabase_session", userId: user.id };
+  }
+  return { authorized: false, tenantId, requestId, error: configured ? "AGENT_AUTH_REQUIRED" : "SUPABASE_SESSION_REQUIRED" };
 }
 
 function requestTraceId(req: IncomingMessage): string {
@@ -1461,7 +1548,20 @@ function consumeChatRateLimit(req: IncomingMessage): { allowed: boolean; retryAf
 }
 
 const agentAuditRuns = new Map<string, Record<string, unknown>>();
-const mediaUploadSessions = new Map<string, { tenantId: string; rawObjectRef: string; expectedHash?: string; expiresAt: number; fileName: string; contentType: string; size: number; receivedAt?: string; receivedHash?: string }>();
+const mediaUploadSessions = new Map<string, {
+  tenantId: string;
+  rawObjectRef: string;
+  expectedHash?: string;
+  expiresAt: number;
+  fileName: string;
+  contentType: string;
+  size: number;
+  storageMode: "object_storage" | "presign_preview";
+  storagePath?: string;
+  storageBucket?: string;
+  receivedAt?: string;
+  receivedHash?: string;
+}>();
 
 async function persistAgentAuditRun(runId: string, tenantId: string, run: Record<string, unknown>): Promise<void> {
   if (!persistenceEnabled()) return;
@@ -1840,10 +1940,74 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  const enterpriseSummaryMatch = p.match(/^\/api\/tenants\/([^/]+)\/summary$/);
+  if (enterpriseSummaryMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(enterpriseSummaryMatch[1]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const audit = await enterprisePilotStore.exportAudit(tenantId);
+    const recordsByBatch = new Map<string, typeof audit.evidence>();
+    for (const record of audit.evidence) {
+      const list = recordsByBatch.get(record.batchId) ?? [];
+      list.push(record);
+      recordsByBatch.set(record.batchId, list);
+    }
+    const batches = [];
+    for (const [batchId, records] of recordsByBatch) {
+      let verification: Awaited<ReturnType<typeof enterprisePilotStore.validateBatch>> | undefined;
+      try { verification = await enterprisePilotStore.validateBatch(tenantId, batchId, ctx.requestId); } catch { /* summary remains review */ }
+      const status = verification?.status ?? "review";
+      const issueStatus = (record: (typeof records)[number]): "passed" | "review" | "missing" | "revoked" => record.status === "revoked" ? "revoked" : (verification?.checks.find((check) => check.evidenceIds.includes(record.evidenceId))?.status === "passed" ? "passed" : "review");
+      const title: Record<string, string> = { production: "生产记录", inspection: "第三方检测", cold_chain: "冷链记录", shipment: "出货记录" };
+      const issues = records.map((record) => ({
+        id: record.evidenceId,
+        batchId,
+        kind: record.kind as "production" | "inspection" | "cold_chain" | "shipment",
+        title: title[record.kind] ?? record.kind,
+        status: issueStatus(record),
+        issuer: record.issuerId,
+        signature: "not_checked" as const,
+        hash: record.payloadHash,
+        detail: record.status === "revoked" ? "该证据已撤销，不能恢复为有效资料。" : "资料已进入企业证据库，等待当前规则和机构状态确认。",
+        nextAction: issueStatus(record) === "passed" ? "保持批次号和来源记录一致。" : "补充来源签名或交由机构复核。",
+      }));
+      const completeness = Math.round(((verification?.checks.filter((check) => check.status === "passed").length ?? 0) / 4) * 100);
+      batches.push({
+        batchId,
+        productName: records[0]?.productId || "未命名商品",
+        policy: "enterprise-evidence-gate-v1",
+        status,
+        completeness,
+        source: records.some((record) => record.dataMode === "demo/synthetic") ? "demo/synthetic" : "external",
+        lastUpdated: records.map((record) => record.createdAt).sort().at(-1) ?? new Date().toISOString(),
+        issues,
+      });
+    }
+    const source = batches.some((batch) => batch.source === "demo/synthetic") ? "demo/synthetic" : "external";
+    sendJson(res, 200, {
+      tenantId,
+      brandName: tenantId,
+      productCount: new Set(batches.map((batch) => batch.productName)).size,
+      batchCount: batches.length,
+      reviewCount: batches.filter((batch) => batch.status === "review").length,
+      revokedCount: batches.filter((batch) => batch.status === "rejected").length,
+      feedbackCount: 0,
+      source,
+      dataMode: source,
+      batches,
+      authMode: ctx.authMode,
+      userId: ctx.userId,
+    });
+    return true;
+  }
+
   const enterpriseImportMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/import$/);
   if (enterpriseImportMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseImportMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -1901,22 +2065,36 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     }
     const hash = createHash("sha256");
     let total = 0;
+    const chunks: Buffer[] = [];
     try {
       for await (const chunk of req) {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
         total += buffer.length;
         if (total > session.size || total > 50 * 1024 * 1024) throw new Error("MEDIA_SIZE_MISMATCH");
         hash.update(buffer);
+        chunks.push(buffer);
       }
       const receivedHash = `0x${hash.digest("hex")}`;
       if (total !== session.size || (session.expectedHash && session.expectedHash !== receivedHash)) {
         sendJson(res, 422, { error: "MEDIA_HASH_MISMATCH", tenantId, uploadId, expectedHash: session.expectedHash ?? null, receivedHash, size: total });
         return true;
       }
+      if (session.storageMode === "object_storage") {
+        const storage = getSupabaseStorageAdmin();
+        if (!storage || !session.storagePath || !session.storageBucket) {
+          sendJson(res, 503, { error: "MEDIA_STORAGE_NOT_CONFIGURED", tenantId, uploadId });
+          return true;
+        }
+        const { error } = await storage.client.storage.from(session.storageBucket).upload(session.storagePath, Buffer.concat(chunks), { contentType: session.contentType, upsert: false });
+        if (error) {
+          sendJson(res, 502, { error: "MEDIA_STORAGE_UPLOAD_FAILED", message: error.message, tenantId, uploadId });
+          return true;
+        }
+      }
       session.receivedAt = new Date().toISOString();
       session.receivedHash = receivedHash;
       mediaUploadSessions.set(uploadId, session);
-      sendJson(res, 200, { schemaVersion: "truthpass.media.upload.v1", status: "uploaded", tenantId, uploadId, rawObjectRef: session.rawObjectRef, contentHash: receivedHash, dataMode: "demo/synthetic", storageMode: "presign_preview", nextAction: "调用 evidence/intake 生成待确认证据。" });
+      sendJson(res, 200, { schemaVersion: "truthpass.media.upload.v1", status: "uploaded", tenantId, uploadId, rawObjectRef: session.rawObjectRef, contentHash: receivedHash, dataMode: session.storageMode === "object_storage" ? "external" : "demo/synthetic", storageMode: session.storageMode, nextAction: "调用 evidence/intake 生成待确认证据。" });
     } catch (error) {
       sendJson(res, 422, { error: error instanceof Error ? error.message : "MEDIA_UPLOAD_FAILED", tenantId, uploadId });
     }
@@ -1926,7 +2104,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const enterpriseMediaPresignMatch = p.match(/^\/api\/tenants\/([^/]+)\/media\/presign$/);
   if (enterpriseMediaPresignMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseMediaPresignMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -1945,9 +2123,13 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     const uploadId = createHash("sha256").update(`media-upload:${tenantId}:${fileName}:${size}:${contentHash}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 32);
-    const rawObjectRef = `demo://media/${tenantId}/${uploadId}/${encodeURIComponent(fileName)}`;
+    const storage = getSupabaseStorageAdmin();
+    const storageMode: "object_storage" | "presign_preview" = storage ? "object_storage" : "presign_preview";
+    const safeFileName = fileName.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "upload.bin";
+    const storagePath = storage ? `${tenantId}/${uploadId}-${safeFileName}` : undefined;
+    const rawObjectRef = storage && storagePath ? `supabase://${storage.bucket}/${storagePath}` : `demo://media/${tenantId}/${uploadId}/${encodeURIComponent(fileName)}`;
     const expiresAt = Date.now() + 15 * 60_000;
-    mediaUploadSessions.set(uploadId, { tenantId, rawObjectRef, expectedHash: contentHash || undefined, expiresAt, fileName, contentType, size });
+    mediaUploadSessions.set(uploadId, { tenantId, rawObjectRef, expectedHash: contentHash || undefined, expiresAt, fileName, contentType, size, storageMode, storagePath, storageBucket: storage?.bucket });
     const origin = `${url.protocol}//${url.host}`;
     sendJson(res, 200, {
       schemaVersion: "truthpass.media.presign.v1",
@@ -1958,9 +2140,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       headers: { "content-type": contentType, "x-truthpass-content-hash": contentHash || undefined },
       rawObjectRef,
       expiresAt: new Date(expiresAt).toISOString(),
-      dataMode: process.env.TRUTHPASS_MEDIA_STORAGE === "object_storage" ? "external" : "demo/synthetic",
-      storageMode: process.env.TRUTHPASS_MEDIA_STORAGE === "object_storage" ? "object_storage" : "presign_preview",
-      nextAction: "上传完成后，用返回的 rawObjectRef 和 contentHash 调用证据预览；商家确认后再导入证据库。",
+      dataMode: storageMode === "object_storage" ? "external" : "demo/synthetic",
+      storageMode,
+      nextAction: storageMode === "object_storage" ? "文件已由服务端复核 Hash 后写入 Supabase Storage；继续调用 evidence/intake 生成待确认证据。" : "演示模式只校验本次上传 Hash；接入 Supabase Storage 后再写入正式对象存储。",
       requestId: ctx.requestId,
       traceId: requestTraceId(req),
     });
@@ -1970,7 +2152,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const enterpriseMediaIntakeMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/intake$/);
   if (enterpriseMediaIntakeMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseMediaIntakeMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2012,7 +2194,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const enterpriseValidateMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/validate$/);
   if (enterpriseValidateMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseValidateMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2034,7 +2216,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const enterpriseReconcileMatch = p.match(/^\/api\/tenants\/([^/]+)\/evidence\/reconcile$/);
   if (enterpriseReconcileMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseReconcileMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2054,7 +2236,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (enterpriseCardMatch && req.method === "GET") {
     const tenantId = decodeURIComponent(enterpriseCardMatch[1]!);
     const batchId = decodeURIComponent(enterpriseCardMatch[2]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2071,7 +2253,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const enterpriseAuditMatch = p.match(/^\/api\/tenants\/([^/]+)\/audit\/export$/);
   if (enterpriseAuditMatch && req.method === "GET") {
     const tenantId = decodeURIComponent(enterpriseAuditMatch[1]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2084,7 +2266,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (enterpriseRevokeMatch && req.method === "POST") {
     const tenantId = decodeURIComponent(enterpriseRevokeMatch[1]!);
     const evidenceId = decodeURIComponent(enterpriseRevokeMatch[2]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -2114,7 +2296,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (agentRunMatch && req.method === "GET") {
     const tenantId = decodeURIComponent(agentRunMatch[1]!);
     const runId = decodeURIComponent(agentRunMatch[2]!);
-    const ctx = enterpriseRequestContext(req, tenantId);
+    const ctx = await enterpriseRequestContext(req, tenantId);
     if (!ctx.authorized) {
       sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
       return true;
@@ -3005,7 +3187,10 @@ export async function handleStatic(url: URL, res: ServerResponse): Promise<void>
 export function createApiServer(): ReturnType<typeof createServer> {
   return createServer(async (req, res) => {
   try {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    const forwardedProto = typeof req.headers["x-forwarded-proto"] === "string" ? req.headers["x-forwarded-proto"].split(",")[0]?.trim() : "";
+    const protocol = forwardedProto === "https" ? "https" : "http";
+    const host = typeof req.headers.host === "string" && req.headers.host ? req.headers.host : `localhost:${PORT}`;
+    const url = new URL(req.url ?? "/", `${protocol}://${host}`);
     if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
       await mcpHttpHandler(req, res);
       return;

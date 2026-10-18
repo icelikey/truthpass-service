@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import { useWallet } from "./WalletContext";
 
@@ -7,6 +8,7 @@ function jumpTo(id: string) {
 
 export function ConsumerActionDock({ stage, batchId }: { stage: ConsumerAgentStage; batchId: string | null }) {
   const { address, walletRole, setWalletModalOpen } = useWallet();
+  const [moreOpen, setMoreOpen] = useState(false);
   const stateText = !batchId
     ? "先选一批商品，Agent 会帮你读资料"
     : stage === "evidence_review"
@@ -28,10 +30,13 @@ export function ConsumerActionDock({ stage, batchId }: { stage: ConsumerAgentSta
         <button type="button" className="consumer-action-primary" onClick={() => jumpTo(batchId ? "evidence" : "agent")}>
           {batchId ? "查看当前依据" : "开始查询"} <span aria-hidden="true">→</span>
         </button>
-        {batchId && <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("agent")}>问 Agent</button>}
-        {batchId && <button type="button" className="consumer-action-secondary" onClick={() => setWalletModalOpen(true)}>{address && walletRole ? "打开已绑定钱包" : "连接并绑定钱包"}</button>}
-        {batchId && <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("community")}>售后 / 反馈</button>}
+        {batchId && <button type="button" className="consumer-action-secondary" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-controls="consumer-action-more">更多操作 <span aria-hidden="true">{moreOpen ? "↑" : "↓"}</span></button>}
       </div>
+      {batchId && moreOpen && <div className="consumer-action-more" id="consumer-action-more">
+        <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("agent")}>问 Agent</button>
+        <button type="button" className="consumer-action-secondary" onClick={() => setWalletModalOpen(true)}>{address && walletRole ? "打开已绑定钱包" : "连接并绑定钱包"}</button>
+        <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("community")}>售后 / 反馈</button>
+      </div>}
     </section>
   );
 }
