@@ -1326,6 +1326,30 @@ function claimedTenantIds(user: SupabaseAuthUser): string[] {
   return claims.filter((value): value is string => typeof value === "string" && validTenantId(value)).map((value) => value.trim());
 }
 
+async function isSupabaseTenantMember(userId: string, tenantId: string): Promise<boolean> {
+  if (!persistenceEnabled()) return false;
+  try {
+    await getDatabasePool().query(`
+      create table if not exists truthpass_tenant_members (
+        user_id text not null,
+        tenant_id text not null,
+        role text not null default 'member',
+        status text not null default 'active',
+        created_at timestamptz not null default now(),
+        primary key (user_id, tenant_id)
+      );
+      create index if not exists truthpass_tenant_members_tenant_idx on truthpass_tenant_members (tenant_id, status);
+    `);
+    const result = await getDatabasePool().query(
+      `select 1 from truthpass_tenant_members where user_id = $1 and tenant_id = $2 and status = 'active' limit 1`,
+      [userId, tenantId],
+    );
+    return result.rowCount === 1;
+  } catch {
+    return false;
+  }
+}
+
 async function enterpriseRequestContext(req: IncomingMessage, tenantId: string): Promise<EnterpriseRequestContext> {
   const configured = Boolean(process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN?.trim());
   const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"].trim() : "";
@@ -1345,7 +1369,7 @@ async function enterpriseRequestContext(req: IncomingMessage, tenantId: string):
   const user = await resolveSupabaseUser(req);
   if (user) {
     const claimedTenants = claimedTenantIds(user);
-    if (!claimedTenants.includes(tenantId)) {
+    if (!claimedTenants.includes(tenantId) && !(user.id && await isSupabaseTenantMember(user.id, tenantId))) {
       return { authorized: false, tenantId, requestId, error: "TENANT_SCOPE_MISMATCH", userId: user.id };
     }
     return { authorized: true, tenantId, requestId, authMode: "supabase_session", userId: user.id };
