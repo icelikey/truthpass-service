@@ -75,6 +75,7 @@ const LEGACY_WEB = existsSync(join(WEB_DIST, "legacy")) ? join(WEB_DIST, "legacy
 const PORT = Number(process.env.PORT || 4173);
 const BATCH_ID = "FO-2026-001";
 const invokeAgent = createCompatibleAgentInvoker();
+let lastCustomerModelDiagnostic: { endpointHost: string; status?: number; errorType?: string; event: string; at: string } | null = null;
 const publicPolicyRegistry = createDefaultProductPolicyRegistry();
 const anonymousConsumers = new AnonymousConsumerRegistry();
 
@@ -1125,30 +1126,24 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         }),
       });
       if (!res.ok) {
-        console.warn(JSON.stringify({
-          event: "customer_service_provider_unavailable",
-          endpointHost: new URL(endpoint).host,
-          status: res.status,
-        }));
+        const diagnostic = { event: "customer_service_provider_unavailable", endpointHost: new URL(endpoint).host, status: res.status, at: new Date().toISOString() } as const;
+        lastCustomerModelDiagnostic = diagnostic;
+        console.warn(JSON.stringify(diagnostic));
         continue;
       }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
       if (typeof content !== "string" || !validConsumerModelText(content, contract)) {
-        console.warn(JSON.stringify({
-          event: "customer_service_provider_invalid_response",
-          endpointHost: new URL(endpoint).host,
-          hasContent: typeof content === "string",
-        }));
+        const diagnostic = { event: "customer_service_provider_invalid_response", endpointHost: new URL(endpoint).host, at: new Date().toISOString() } as const;
+        lastCustomerModelDiagnostic = diagnostic;
+        console.warn(JSON.stringify({ ...diagnostic, hasContent: typeof content === "string" }));
         continue;
       }
       return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
     } catch (error) {
-      console.warn(JSON.stringify({
-        event: "customer_service_provider_error",
-        endpointHost: new URL(endpoint).host,
-        errorType: error instanceof Error ? error.name : "unknown",
-      }));
+      const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString() } as const;
+      lastCustomerModelDiagnostic = diagnostic;
+      console.warn(JSON.stringify(diagnostic));
       // Try the next compatible endpoint, then use the deterministic response.
     }
   }
@@ -1890,6 +1885,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",
+      ...(url.searchParams.get("diagnostics") === "true" ? { providerDiagnostic: lastCustomerModelDiagnostic } : {}),
     });
     return true;
   }
