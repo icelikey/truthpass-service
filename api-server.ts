@@ -1096,30 +1096,45 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   const apiKey = process.env.AGENT_API_KEY?.trim();
   const model = process.env.AGENT_MODEL?.trim();
   if (!apiKey || !model) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
-  const baseUrl = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
-  const endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
-  try {
-    // DeepSeek's current production models may spend the entire completion
-    // budget on hidden reasoning unless thinking is explicitly disabled. The
-    // customer service contract only consumes the bounded answer text, so do
-    // not let a reasoning-only response force an unnecessary fallback. Keep
-    // this provider-specific so other OpenAI-compatible gateways can reject
-    // unknown fields safely.
-    const providerOptions = /deepseek\.com/i.test(baseUrl) ? { thinking: { type: "disabled" } } : {};
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({ model, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], temperature: 0.2, max_tokens: 400, ...providerOptions }),
-    });
-    if (!res.ok) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !validConsumerModelText(content, contract)) return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
-    return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
-  } catch {
-    return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
+
+  const configuredBase = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
+  const candidates = new Set<string>();
+  if (configuredBase.endsWith("/chat/completions")) candidates.add(configuredBase);
+  else {
+    candidates.add(configuredBase + "/chat/completions");
+    if (/api\.deepseek\.com\/v1$/i.test(configuredBase)) {
+      candidates.add(configuredBase.replace(/\/v1$/i, "") + "/chat/completions");
+    }
   }
+
+  for (const endpoint of candidates) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(20_000),
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 500,
+          stream: false,
+        }),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+      const content = data.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || !validConsumerModelText(content, contract)) continue;
+      return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
+    } catch {
+      // Try the next compatible endpoint, then use the deterministic response.
+    }
+  }
+
+  return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
 }
 
 function isChainStatusQuestion(question: string): boolean {

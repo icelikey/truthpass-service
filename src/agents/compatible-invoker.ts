@@ -22,7 +22,7 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
     if (sanitized.sourceIds.size === 0) return emptyOutput(invocation, sanitized.batchId);
     const apiKey = (options.apiKey ?? process.env.AGENT_API_KEY)?.trim();
     const model = (options.model ?? process.env.AGENT_MODEL)?.trim();
-    const baseUrl = (options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.stepfun.com/step_plan/v1").trim();
+    const baseUrl = (options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.deepseek.com").trim();
     if (!apiKey || !model) throw new Error("Agent 模型未配置：需要 AGENT_API_KEY 和 AGENT_MODEL");
 
     const response = await fetchImpl(completionsEndpoint(baseUrl), {
@@ -57,7 +57,9 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
 function completionsEndpoint(baseUrl: string): string {
   let base = baseUrl.trim();
   while (base.endsWith("/")) base = base.slice(0, -1);
-  return base.endsWith("/chat/completions") ? base : base + "/chat/completions";
+  if (base.endsWith("/chat/completions")) return base;
+  if (/api\.deepseek\.com\/v1$/i.test(base)) base = base.replace(/\/v1$/i, "");
+  return base + "/chat/completions";
 }
 
 function sanitizeInput(input: AgentInput): SanitizedInput {
