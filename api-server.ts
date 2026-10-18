@@ -1124,12 +1124,31 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
           stream: false,
         }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.warn(JSON.stringify({
+          event: "customer_service_provider_unavailable",
+          endpointHost: new URL(endpoint).host,
+          status: res.status,
+        }));
+        continue;
+      }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !validConsumerModelText(content, contract)) continue;
+      if (typeof content !== "string" || !validConsumerModelText(content, contract)) {
+        console.warn(JSON.stringify({
+          event: "customer_service_provider_invalid_response",
+          endpointHost: new URL(endpoint).host,
+          hasContent: typeof content === "string",
+        }));
+        continue;
+      }
       return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
-    } catch {
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "customer_service_provider_error",
+        endpointHost: new URL(endpoint).host,
+        errorType: error instanceof Error ? error.name : "unknown",
+      }));
       // Try the next compatible endpoint, then use the deterministic response.
     }
   }
