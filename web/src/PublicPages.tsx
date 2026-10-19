@@ -28,7 +28,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
       <Brand route={route} />
       <nav className="tp-public-nav" aria-label={zh ? "主导航" : "Primary navigation"}>
         <a className={active === "home" ? "active" : ""} href={links.home}>{zh ? "首页" : "Home"}</a>
-        <a href={links.home + "#evidence"}>{zh ? "商品查询" : "Products"}</a>
+        <a href={zh ? "/?view=consumer#agent" : "/en?view=consumer#agent"}>{zh ? "商品查询" : "Products"}</a>
         <a href={links.merchant} className={active === "merchant" ? "active" : ""}>{zh ? "解决方案" : "Solutions"}</a>
         <a href={zh ? "/institution" : "/en/institution"}>{zh ? "机构入口" : "Institutions"}</a>
         <a href={links.developers} className={active === "developers" ? "active" : ""}>{zh ? "开发者" : "Developers"}</a>
@@ -40,7 +40,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
           <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : "/"}>中文</a>
           <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : "/en"}>English</a>
         </div>
-        <a className="tp-outline-btn" href={zh ? "/" : "/en"}>{zh ? "登录" : "Sign in"}</a>
+        <a className="tp-outline-btn" href={`/?view=consumer&auth=1#agent`}>{zh ? "登录" : "Sign in"}</a>
       </div>
     </header>
   );
@@ -241,7 +241,7 @@ export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-develop
 function EnglishLandingPage() {
   return <PageFrame route="en-home" active="home"><main className="tp-landing-main">
     <section className="tp-landing-hero"><div><p className="tp-kicker">OPEN EVIDENCE · TRUSTPASS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>Check first.<br /><span>Buy next.</span></h1><p className="tp-landing-lead">Production, testing, delivery — show the record.</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/en#evidence">View the record&nbsp; →</a><a className="tp-paper-btn" href="/en/merchant">For business&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>SHOW THE RECORD</span><b>MAKE THE CHOICE</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>Show the record.</h2><p>Production, testing, delivery — each step has a source.</p><a href="/en#cli-reference">View a sample record →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>Ask once. Get the evidence.</h2><p>Your agent can read the same public record through MCP or CLI.</p><a href="/en/developers">Open developer access →</a></article><article><span className="tp-panel-symbol">◉</span><h2>Make one product explainable.</h2><p>Keep the record clear from production to aftercare.</p><a href="/en/merchant">For business →</a></article></section>
+    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>Show the record.</h2><p>Production, testing, delivery — each step has a source.</p><a href="/en?view=consumer#agent">View a sample record →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>Ask once. Get the evidence.</h2><p>Your agent can read the same public record through MCP or CLI.</p><a href="/en/developers">Open developer access →</a></article><article><span className="tp-panel-symbol">◉</span><h2>Make one product explainable.</h2><p>Keep the record clear from production to aftercare.</p><a href="/en/merchant">For business →</a></article></section>
     <section id="about" className="tp-landing-strip"><span>01</span><b>CHECK</b><small>See the record.</small><span>02</span><b>CHOOSE</b><small>Make the call.</small><span>03</span><b>CONTINUE</b><small>Keep help after purchase.</small></section>
   </main></PageFrame>;
 }
@@ -249,7 +249,7 @@ function EnglishLandingPage() {
 function ChineseLandingPage() {
   return <PageFrame route="zh-home" active="home"><main className="tp-landing-main">
     <section className="tp-landing-hero"><div><p className="tp-kicker">公开证据 · TRUTHPASS</p><span className="tp-demo-ribbon">演示资料 · 不能替代真实商品认证</span><h1>先看清。<br /><span>再下单。</span></h1><p className="tp-landing-lead">生产、检测、运输，一件件摆出来。</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/?view=consumer#agent">查看依据&nbsp; →</a><a className="tp-paper-btn" href="/merchant">我是企业&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>有凭有据</span><b>大家看得见</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>有凭有据，大家看得见。</h2><p>生产、检测、运输，一件件摆出来。</p><a href="/?view=consumer#cli-reference">看一份演示资料 →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>你问什么，我查什么。</h2><p>同一份公开资料，人和 Agent 都能看。</p><a href="/developers">进入开发者入口 →</a></article><article><span className="tp-panel-symbol">◉</span><h2>把一件商品，说清楚。</h2><p>每一步有来源，每个缺口有人处理。</p><a href="/merchant">查看企业入口 →</a></article></section>
+    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>有凭有据，大家看得见。</h2><p>生产、检测、运输，一件件摆出来。</p><a href="/?view=consumer#agent">看一份演示资料 →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>你问什么，我查什么。</h2><p>同一份公开资料，人和 Agent 都能看。</p><a href="/developers">进入开发者入口 →</a></article><article><span className="tp-panel-symbol">◉</span><h2>把一件商品，说清楚。</h2><p>每一步有来源，每个缺口有人处理。</p><a href="/merchant">查看企业入口 →</a></article></section>
     <section id="about" className="tp-landing-strip"><span>01</span><b>看依据</b><small>先把事实看清楚。</small><span>02</span><b>做选择</b><small>缺什么，明白补上。</small><span>03</span><b>留记录</b><small>买完还有事，照样找得到人。</small></section>
   </main></PageFrame>;
 }

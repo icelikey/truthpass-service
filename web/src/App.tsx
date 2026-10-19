@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AuthModal } from "./components/AuthModal";
 import { AfterSalesPanel } from "./components/AfterSalesPanel";
 import { ChatPanel } from "./components/ChatPanel";
@@ -27,8 +27,16 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [observerOpen, setObserverOpen] = useState(false);
   const [verifyState, setVerifyState] = useState<VerifyState>("idle");
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [authOpen, setAuthOpen] = useState(false);
+  const [batchId, setBatchId] = useState<string | null>(() => {
+    const queryBatch = new URLSearchParams(window.location.search).get("batch")?.trim();
+    if (queryBatch) return queryBatch.toUpperCase();
+    try {
+      return window.sessionStorage.getItem("truthpass.consumer.batch") || null;
+    } catch {
+      return null;
+    }
+  });
+  const [authOpen, setAuthOpen] = useState(() => new URLSearchParams(window.location.search).get("auth") === "1");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focusTech, setFocusTech] = useState(false);
   const [consumerStage, setConsumerStage] = useState<ConsumerAgentStage>("idle");
@@ -40,7 +48,29 @@ export default function App() {
   const isMerchantRoute = pathname.startsWith("/merchant");
   const isInstitutionRoute = pathname === "/institution" || pathname === "/en/institution";
   const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
-  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname) && !(pathname === "/" && isConsumerView);
+  const authRequested = new URLSearchParams(window.location.search).get("auth") === "1";
+  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname)
+    && !authRequested
+    && !((pathname === "/" || pathname === "/en") && isConsumerView);
+
+  // Keep a deep link and a refresh on the same consumer batch. This makes the
+  // evidence flow recoverable without turning the public landing page into a
+  // long scrolling console.
+  useEffect(() => {
+    try {
+      if (batchId) window.sessionStorage.setItem("truthpass.consumer.batch", batchId);
+      else window.sessionStorage.removeItem("truthpass.consumer.batch");
+    } catch {
+      // Private browsing can disable sessionStorage; the in-memory flow still works.
+    }
+    if (isPublicPageRoute || pathname === "/merchant" || pathname === "/institution" || pathname === "/en/merchant" || pathname === "/en/institution") return;
+    const url = new URL(window.location.href);
+    if (batchId) url.searchParams.set("batch", batchId);
+    else url.searchParams.delete("batch");
+    url.searchParams.set("view", "consumer");
+    url.searchParams.delete("auth");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [batchId, isPublicPageRoute, pathname]);
 
   const showToast = (msg: string) => {
     setToast(msg);

@@ -116,8 +116,14 @@ export function WalletProvider({
     const handleAccountsChanged = (accounts: string[]) => {
       if (Array.isArray(accounts) && accounts.length > 0) {
         setAddress(accounts[0]);
+        setWalletRole(null);
+        setBindingStatus("unbound");
+        setTxError("钱包账户已切换，请重新绑定身份");
+        onToast("钱包账户已切换，请重新绑定身份");
       } else {
         setAddress(null);
+        setWalletRole(null);
+        setBindingStatus("unbound");
       }
     };
     const handleChainChanged = (hex: string) => {
@@ -130,7 +136,7 @@ export function WalletProvider({
       provider.removeListener?.("accountsChanged", handleAccountsChanged);
       provider.removeListener?.("chainChanged", handleChainChanged);
     };
-  }, [provider]);
+  }, [onToast, provider]);
 
   const connectWallet = useCallback(
     async (kind: WalletKind): Promise<string | null> => {
@@ -138,9 +144,10 @@ export function WalletProvider({
       setSelectedWalletKind(kind);
       const discovered = discoverWalletOptions();
       setOptions(discovered);
-      const target = discovered.find((o) => o.kind === kind) ?? discovered[0];
+      const target = discovered.find((o) => o.kind === kind);
       if (!target?.provider) {
-        const message = `未检测到 ${target?.name ?? "EVM 钱包"} 插件。请安装 MetaMask、OKX Wallet 或 Binance Wallet 后重试。`;
+        const requestedName = discovered.find((o) => o.kind === kind)?.name ?? kind;
+        const message = `未检测到 ${requestedName} 插件。请安装 MetaMask、OKX Wallet 或 Binance Wallet 后重试。`;
         setTxError(message);
         onToast(message);
         return null;
