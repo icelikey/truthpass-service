@@ -409,18 +409,37 @@ function normalizeRemoteUrl(value: string): string {
 }
 
 function remoteHeaders(args: ParsedArgs, requireTenant = false): Record<string, string> {
-  const headers: Record<string, string> = { accept: "application/json", "x-truthpass-request-id": args.requestId ?? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+  const headers: Record<string, string> = { accept: "application/json", "x-truthpass-request-id": ensureRequestId(args) };
   if (args.token) headers.authorization = `Bearer ${args.token}`;
   if (args.tenantId) headers["x-truthpass-tenant"] = args.tenantId;
   if (requireTenant && (!args.token || !args.tenantId)) throw new Error("远程 Agent 请求需要 --token 和 --tenant");
   return headers;
 }
 
+function ensureRequestId(args: ParsedArgs): string {
+  if (!args.requestId) args.requestId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return args.requestId;
+}
+
 async function fetchRemoteJson(args: ParsedArgs, path: string, init: RequestInit = {}, requireTenant = false): Promise<Record<string, unknown>> {
   if (!args.remoteUrl) throw new Error("该命令需要 --remote 服务地址");
   const url = new URL(path, normalizeRemoteUrl(args.remoteUrl) + "/");
   const headers = { ...remoteHeaders(args, requireTenant), ...(init.headers as Record<string, string> | undefined) };
-  const response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
+  let response: Response | undefined;
+  let lastError: unknown;
+  // Vercel 的公开入口在冷启动或边缘连接重试时可能出现一次性 TLS/网络错误。
+  // CLI 只对网络层失败和 5xx 重试，不重试 4xx，避免把权限错误掩盖掉。
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
+      if (response.status < 500 || attempt === 2) break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 2) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+  }
+  if (!response) throw lastError instanceof Error ? lastError : new Error("远程服务请求失败");
   const text = await response.text();
   let body: Record<string, unknown>;
   try { body = JSON.parse(text) as Record<string, unknown>; } catch { body = { error: "REMOTE_INVALID_JSON", raw: text.slice(0, 400) }; }
@@ -453,12 +472,32 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
   if (command === "inspect" || command === "verify") {
     const result = await fetchRemoteJson(args, `/api/cli/inspect?batchId=${batchId}`);
     const verification = result.verification && typeof result.verification === "object" ? result.verification as Record<string, unknown> : {};
-    return { ...result, command: command === "verify" ? "verify" : "inspect", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), verificationStatus: verification.status ?? result.status ?? null, dataMode: result.dataClass ?? verification.dataClass ?? null };
+    const verificationStatus = verification.status ?? result.status ?? null;
+    return {
+      ...result,
+      command: command === "verify" ? "verify" : "inspect",
+      remoteUrl: normalizeRemoteUrl(args.remoteUrl!),
+      tenantId: args.tenantId ?? "public",
+      traceId: ensureRequestId(args),
+      verificationStatus,
+      dataMode: result.dataClass ?? verification.dataClass ?? "demo/synthetic",
+      nextAction: verificationStatus === "accepted" ? "查看依据；如需上链，请由用户钱包签名确认" : "补齐缺失资料后重新核验",
+    };
   }
   if (command === "explain") {
     const result = await fetchRemoteJson(args, `/api/cli/explain?batchId=${batchId}`);
     const inspection = result.inspection && typeof result.inspection === "object" ? result.inspection as Record<string, unknown> : {};
-    return { ...result, command: "explain", remoteUrl: normalizeRemoteUrl(args.remoteUrl!), verificationStatus: result.status ?? inspection.status ?? null, dataMode: result.dataClass ?? inspection.dataClass ?? null };
+    const verificationStatus = result.status ?? (inspection.verification && typeof inspection.verification === "object" ? (inspection.verification as Record<string, unknown>).status : undefined) ?? null;
+    return {
+      ...result,
+      command: "explain",
+      remoteUrl: normalizeRemoteUrl(args.remoteUrl!),
+      tenantId: args.tenantId ?? "public",
+      traceId: ensureRequestId(args),
+      verificationStatus,
+      dataMode: result.dataClass ?? "demo/synthetic",
+      nextAction: verificationStatus === "accepted" ? "查看依据；真实上链仍需用户钱包签名并回读 receipt" : "补齐检测、冷链和来源签名后重新核验",
+    };
   }
   if (command === "collaborate") {
     return fetchRemoteJson(args, "/api/agent/v1/collaborate", {
@@ -758,10 +797,21 @@ export function textFor(result: Record<string, unknown>): string {
   if (result.command === "recommend") return `批次 ${result.batchId}：${result.recommendation}\n${result.reason}\n下一步：${result.consumerNextAction}\n`;
   if (result.command === "order") return `批次 ${result.batchId}：${result.orderStatus}\n${result.reason}\n`;
   if (result.command === "inspect") {
-    const chain = result.chain as Record<string, unknown>;
-    const verification = result.verification as Record<string, unknown>;
-    const batch = result.batch as Record<string, unknown>;
-    return `批次 ${batch.id ?? batch.batchId ?? "未知"}：${verification.status}\n链上：${chain.lifecycle}（${chain.network ?? "unavailable"}）\n证据哈希：${(result.evidence as Record<string, unknown>).evidenceHash ?? "无"}\n`;
+    const chain = (result.chain ?? {}) as Record<string, unknown>;
+    const verification = (result.verification ?? {}) as Record<string, unknown>;
+    const batch = (result.batch ?? {}) as Record<string, unknown>;
+    const assessment = (verification.assessment ?? {}) as Record<string, unknown>;
+    const batchId = batch.id ?? batch.batchId ?? verification.batchId ?? result.batchId ?? "未知";
+    const status = verification.status ?? result.status ?? "未知";
+    const anchor = (verification.anchor ?? {}) as Record<string, unknown>;
+    const lifecycle = chain.lifecycle ?? (anchor.submitted === true ? "anchored" : "anchor_pending");
+    const network = chain.network ?? chain.chainName ?? (anchor.network ?? "unavailable");
+    const evidenceHash = (result.evidence as Record<string, unknown> | undefined)?.evidenceHash
+      ?? verification.evidenceRoot
+      ?? assessment.evidenceHash
+      ?? "无";
+    const dataMode = result.dataMode ?? verification.dataClass ?? result.dataClass ?? "未知";
+    return `批次 ${batchId}：${status}\n链上：${lifecycle}（${network}）\n证据哈希：${evidenceHash}\n数据：${dataMode}\n校验状态：${result.verificationStatus ?? status}\n下一步：${result.nextAction ?? "查看依据"}\n追踪：${result.traceId ?? "未知"}\n`;
   }
   return `批次 ${result.batchId}：${result.status}\n选择服务：${result.selectedServiceId ?? "无"}\n评分：${result.score}\n`;
 }

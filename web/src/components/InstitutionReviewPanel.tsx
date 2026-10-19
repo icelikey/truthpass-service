@@ -35,13 +35,14 @@ export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en"
   const { address, chainId, walletName, walletRole, bindingStatus, setWalletModalOpen, bindWalletRole, executeOnChainAction, txBusy, lastTx } = useWallet();
   const [active, setActive] = useState<ReviewAction>("inspection");
   const [message, setMessage] = useState("");
+  const [authorizationToken, setAuthorizationToken] = useState("");
   const action = useMemo(() => ACTIONS.find((item) => item.id === active) ?? ACTIONS[0], [active]);
   const walletReady = Boolean(address && chainId === 677 && bindingStatus === "bound_verified");
   const en = locale === "en";
   const localizedAction = en ? EN_ACTIONS[action.id] : { title: action.title, detail: action.detail, next: action.next, role: WALLET_ROLE_LABELS[action.role] };
 
   const bind = async () => {
-    const ok = await bindWalletRole(action.role, "demo");
+    const ok = await bindWalletRole(action.role, "demo", authorizationToken.trim() || undefined);
     setMessage(ok
       ? (en ? `Bound ${localizedAction.role}; the next signature will include the batch and role.` : `已绑定${WALLET_ROLE_LABELS[action.role]}身份；下一次签名会带上批次和角色。`)
       : (en ? "Identity binding is incomplete. A real institution needs an administrator invitation and cannot self-declare a role." : "身份绑定未完成。真实机构需要管理员邀请令牌，不能自行声明角色。"));
@@ -86,6 +87,7 @@ export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en"
           <p>{localizedAction.detail}</p>
           <dl><div><dt>{en ? "Required identity" : "需要身份"}</dt><dd>{localizedAction.role}</dd></div><div><dt>{en ? "What remains" : "会留下什么"}</dt><dd>{localizedAction.next}</dd></div><div><dt>{en ? "What will not happen" : "不会发生什么"}</dt><dd>{en ? "The agent will not sign for you or change the quality conclusion." : "Agent 不会替你签名，也不会自动改变质量结论。"}</dd></div></dl>
           <div className="institution-detail-actions"><button type="button" className="merchant-primary" onClick={() => void bind()}>{walletRole === action.role ? (en ? "Identity bound" : "身份已绑定") : `${en ? "Bind " : "绑定"}${en ? ({ inspection: "inspection institution", review: "review institution", arbitration: "arbitration institution" }[action.id]) : WALLET_ROLE_LABELS[action.role]}`}</button><button type="button" className="merchant-secondary" onClick={() => void confirmAction()} disabled={txBusy}>{txBusy ? (en ? "Waiting for receipt…" : "等待回执…") : (en ? "Confirm wallet action" : "确认钱包操作")}</button></div>
+          <label className="institution-token-field"><span>{en ? "Administrator invitation token (institution roles)" : "管理员邀请令牌（机构角色必填）"}</span><input type="password" value={authorizationToken} onChange={(event) => setAuthorizationToken(event.target.value)} placeholder={en ? "Paste the one-time invitation token" : "粘贴一次性邀请令牌"} autoComplete="off" /></label>
           {lastTx && <div className="institution-message" role="status">{en ? `Last receipt: ${lastTx.receiptStatus ?? "submitted"}` : `最近回执：${lastTx.receiptStatus ?? "已提交"}`}</div>}
           {!walletReady && <small className="institution-hint">{en ? "Connect a wallet and bind the matching identity first." : "先连接钱包并绑定对应身份；未安装插件时，钱包弹窗会直接给出安装入口。"}</small>}
           {message && <div className="institution-message" role="status">{message}</div>}

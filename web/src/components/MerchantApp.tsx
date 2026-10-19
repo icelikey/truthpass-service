@@ -137,7 +137,7 @@ export function MerchantApp() {
   const generateAgentReport = async () => {
     setLifecycleBusy(true);
     try {
-      setAgentReport(await requestAgentReport(selectedBatch?.batchId ?? "FO-2026-001"));
+      setAgentReport(await requestAgentReport(selectedBatch?.batchId ?? "FO-2026-001", agentInput || undefined, summary?.tenantId ?? "demo-tenant"));
     } catch {
       setMessage("Agent 汇报暂时无法生成，请检查 Agent Gateway 状态。");
     } finally {

@@ -31,7 +31,7 @@ export interface WalletContextValue {
   walletKind: WalletKind | null;
   walletRole: WalletRole | null;
   bindingStatus: "unbound" | "binding" | "bound_verified" | "error";
-  bindWalletRole: (role: WalletRole, tenantId?: string) => Promise<boolean>;
+  bindWalletRole: (role: WalletRole, tenantId?: string, authorizationToken?: string) => Promise<boolean>;
   connecting: boolean;
   txBusy: boolean;
   lastTx: SessionChainTx | null;
@@ -251,7 +251,7 @@ export function WalletProvider({
     onToast("已断开钱包连接");
   }, [onToast]);
 
-  const bindWalletRole = useCallback(async (role: WalletRole, tenantId = "demo"): Promise<boolean> => {
+  const bindWalletRole = useCallback(async (role: WalletRole, tenantId = "demo", authorizationToken?: string): Promise<boolean> => {
     if (!provider || !address) {
       const msg = "请先连接真实钱包，再绑定身份";
       setTxError(msg);
@@ -269,7 +269,7 @@ export function WalletProvider({
       const bindResponse = await fetch("/api/wallet/bind", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ address, tenantId, role, message: challenge.message, signature }),
+        body: JSON.stringify({ address, tenantId, role, message: challenge.message, signature, ...(authorizationToken ? { authorizationToken } : {}) }),
       });
       const bound = await bindResponse.json() as { status?: string; error?: string };
       if (!bindResponse.ok || bound.status !== "bound_verified") throw new Error(bound.error || "身份绑定失败");

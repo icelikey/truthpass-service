@@ -417,8 +417,9 @@ export interface SessionChainTransaction {
 
 const sessionChainTxs: SessionChainTransaction[] = [];
 
-let cachedRpcReachable = true;
-let cachedRpcCheckedAt = new Date().toISOString();
+// 运行时第一次探测完成前不把回放凭证冒充为实时 RPC 状态。
+let cachedRpcReachable = false;
+let cachedRpcCheckedAt: string | undefined;
 let rpcCheckInFlight = false;
 
 function refreshBotChainRpcInBackground(): void {
@@ -430,7 +431,8 @@ function refreshBotChainRpcInBackground(): void {
       cachedRpcCheckedAt = new Date().toISOString();
     })
     .catch(() => {
-      // Keep verified mainnet status so UI never blocks
+      // RPC 不可达时保持未知/不可用，不能用历史回放凭证替代实时状态。
+      cachedRpcReachable = false;
       cachedRpcCheckedAt = new Date().toISOString();
     })
     .finally(() => {
@@ -463,6 +465,7 @@ function weiQuantity(value: unknown, field: string, fallback = "0x38d7ea4c68000"
 
 async function getBotChainMainnetStatus() {
   refreshBotChainRpcInBackground();
+  const rpcReady = cachedRpcReachable;
   return {
     network: BOT_CHAIN_MAINNET.network,
     chainId: BOT_CHAIN_MAINNET.chainId,
@@ -471,22 +474,26 @@ async function getBotChainMainnetStatus() {
     nativeCurrency: { name: "BOT", symbol: "BOT", decimals: 18 },
     rpcUrl: BOT_CHAIN_MAINNET.rpcUrl,
     explorerUrl: BOT_CHAIN_MAINNET.explorerUrl,
-    status: "reachable",
-    rpcLive: cachedRpcReachable,
+    status: rpcReady ? "reachable" : "unavailable",
+    rpcLive: rpcReady,
     liveRpc: {
-      reachable: true,
-      rpcChainId: 677,
-      latestBlockNumber: 26438105,
-      contractsDeployed: {
-        evidenceAnchor: true,
-        consumerGateway: true,
-        auditEscrow: true,
-      },
-      checkedAt: cachedRpcCheckedAt,
+      reachable: rpcReady,
+      latestBlockNumber: undefined,
+      ...(rpcReady ? {
+        rpcChainId: 677,
+        contractsDeployed: {
+          evidenceAnchor: true,
+          consumerGateway: true,
+          auditEscrow: true,
+        },
+      } : {}),
+      checkedAt: cachedRpcCheckedAt ?? null,
     },
-    anchored: true,
-    deploymentStatus: "deployment_receipt_verified",
-    businessStatus: "business_replay_receipts_verified",
+    // verifiedTransactions 是部署时保存的回放/历史凭证，不代表本次请求实时读到 receipt。
+    anchored: false,
+    replayVerified: true,
+    deploymentStatus: "replay_verified",
+    businessStatus: "replay_verified",
     contractAddress: BOT_CHAIN_MAINNET.contractAddress,
     consumerGatewayAddress: BOT_CHAIN_MAINNET.consumerGatewayAddress,
     auditEscrowAddress: BOT_CHAIN_MAINNET.auditEscrowAddress,
@@ -938,11 +945,15 @@ function expectedReceiptEventCheck(
       return { ok: false, reason: "缺少 Anchor DisputeRaised 事件" };
     }
   } else if (event === "EvidenceAnchored") {
-    if (!receiptHasEvent(receipt, EVIDENCE_ANCHORED_TOPIC, BOT_CHAIN_MAINNET.contractAddress)) {
+    const requestId = id("requestId");
+    const evidenceRoot = id("evidenceRoot");
+    if (!requestId || !evidenceRoot || !receiptHasEvent(receipt, EVIDENCE_ANCHORED_TOPIC, BOT_CHAIN_MAINNET.contractAddress, [requestId, evidenceRoot])) {
       return { ok: false, reason: "缺少 EvidenceAnchored 事件" };
     }
   } else if (event === "VerificationRecorded") {
-    if (!receiptHasEvent(receipt, VERIFICATION_RECORDED_TOPIC, BOT_CHAIN_MAINNET.contractAddress)) {
+    const requestId = id("requestId");
+    const evidenceRoot = id("evidenceRoot");
+    if (!requestId || !evidenceRoot || !receiptHasEvent(receipt, VERIFICATION_RECORDED_TOPIC, BOT_CHAIN_MAINNET.contractAddress, [requestId, evidenceRoot])) {
       return { ok: false, reason: "缺少 VerificationRecorded 事件" };
     }
   } else if (event === "AuditFindingSubmitted") {
@@ -2035,7 +2046,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (p === "/api/wallet/bind" && req.method === "GET") {
     const address = (url.searchParams.get("address") || "").trim().toLowerCase();
     const tenantId = (url.searchParams.get("tenantId") || "demo").trim();
-    const roles = [...walletBindings.values()].filter((item) => item.address === address && item.tenantId === tenantId);
+    const roles = (await Promise.all([...walletBindingRoles].map((role) => findWalletBinding(address, tenantId, [role]))))
+      .filter((item): item is WalletBindingRecord => Boolean(item));
     sendJson(res, 200, { schemaVersion: "truthpass.wallet.binding-list.v1", address, tenantId, bindingMode: walletBindingMode(), bindings: roles });
     return true;
   }
@@ -2377,16 +2389,21 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/agent/v1/collaborate" && req.method === "POST") {
-    const access = agentGatewayAuthorized(req);
-    if (!access.authorized) {
-      sendJson(res, 401, { error: "AGENT_AUTH_REQUIRED", message: "需要受保护的 Agent Gateway 令牌" });
-      return true;
-    }
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" && body.batchId.trim() ? body.batchId.trim().toUpperCase() : BATCH_ID;
     const question = typeof body.question === "string" && body.question.trim() ? body.question.trim() : "请解释当前批次证据状态。";
     const headerTenant = typeof req.headers["x-truthpass-tenant"] === "string" ? req.headers["x-truthpass-tenant"] : "";
     const tenantId = headerTenant || (typeof body.tenantId === "string" ? body.tenantId : "demo");
+    // 生产环境启用网关或 Supabase 后，协作请求必须同时带租户和 request-id，
+    // 防止调用方只在 body 中伪造 tenantId。未配置的本地 Demo 保留匿名演示路径。
+    const enterpriseConfigured = Boolean(process.env.TRUTHPASS_AGENT_GATEWAY_TOKEN?.trim() || supabaseAuthConfig());
+    const access = enterpriseConfigured
+      ? await enterpriseRequestContext(req, tenantId)
+      : agentGatewayAuthorized(req);
+    if (!access.authorized) {
+      sendJson(res, enterpriseConfigured && "error" in access ? 401 : 401, { error: enterpriseConfigured && "error" in access ? access.error : "AGENT_AUTH_REQUIRED", message: "需要有效的 Agent Gateway 令牌、租户范围和请求 ID" });
+      return true;
+    }
     const result = await runPublicAgentCollaboration(batchId, question, tenantId);
     sendJson(res, 200, { ...result, traceId: requestTraceId(req), authMode: access.authMode, tenantId });
     return true;
@@ -2640,11 +2657,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           sendJson(res, 422, { error: "transaction.from 与已绑定钱包不一致", status: "transaction_sender_mismatch", txHash });
           return true;
         }
-        if (transaction.to && transaction.to.toLowerCase() !== expectedContract.toLowerCase()) {
+        if (!transaction.to || transaction.to.toLowerCase() !== expectedContract.toLowerCase()) {
           sendJson(res, 422, { error: "transaction.to 与预期交易目标不一致", status: "transaction_target_mismatch", txHash });
           return true;
         }
-        if (transaction.chainId && Number.parseInt(transaction.chainId.replace(/^0x/i, ""), 16) !== BOT_CHAIN_MAINNET.chainId) {
+        if (!transaction.chainId || Number.parseInt(transaction.chainId.replace(/^0x/i, ""), 16) !== BOT_CHAIN_MAINNET.chainId) {
           sendJson(res, 422, { error: "交易 Chain ID 与 BOT Chain Mainnet 不一致", status: "transaction_chain_mismatch", txHash });
           return true;
         }
