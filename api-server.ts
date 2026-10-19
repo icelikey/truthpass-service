@@ -1078,6 +1078,30 @@ type ConsumerModelContract = {
   chainContext?: ChainQueryContext;
 };
 
+function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContract): string | null {
+  let value = raw.trim().replace(/^```(?:json|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const conclusion = typeof parsed.conclusion === "string" ? parsed.conclusion : typeof parsed.headline === "string" ? parsed.headline : "";
+    const evidence = typeof parsed.evidence === "string" ? parsed.evidence : typeof parsed.basis === "string" ? parsed.basis : "";
+    const uncertainty = typeof parsed.uncertainty === "string" ? parsed.uncertainty : typeof parsed.uncertain === "string" ? parsed.uncertain : "";
+    const next = typeof parsed.nextAction === "string" ? parsed.nextAction : typeof parsed.next_step === "string" ? parsed.next_step : typeof parsed.next === "string" ? parsed.next : "";
+    if (conclusion && evidence && uncertainty && next) value = `结论：${conclusion} 依据：${evidence} 不确定：${uncertainty} 下一步：${next}`;
+  } catch {
+    // The public contract is plain text; JSON is accepted only as a formatting convenience.
+  }
+  value = value
+    .replace(/\*+/g, "")
+    .replace(/(结论|依据|不确定|下一步)\s*:/g, "$1：")
+    .replace(/\b(Conclusion|Verdict)\s*:/gi, "结论：")
+    .replace(/\b(Evidence|Basis)\s*:/gi, "依据：")
+    .replace(/\b(Uncertainty|Unknowns?)\s*:/gi, "不确定：")
+    .replace(/\b(Next\s*step|Next\s*action)\s*:/gi, "下一步：")
+    .replace(/\s*\n+\s*/g, " ")
+    .trim();
+  return validConsumerModelText(value, contract) ? value : null;
+}
+
 function validConsumerModelText(text: string, contract?: ConsumerModelContract): boolean {
   const value = text.trim();
   if (!value || value.length > 2_000) return false;
@@ -1133,7 +1157,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !validConsumerModelText(content, contract)) {
+      const normalized = typeof content === "string" ? normalizeConsumerModelText(content, contract) : null;
+      if (!normalized) {
         const text = typeof content === "string" ? content.trim() : "";
         const diagnostic = {
           event: "customer_service_provider_invalid_response",
@@ -1151,7 +1176,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         console.warn(JSON.stringify(diagnostic));
         continue;
       }
-      return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
+      return { lines: [{ cls: "plain", text: normalized }], status: "model_assisted", dataMode: "demo/synthetic", sources };
     } catch (error) {
       const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString() } as const;
       lastCustomerModelDiagnostic = diagnostic;
