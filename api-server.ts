@@ -1102,13 +1102,22 @@ function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContrac
   return validConsumerModelText(value, contract) ? value : null;
 }
 
+function hasUnsupportedDemoClaim(text: string): boolean {
+  // A safe disclaimer such as “不能替代真实商品认证” is allowed. Only reject
+  // the same words when they are presented as a positive claim.
+  const withoutDisclaimers = text
+    .replace(/(?:不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无)[^。；;，,\n]{0,12}(?:真实认证|官方认证)/g, "")
+    .replace(/(?:不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无)[^。；;，,\n]{0,8}(?:已证明安全|安全无疑)/g, "");
+  return /(真实认证|官方认证|已证明安全|安全无疑)/.test(withoutDisclaimers);
+}
+
 function validConsumerModelText(text: string, contract?: ConsumerModelContract): boolean {
   const value = text.trim();
   if (!value || value.length > 2_000) return false;
   // Keep the public answer machine-readable and short enough for a consumer.
   const sectionBoundary = "(?:^|[\\s。；;、])";
   if (!new RegExp(sectionBoundary + "结论：").test(value) || !new RegExp(sectionBoundary + "依据：").test(value) || !new RegExp(sectionBoundary + "不确定：").test(value) || !new RegExp(sectionBoundary + "下一步：").test(value)) return false;
-  if (contract?.dataMode === "demo/synthetic" && /(真实认证|官方认证|已证明安全|安全无疑)/.test(value)) return false;
+  if (contract?.dataMode === "demo/synthetic" && hasUnsupportedDemoClaim(value)) return false;
   if (contract?.batchId) {
     const batchIds = value.match(/\b[A-Z]{2,12}-\d{4}-\d{2,6}\b/g) ?? [];
     if (batchIds.some((id) => id !== contract.batchId)) return false;
@@ -1170,7 +1179,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
           hasEvidence: /依据：/.test(text),
           hasUncertainty: /不确定：/.test(text),
           hasNextAction: /下一步：/.test(text),
-          containsForbiddenClaim: /(真实认证|官方认证|已证明安全|安全无疑)/.test(text),
+          containsForbiddenClaim: hasUnsupportedDemoClaim(text),
         } as const;
         lastCustomerModelDiagnostic = diagnostic;
         console.warn(JSON.stringify(diagnostic));
