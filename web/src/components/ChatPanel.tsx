@@ -153,6 +153,18 @@ function MessageView({
           </span>
         )}
       </div>
+      {(message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
+        <details className="agent-trace-details">
+          <summary>回答依据 · {message.meta.modelAssisted ? `${message.meta.provider ?? "模型"} 已参与解释` : "基础回答"} </summary>
+          <div className="agent-trace-grid">
+            <span><b>模型</b>{message.meta.modelAssisted ? `${message.meta.provider ?? "兼容接口"} · ${message.meta.model ?? "已配置模型"}` : "deterministic fallback"}</span>
+            <span><b>流程</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? "规则核验" : stage === "jev" ? "JEV 分流" : stage === "deepseek" ? "DeepSeek 解释" : stage).join(" → ")}</span>
+            {message.meta.pipelineDetail && <span><b>结果</b>规则：{message.meta.pipelineDetail.verifier.status} · JEV：{message.meta.pipelineDetail.jev.decision} · 模型：{message.meta.pipelineDetail.deepseek.status}</span>}
+            <span><b>引用</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : "当前回答没有额外证据 ID"}</span>
+            <span><b>Trace ID</b><code>{message.meta.traceId ?? "—"}</code></span>
+          </div>
+        </details>
+      )}
 
       {isLoading && (
         <div className="chat-sse-state loading" role="status">正在生成回答…</div>
@@ -280,6 +292,8 @@ export function ChatPanel({
   afterSalesPrompt,
   onPromptConsumed,
   batchId,
+  autoQueryBatch,
+  locale = "zh",
 }: {
   onStart: () => void;
   onDone: () => void;
@@ -290,8 +304,12 @@ export function ChatPanel({
   afterSalesPrompt?: string;
   onPromptConsumed?: () => void;
   batchId: string | null;
+  /** Run the same real Agent query as the batch selector when a consumer searches above the chat. */
+  autoQueryBatch?: string | null;
+  locale?: "zh" | "en";
 }) {
   const { messages, ask, pushUser, pushAgent } = useChatStream();
+  const en = locale === "en";
   const { address, chainId, executeOnChainAction, txBusy } = useWallet();
   const walletReady = Boolean(address && chainId === 677);
   const [input, setInput] = useState("");
@@ -309,6 +327,7 @@ export function ChatPanel({
   const chatLogRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
+  const lastAutoQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!afterSalesPrompt) return;
@@ -334,6 +353,12 @@ export function ChatPanel({
       await ask(question, "");
     }
   };
+
+  useEffect(() => {
+    if (!autoQueryBatch || lastAutoQueryRef.current === autoQueryBatch || busy) return;
+    lastAutoQueryRef.current = autoQueryBatch;
+    void runVerify(`查询批次 ${autoQueryBatch}`, autoQueryBatch);
+  }, [autoQueryBatch, busy]);
 
   const recommend = async (text: string) => {
     setInput("");
@@ -469,26 +494,26 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>TruthPass Agent 客服</strong>
+          <strong>{en ? "TruthPass Product Agent" : "TruthPass Agent 客服"}</strong>
           <small>
-            <span className="status-dot" title="在线" />
-            解释资料来源 · 告诉你不确定的地方 · 给出下一步
+            <span className="status-dot" title={en ? "Online" : "在线"} />
+            {en ? "Explains sources · shows uncertainty · gives the next step" : "解释资料来源 · 告诉你不确定的地方 · 给出下一步"}
           </small>
         </div>
       </div>
 
       <div className="chat-log" ref={chatLogRef} aria-live="polite">
         <div className="msg agent">
-          <div className="chat-meta" aria-label="欢迎语元信息">
-            <span className="status-pill demo">演示资料</span>
-            <span className="status-pill pending">商品助手</span>
+          <div className="chat-meta" aria-label={en ? "Welcome message metadata" : "欢迎语元信息"}>
+            <span className="status-pill demo">{en ? "Demo data" : "演示资料"}</span>
+            <span className="status-pill pending">{en ? "Product Agent" : "商品助手"}</span>
           </div>
           <div className="msg-bubble">
             <div className="agent-structured-answer" aria-label="Agent 回答结构">
-              <section className="agent-answer-section agent-answer-结论"><strong>结论</strong><p>我帮你看商品依据，不替任何一方做质量承诺。</p></section>
-              <section className="agent-answer-section agent-answer-依据"><strong>依据</strong><p>生产、检测、运输和售后资料都按批次整理。</p></section>
-              <section className="agent-answer-section agent-answer-不确定"><strong>不确定</strong><p>当前鱼油资料是演示资料，不能替代真实认证。</p></section>
-              <section className="agent-answer-section agent-answer-下一步"><strong>下一步</strong><p>先选择批次，或者直接问我“还缺什么资料”。</p></section>
+              <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "结论"}</strong><p>{en ? "I will show the product evidence without making a quality promise for anyone." : "我帮你看商品依据，不替任何一方做质量承诺。"}</p></section>
+              <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "依据"}</strong><p>{en ? "Production, testing, delivery, and aftercare records are grouped by batch." : "生产、检测、运输和售后资料都按批次整理。"}</p></section>
+              <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "不确定"}</strong><p>{en ? "This fish oil record is synthetic demo data and is not certification." : "当前鱼油资料是演示资料，不能替代真实认证。"}</p></section>
+              <section className="agent-answer-section agent-answer-下一步"><strong>{en ? "Next step" : "下一步"}</strong><p>{en ? "Choose a batch or ask me what evidence is still missing." : "先选择批次，或者直接问我“还缺什么资料”。"}</p></section>
             </div>
           </div>
         </div>
@@ -507,17 +532,17 @@ export function ChatPanel({
 
       <div className="chat-quick">
         <div className="quick-group">
-          <span className="chat-quick-label">批次查询：</span>
+          <span className="chat-quick-label">{en ? "Batch:" : "批次查询："}</span>
           <div className="batch-select">
             <button
               className="batch-trigger"
               type="button"
-              aria-label="选择演示批次"
+              aria-label={en ? "Choose demo batch" : "选择演示批次"}
               aria-expanded={batchOpen}
               onClick={() => setBatchOpen((v) => !v)}
               disabled={busy}
             >
-              选择批次 <span aria-hidden="true">▾</span>
+              {en ? "Choose batch" : "选择批次"} <span aria-hidden="true">▾</span>
             </button>
             {batchOpen && (
               <div className="batch-menu">
@@ -525,10 +550,10 @@ export function ChatPanel({
                   <button
                     key={b.id}
                     type="button"
-                    aria-label={`查询批次 ${b.id} ${b.name}`}
+                    aria-label={`${en ? "Inspect batch" : "查询批次"} ${b.id} ${b.name}`}
                     onClick={() => {
                       setBatchOpen(false);
-                      runVerify(`查询批次 ${b.id}`, b.id);
+                      runVerify(`${en ? "Inspect batch" : "查询批次"} ${b.id}`, b.id);
                     }}
                   >
                     <b>{b.id}</b>
@@ -541,8 +566,8 @@ export function ChatPanel({
         </div>
         {batchId && (
           <div className="quick-group">
-            <span className="chat-quick-label">你想了解：</span>
-            {QUICK_PROMPTS.map((prompt) => (
+            <span className="chat-quick-label">{en ? "Ask about:" : "你想了解："}</span>
+            {(en ? QUICK_PROMPTS.map((prompt) => ({ ...prompt, label: prompt.label === "检测" ? "Testing" : prompt.label === "运输" ? "Delivery" : prompt.label === "缺口" ? "Missing" : prompt.label === "链状态" ? "Chain" : prompt.label, q: prompt.q })) : QUICK_PROMPTS).map((prompt) => (
               <button
                 key={prompt.label}
                 type="button"
@@ -560,15 +585,15 @@ export function ChatPanel({
         )}
         {batchId && (
           <div className="quick-group">
-            <span className="chat-quick-label">IoT 模拟：</span>
-            <button type="button" aria-label="模拟正常温度" onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>正常温度</button>
-            <button type="button" aria-label="模拟冷链异常" onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>冷链异常</button>
-            <button type="button" aria-label="模拟设备离线" onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>设备离线</button>
+            <span className="chat-quick-label">{en ? "Sensor simulation:" : "IoT 模拟："}</span>
+            <button type="button" aria-label={en ? "Simulate normal temperature" : "模拟正常温度"} onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>{en ? "Normal" : "正常温度"}</button>
+            <button type="button" aria-label={en ? "Simulate cold-chain gap" : "模拟冷链异常"} onClick={() => simulateIot("cold_chain_gap")} disabled={busy || iotBusy}>{en ? "Cold-chain gap" : "冷链异常"}</button>
+            <button type="button" aria-label={en ? "Simulate offline device" : "模拟设备离线"} onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>{en ? "Offline" : "设备离线"}</button>
           </div>
         )}
         {sensorRun && (
           <div className="sensor-transfer-card" aria-live="polite">
-            <div className="sensor-transfer-head"><div><span className="chat-quick-label">服务器模拟传感</span><strong>{sensorRun.mode === "normal" ? "温控正常" : sensorRun.mode === "cold_chain_gap" ? "冷链异常" : "设备离线"}</strong></div><span className={`sensor-check-pill ${sensorRun.verification?.status === "accepted" ? "pass" : "review"}`}>{sensorRun.verification?.status === "accepted" ? "校验通过" : "进入复核"}</span></div>
+            <div className="sensor-transfer-head"><div><span className="chat-quick-label">{en ? "Server sensor replay" : "服务器模拟传感"}</span><strong>{sensorRun.mode === "normal" ? (en ? "Temperature normal" : "温控正常") : sensorRun.mode === "cold_chain_gap" ? (en ? "Cold-chain gap" : "冷链异常") : (en ? "Device offline" : "设备离线")}</strong></div><span className={`sensor-check-pill ${sensorRun.verification?.status === "accepted" ? "pass" : "review"}`}>{sensorRun.verification?.status === "accepted" ? (en ? "Verified" : "校验通过") : (en ? "Needs review" : "进入复核")}</span></div>
             <div className="sensor-transfer-steps">{sensorRun.pipeline.map((step, index) => <span key={step} className={index === sensorRun.pipeline.length - 1 ? "done" : ""}><b>{index + 1}</b>{step}{index < sensorRun.pipeline.length - 1 && <i>→</i>}</span>)}</div>
             <p>{sensorRun.message}</p>
             <small>证据编号 {sensorRun.evidenceId} · payload 已生成摘要 · {sensorRun.verification?.status ?? "待校验"}</small>
@@ -581,7 +606,7 @@ export function ChatPanel({
           type="button"
           className={listening ? "voice-btn listening" : "voice-btn"}
           onClick={toggleVoice}
-          aria-label={listening ? "停止语音输入" : "开始语音输入"}
+          aria-label={listening ? (en ? "Stop voice input" : "停止语音输入") : (en ? "Start voice input" : "开始语音输入")}
           disabled={busy}
         >
           {listening ? "⏺" : "🎤"}
@@ -590,12 +615,12 @@ export function ChatPanel({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={listening ? "正在聆听，请说话…" : "输入商品名或批次号，例如：鱼油 / FO-2026-001"}
+          placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? "Ask about a product or batch, e.g. fish oil / FO-2026-001" : "输入商品名或批次号，例如：鱼油 / FO-2026-001")}
           autoComplete="off"
           disabled={busy}
-          aria-label="Agent 问题输入框"
+          aria-label={en ? "Agent question" : "Agent 问题输入框"}
         />
-        <button type="submit" aria-label="发送问题" disabled={busy}>
+        <button type="submit" aria-label={en ? "Send question" : "发送问题"} disabled={busy}>
           ➤
         </button>
       </form>

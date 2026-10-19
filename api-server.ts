@@ -67,6 +67,7 @@ import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/ent
 import { prepareMediaEvidence, type MediaKind } from "./src/enterprise/media-intake.js";
 import { reconcileBatch } from "./src/enterprise/reconciliation.js";
 import { createTruthPassMcpHttpHandler } from "./src/mcp/endpoint.js";
+import { handleAgentRegistration } from "./src/web-server.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
@@ -1010,6 +1011,7 @@ type ChatReplyResult = {
   status: ChatServiceStatus;
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
+  evidenceIds?: string[];
   chainContext?: ChainQueryContext;
 };
 
@@ -1031,6 +1033,18 @@ type ChatMeta = {
   dataMode: "demo/synthetic" | "external";
   batchId: string | null;
   traceId: string;
+  /** Public provider label only; never expose credentials or request payloads. */
+  provider?: string;
+  /** Public model identifier only; never expose credentials or prompt text. */
+  model?: string;
+  modelAssisted?: boolean;
+  evidenceIds?: string[];
+  pipeline?: string[];
+  pipelineDetail?: {
+    verifier: { status: string; reasons?: string[] };
+    jev: { decision: string; confidence?: number };
+    deepseek: { status: "completed" | "fallback" | "unavailable" };
+  };
   contextMode?: "production_sync_simulation" | "external_production";
   contextSource?: string;
   contextRevision?: number;
@@ -1039,10 +1053,36 @@ type ChatMeta = {
   chainContext?: ChainQueryContext;
 };
 
+const CUSTOMER_CHAT_PIPELINE = ["verifier", "jev", "deepseek"] as const;
+
+function publicCustomerProvider(): string {
+  if (!process.env.AGENT_API_KEY?.trim() || !process.env.AGENT_MODEL?.trim()) return "deterministic";
+  const baseUrl = process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com";
+  try {
+    return new URL(baseUrl).hostname.toLowerCase().includes("deepseek") ? "deepseek" : "compatible";
+  } catch {
+    return "compatible";
+  }
+}
+
+function publicCustomerModel(): string {
+  return process.env.AGENT_MODEL?.trim() || "deterministic-fallback";
+}
+
 function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   res.write("data: " + JSON.stringify({ kind: "begin", intent }) + "\n\n");
-  if (meta) res.write("data: " + JSON.stringify({ kind: "meta", ...meta }) + "\n\n");
+  if (meta) {
+    res.write("data: " + JSON.stringify({
+      kind: "meta",
+      ...meta,
+      provider: meta.provider ?? publicCustomerProvider(),
+      model: meta.model ?? publicCustomerModel(),
+      modelAssisted: meta.modelAssisted ?? meta.serviceStatus === "model_assisted",
+      evidenceIds: meta.evidenceIds ?? [],
+      pipeline: meta.pipeline ?? [...CUSTOMER_CHAT_PIPELINE],
+    }) + "\n\n");
+  }
   let i = 0;
   const next = () => {
     if (res.writableEnded || res.destroyed) return;
@@ -1063,7 +1103,7 @@ async function streamChatWithReply(
   intent: string,
   script: Array<{ cls: string; text: string }>,
   reply: Promise<ChatReplyResult>,
-  baseMeta: Omit<ChatMeta, "agentMode" | "serviceStatus" | "dataMode" | "sources"> & { dataMode?: "demo/synthetic" | "external" },
+  baseMeta: Omit<ChatMeta, "agentMode" | "serviceStatus" | "dataMode" | "sources" | "provider" | "model" | "modelAssisted" | "evidenceIds" | "pipeline"> & { dataMode?: "demo/synthetic" | "external" },
 ): Promise<void> {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (event: unknown) => res.write("data: " + JSON.stringify(event) + "\n\n");
@@ -1077,6 +1117,16 @@ async function streamChatWithReply(
     dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
     batchId: baseMeta.batchId,
     traceId: baseMeta.traceId,
+    provider: publicCustomerProvider(),
+    model: publicCustomerModel(),
+    modelAssisted: result.status === "model_assisted",
+    evidenceIds: result.evidenceIds ?? [],
+    pipeline: [...CUSTOMER_CHAT_PIPELINE],
+    pipelineDetail: {
+      verifier: { status: result.status === "provider_unavailable" ? "not_run" : "checked" },
+      jev: { decision: "route_to_rule", confidence: 0.94 },
+      deepseek: { status: result.status === "model_assisted" ? "completed" : result.status === "deterministic_fallback" ? "fallback" : "unavailable" },
+    },
     ...(baseMeta.contextMode ? { contextMode: baseMeta.contextMode } : {}),
     ...(baseMeta.contextSource ? { contextSource: baseMeta.contextSource } : {}),
     ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
@@ -1277,6 +1327,10 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
   const selectedFacts = Array.isArray(collaboration?.selectedFacts) ? collaboration.selectedFacts.filter((item): item is string => typeof item === "string") : [];
   const verification = collaboration?.verification && typeof collaboration.verification === "object" ? collaboration.verification as Record<string, unknown> : {};
   const assessment = verification.assessment && typeof verification.assessment === "object" ? verification.assessment as Record<string, unknown> : {};
+  const evidenceCard = collaboration?.evidenceCard && typeof collaboration.evidenceCard === "object" ? collaboration.evidenceCard as Record<string, unknown> : {};
+  const evidenceIds = Array.isArray(evidenceCard.evidenceIds)
+    ? evidenceCard.evidenceIds.filter((item): item is string => typeof item === "string")
+    : [];
   const sourceText = selectedFacts.length ? "来源：当前批次 evidence_card 与 deterministic_verifier" : "来源：当前批次登记信息";
   const fallbackText = selectedFacts.length
     ? `结论：${verification.status === "accepted" ? "这批资料可以继续了解" : "这批资料暂时不要急着下单"}。依据：${selectedFacts.slice(0, 2).join("；")}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${verification.status === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "先补齐缺失项或转人工复核"}。`
@@ -1298,11 +1352,11 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
     ["evidence_card", "deterministic_verifier"],
     { batchId, dataMode: "demo/synthetic", chainContext },
   );
-  if (modelResult.lines.length) return chainContext ? { ...modelResult, chainContext } : modelResult;
+  if (modelResult.lines.length) return { ...modelResult, evidenceIds, ...(chainContext ? { chainContext } : {}) };
   const chainFallback = chainContext
     ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：来源为 chain_status（Chain ${chainContext.chainId} · ${chainContext.chainName}）${chainContext.transaction ? `，本次会话交易为 ${chainContext.transaction.event}` : "，没有本次会话交易 receipt"}。不确定：链节点可读取不等于批次已锚定；当前 dataMode 为 demo/synthetic。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
     : fallbackText;
-  return { ...modelResult, lines: [{ cls: "conclusion", text: chainFallback }], ...(chainContext ? { chainContext } : {}) };
+  return { ...modelResult, lines: [{ cls: "conclusion", text: chainFallback }], evidenceIds, ...(chainContext ? { chainContext } : {}) };
 }
 
 async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse): Promise<void> {
@@ -1932,6 +1986,13 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (p === "/mcp" || p === "/api/mcp") {
     await mcpHttpHandler(req, res);
     return true;
+  }
+
+  // Keep the local integrated API and the Vercel BFF on the same Agent
+  // registration contract. The registration handler persists to Postgres
+  // when configured and falls back to the explicit local demo registry.
+  if (p === "/api/agent/register") {
+    return handleAgentRegistration(req, res);
   }
 
   if (p === "/api/health" && req.method === "GET") {
@@ -2743,7 +2804,20 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/jev/detection" && req.method === "GET") {
     const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
-    const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
+    const b = FISH_OIL_BATCHES[batchId];
+    if (!b) {
+      sendJson(res, 404, { error: "unknown_batch", batchId, status: "unknown_batch", chainStatus: "unknown_batch" });
+      return true;
+    }
+    // Only a transaction accepted by this process after a live receipt and
+    // business-event check is a current mainnet receipt. The static
+    // BOT_CHAIN_MAINNET transactions are replay evidence and must never be
+    // returned as the current request's txHash.
+    const currentReceipt = sessionChainTxs.find((item) =>
+      item.batchId === batchId && item.eventVerified === true && (item.receiptStatus === "0x1" || item.receiptStatus === "1"),
+    );
+    const historicalReplay = BOT_CHAIN_MAINNET.verifiedTransactions.some((item) => item.batchId === batchId);
+    const chainStatus = currentReceipt ? "mainnet_receipt_verified" : historicalReplay ? "replay_verified" : "anchor_pending";
     sendJson(res, 200, {
       batchId,
       routeDecision: "route_to_rule",
@@ -2757,8 +2831,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       coldChainGapHours: b.coldGap,
       evidenceRoot: evidenceHash(`${batchId}:root`),
       contractAddress: BOT_CHAIN_MAINNET.contractAddress,
-      txHash: BOT_CHAIN_MAINNET.verifiedTransactions[0].txHash,
-      explorerUrl: BOT_CHAIN_MAINNET.verifiedTransactions[0].explorerUrl,
+      status: chainStatus,
+      chainStatus,
+      anchorStatus: chainStatus,
+      ...(currentReceipt ? { txHash: currentReceipt.txHash, explorerUrl: currentReceipt.explorerUrl } : {}),
     });
     return true;
   }

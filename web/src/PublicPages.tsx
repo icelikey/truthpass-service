@@ -1,13 +1,17 @@
 import { useState, type ReactNode } from "react";
+import { DesignPreviewGallery } from "./components/DesignPreviewGallery";
+import { RiceCasePage } from "./components/RiceCasePage";
 
-type PublicRoute = "zh-home" | "zh-developers" | "en-home" | "en-merchant" | "en-developers";
+type PublicRoute = "zh-home" | "zh-developers" | "zh-institution" | "en-home" | "en-merchant" | "en-institution" | "en-developers";
 
-const routeMap: Record<PublicRoute, { zh: boolean; home: string; developers: string; merchant: string }> = {
-  "zh-home": { zh: true, home: "/", developers: "/developers", merchant: "/merchant" },
-  "zh-developers": { zh: true, home: "/", developers: "/developers", merchant: "/merchant" },
-  "en-home": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant" },
-  "en-merchant": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant" },
-  "en-developers": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant" },
+const routeMap: Record<PublicRoute, { zh: boolean; home: string; developers: string; merchant: string; institution: string }> = {
+  "zh-home": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "zh-developers": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "zh-institution": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "en-home": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-merchant": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-institution": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-developers": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
 };
 
 function Brand({ route, compact = false }: { route: PublicRoute; compact?: boolean }) {
@@ -29,16 +33,17 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
       <nav className="tp-public-nav" aria-label={zh ? "主导航" : "Primary navigation"}>
         <a className={active === "home" ? "active" : ""} href={links.home}>{zh ? "首页" : "Home"}</a>
         <a href={zh ? "/?view=consumer#agent" : "/en?view=consumer#agent"}>{zh ? "商品查询" : "Products"}</a>
+        <a href={zh ? "/cases/rice" : "/en/cases/rice"}>{zh ? "案例：大米" : "Case: rice"}</a>
         <a href={links.merchant} className={active === "merchant" ? "active" : ""}>{zh ? "解决方案" : "Solutions"}</a>
-        <a href={zh ? "/institution" : "/en/institution"}>{zh ? "机构入口" : "Institutions"}</a>
+        <a className={route.includes("institution") ? "active" : ""} href={links.institution}>{zh ? "机构入口" : "Institutions"}</a>
         <a href={links.developers} className={active === "developers" ? "active" : ""}>{zh ? "开发者" : "Developers"}</a>
         <a href={links.home + "#about"}>{zh ? "关于我们" : "About"}</a>
       </nav>
       <div className="tp-header-actions">
         <span className="tp-search-mark" aria-hidden="true">⌕</span>
         <div className="tp-language-switch" aria-label={zh ? "语言" : "Language"}>
-          <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : "/"}>中文</a>
-          <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : "/en"}>English</a>
+          <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : route.includes("institution") ? "/institution" : "/"}>中文</a>
+          <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : route.includes("institution") ? "/en/institution" : "/en"}>English</a>
         </div>
         <a className="tp-outline-btn" href={`/?view=consumer&auth=1#agent`}>{zh ? "登录" : "Sign in"}</a>
       </div>
@@ -99,6 +104,8 @@ const developerCopy = {
     ready: "已连接",
     unavailable: "暂时无法连接",
     statusHint: "公开查询无需 Token；受保护操作会要求企业身份。",
+    capabilityTitle: "四种公开能力",
+    capabilityBody: "先查清楚，再决定是否需要身份和签名。",
   },
   en: {
     eyebrow: "DEVELOPER ACCESS · OPEN EVIDENCE",
@@ -136,6 +143,8 @@ const developerCopy = {
     ready: "Connected",
     unavailable: "Unavailable",
     statusHint: "Public inspection is open. Protected actions require an enterprise identity.",
+    capabilityTitle: "Four capabilities, one clear path",
+    capabilityBody: "Inspect first. Ask for identity and a signature only when a write is needed.",
   },
 };
 
@@ -210,26 +219,57 @@ function DeveloperCard({ route, kind }: { route: PublicRoute; kind: "mcp" | "cli
   );
 }
 
+function CapabilityCard({ route, icon, title, body, action, href, protectedAction = false }: { route: PublicRoute; icon: string; title: string; body: string; action: string; href: string; protectedAction?: boolean }) {
+  const zh = routeMap[route].zh;
+  return (
+    <article className="tp-capability-card">
+      <span className="tp-capability-icon" aria-hidden="true">{icon}</span>
+      <div>
+        <h3>{title}</h3>
+        <p>{body}</p>
+        <span className={protectedAction ? "tp-capability-state protected" : "tp-capability-state"}>{protectedAction ? (zh ? "需要身份与签名" : "Identity + signature") : (zh ? "公开只读" : "Public read-only")}</span>
+      </div>
+      <a className="tp-text-link" href={href}>{action} →</a>
+    </article>
+  );
+}
+
 export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-developers" | "en-developers" }) {
   const zh = routeMap[route].zh;
   const copy = zh ? developerCopy.zh : developerCopy.en;
   const [status, setStatus] = useState<"idle" | "checking" | "ready" | "error">("idle");
   const [statusText, setStatusText] = useState("");
+  const capabilities = zh
+    ? [
+      { icon: "⌂", title: "查询商品", body: "按商品身份读取公开资料和来源。", action: "打开商品查询", href: "/?view=consumer#agent" },
+      { icon: "▣", title: "查询批次", body: "查看生产、检测、运输和反馈是否对应。", action: "查询 FO-2026-001", href: "/?view=consumer&batch=FO-2026-001#agent" },
+      { icon: "◇", title: "查询链状态", body: "区分历史回放、等待上链和真实回执。", action: "查看链状态", href: "/?view=consumer&batch=FO-2026-001#chain" },
+      { icon: "⚿", title: "执行受保护操作", body: "需要企业或机构钱包确认，Agent 不代签。", action: "查看钱包规则", href: "/institution", protectedAction: true },
+    ]
+    : [
+      { icon: "⌂", title: "Inspect a product", body: "Read public evidence by product identity.", action: "Open product query", href: "/en?view=consumer#agent" },
+      { icon: "▣", title: "Inspect a batch", body: "Check production, testing, delivery, and feedback links.", action: "Inspect FO-2026-001", href: "/en?view=consumer&batch=FO-2026-001#agent" },
+      { icon: "◇", title: "Check chain status", body: "Separate replay history, pending anchors, and real receipts.", action: "View chain status", href: "/en?view=consumer&batch=FO-2026-001#chain" },
+      { icon: "⚿", title: "Run a protected action", body: "Enterprise or institution wallets must confirm. Agents never sign.", action: "See wallet rules", href: "/en/institution", protectedAction: true },
+    ];
+
   const checkStatus = async () => {
     setStatus("checking");
     try {
       const response = await fetch("/api/agent/status", { headers: { Accept: "application/json" } });
-      const data = await response.json() as { status?: string; agentMode?: string; dataMode?: string };
+      const data = await response.json() as { status?: string; agentMode?: string; dataMode?: string; model?: string };
       if (!response.ok || data.status !== "ready") throw new Error("unavailable");
       setStatus("ready");
-      setStatusText(`${data.agentMode ?? "ready"} · ${data.dataMode ?? "demo/synthetic"}`);
+      setStatusText(`${data.agentMode ?? "ready"} · ${data.model ?? data.dataMode ?? "demo/synthetic"}`);
     } catch {
       setStatus("error");
       setStatusText("");
     }
   };
+
   return <PageFrame route={route} active="developers"><main className="tp-developer-main">
     <section className="tp-developer-hero"><p className="tp-kicker">{copy.eyebrow}</p><h1>{copy.title}<span aria-hidden="true">{zh ? "。" : ""}</span></h1><p>{copy.intro}</p><div className="tp-hero-rule" /></section>
+    <section className="tp-capability-section" aria-labelledby="capability-title"><div className="tp-section-head"><div><p className="tp-kicker" id="capability-title">{copy.capabilityTitle}</p><p className="tp-capability-intro">{copy.capabilityBody}</p></div><span>{zh ? "公开查 · 需要签名才写" : "Read open · sign to write"}</span></div><div className="tp-capability-grid">{capabilities.map((item) => <CapabilityCard key={item.title} route={route} {...item} />)}</div></section>
     <section className="tp-developer-grid" aria-label={zh ? "开发者工具" : "Developer tools"}><DeveloperCard route={route} kind="mcp" /><DeveloperCard route={route} kind="cli" /></section>
     <section className="tp-install-panel" aria-labelledby="install-title"><div><p className="tp-kicker" id="install-title">{copy.installTitle}</p><p>{copy.installBody}</p></div><div className="tp-install-panel-actions"><CopyButton value={copy.installCommand} label={copy.copyCommand} copiedLabel={copy.copiedCommand} /><a className="tp-text-link" href="/downloads/truthpass-cli.zip" download>{copy.install} ↓</a></div></section>
     <AgentRuntime copy={copy} />
@@ -258,13 +298,24 @@ function EnglishMerchantPage() {
   const cards = [
     ["Production", "Recorded", "Supplier and batch origin"],
     ["Testing", "Awaiting confirmation", "Lab report and quality checks"],
-    ["Delivery", "Recorded", "Traceable handoff"],
-    ["Aftercare", "Awaiting confirmation", "Service and feedback"],
+    ["Cold chain", "Awaiting confirmation", "Temperature and handoff record"],
+    ["Shipment", "Recorded", "Traceable dispatch and receipt"],
+    ["Purchase", "Pending", "Customer proof is created at checkout"],
+    ["Aftercare", "Awaiting confirmation", "Service, returns, and feedback"],
+    ["Review", "Open", "A responsible institution can confirm or challenge"],
   ];
-  return <PageFrame route="en-merchant" active="merchant"><main className="tp-merchant-main"><section className="tp-merchant-hero"><div><p className="tp-kicker">FOR BUSINESS · PRODUCT RECORDS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>One product.<br /><span>A complete record.</span></h1><p>From production to aftercare, keep each handoff visible and useful.</p></div><a className="tp-red-btn" href="/merchant">Open merchant workspace&nbsp; →</a></section><section className="tp-merchant-lifecycle"><div className="tp-section-head"><div><p className="tp-kicker">LIFECYCLE</p><h2>Make the evidence legible.</h2></div><span>FO-2026-001 · DEMO</span></div><div className="tp-lifecycle-track">{cards.map(([title, status, detail], index) => <article key={title} className={status === "Recorded" ? "recorded" : "awaiting"}><span className="tp-lifecycle-node">{index + 1}</span><strong>{title}</strong><b>{status}</b><small>{detail}</small></article>)}</div></section><section className="tp-merchant-summary"><article><span>Current product</span><h2>Deep Sea Fish Oil</h2><p>Production, testing, delivery — clearly recorded.</p></article><article><span>Evidence completeness</span><strong>78%</strong><p>2 items still need confirmation.</p></article><article><span>Next action</span><strong>Review testing report</strong><p>Give the record a clear, dated update.</p></article></section></main></PageFrame>;
+  return <PageFrame route="en-merchant" active="merchant"><main className="tp-merchant-main">
+    <section className="tp-merchant-hero"><div><p className="tp-kicker">FOR BUSINESS · PRODUCT RECORDS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>One product.<br /><span>A complete record.</span></h1><p>Speak, scan, or upload. Your agent turns the material into a batch record you can review before anyone signs.</p><div className="tp-merchant-hero-actions"><a className="tp-red-btn" href="/merchant">Open merchant workspace&nbsp; →</a><a className="tp-paper-btn" href="/en?view=consumer&batch=FO-2026-001#agent">View the sample record</a></div></div><aside className="tp-merchant-promise"><span>WHO OWNS THE NEXT STEP?</span><strong>Every gap<br />has an owner.</strong><small>Agent organizes the record. Your team and the assigned institution confirm it.</small></aside></section>
+    <section className="tp-merchant-lifecycle"><div className="tp-section-head"><div><p className="tp-kicker">LIFECYCLE · FO-2026-001</p><h2>Make the evidence legible.</h2><p className="tp-section-intro">One timeline from production to review. Missing items stay visible until someone handles them.</p></div><span>DEMO / SYNTHETIC</span></div><div className="tp-lifecycle-track">{cards.map(([title, status, detail], index) => <article key={title} className={status === "Recorded" ? "recorded" : status === "Open" ? "review" : "awaiting"}><span className="tp-lifecycle-node">{index + 1}</span><strong>{title}</strong><b>{status}</b><small>{detail}</small></article>)}</div></section>
+    <section className="tp-merchant-summary"><article><span>Current product</span><h2>Deep Sea Fish Oil</h2><p>Production and shipment records are present. Testing and cold-chain evidence still need confirmation.</p></article><article><span>Evidence completeness</span><strong>78%</strong><p>2 open gaps are assigned to the next responsible party.</p></article><article><span>Agent report</span><strong>Review first</strong><p>Ask the institution to confirm the testing report before publishing a final claim.</p></article></section>
+    <section className="tp-merchant-next"><div><p className="tp-kicker">NEXT STEP</p><h2>Start with one batch.</h2><p>Connect the business wallet only when you are ready to confirm a record. Read-only preparation stays available without a wallet.</p></div><a className="tp-red-btn" href="/merchant">Continue in workspace →</a></section>
+  </main></PageFrame>;
 }
 
 export function PublicPageRouter({ pathname }: { pathname: string }) {
+  if (pathname === "/design-preview") return <DesignPreviewGallery />;
+  if (pathname === "/cases/rice") return <RiceCasePage locale="zh" />;
+  if (pathname === "/en/cases/rice") return <RiceCasePage locale="en" />;
   if (pathname === "/") return <ChineseLandingPage />;
   if (pathname === "/developers") return <DeveloperPage />;
   if (pathname === "/en/developers") return <DeveloperPage route="en-developers" />;

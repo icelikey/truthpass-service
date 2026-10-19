@@ -154,7 +154,30 @@ test("customer service exposes status and SSE runtime metadata", async () => {
     assert.match(stream, /"kind":"meta"/);
     assert.match(stream, /"serviceStatus":"deterministic_fallback"/);
     assert.match(stream, /"traceId":"chat-test-001"/);
+    assert.match(stream, /"provider":"deterministic"/);
+    assert.match(stream, /"model":"deterministic-fallback"/);
+    assert.match(stream, /"modelAssisted":false/);
+    assert.match(stream, /"evidenceIds":\[\]/);
+    assert.match(stream, /"pipeline":\["verifier","jev","deepseek"\]/);
     assert.match(stream, /"kind":"done"/);
+  });
+});
+
+test("JEV detection separates replay history from current receipt state", async () => {
+  await withServer(async (baseUrl) => {
+    const replayResponse = await fetch(`${baseUrl}/api/jev/detection?batchId=FO-2026-001`);
+    const replay = await replayResponse.json() as Record<string, any>;
+    assert.equal(replayResponse.status, 200);
+    assert.equal(replay.status, "replay_verified");
+    assert.equal(replay.chainStatus, "replay_verified");
+    assert.equal(replay.txHash, undefined);
+    assert.equal(replay.explorerUrl, undefined);
+
+    const pendingResponse = await fetch(`${baseUrl}/api/jev/detection?batchId=FO-2026-002`);
+    const pending = await pendingResponse.json() as Record<string, any>;
+    assert.equal(pendingResponse.status, 200);
+    assert.equal(pending.status, "anchor_pending");
+    assert.equal(pending.txHash, undefined);
   });
 });
 

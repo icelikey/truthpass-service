@@ -267,6 +267,59 @@ function agentRegistryAuthorized(request: IncomingMessage): { authorized: boolea
   return { authorized: authorization === "Bearer " + expected, authMode: "configured" };
 }
 
+/**
+ * Handle Agent registration independently from the legacy web router.
+ *
+ * `api-server.ts` is also used as the local integrated API entrypoint, while
+ * Vercel dispatches through `src/web-server.ts`. Keeping this small handler
+ * shared prevents the two entrypoints from exposing different registration
+ * contracts (the local entrypoint used to return 404 here).
+ */
+export async function handleAgentRegistration(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+  if (request.method !== "POST" && request.method !== "GET") return false;
+
+  const access = agentRegistryAuthorized(request);
+  if (!access.authorized) {
+    sendJson(response, 401, { error: "AGENT_REGISTRATION_AUTH_REQUIRED" });
+    return true;
+  }
+
+  try {
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      const tenantHeader = typeof request.headers["x-truthpass-tenant"] === "string" ? request.headers["x-truthpass-tenant"] : "";
+      if (tenantHeader && body.tenantId === undefined) body.tenantId = tenantHeader;
+      const record = await buildAgentRegistration(body);
+      sendJson(response, 201, {
+        schemaVersion: "truthpass.agent.registration.v1",
+        status: agentRegistryMode() === "postgres" ? "registered_persistent" : "registered_local",
+        authMode: access.authMode,
+        registryMode: agentRegistryMode(),
+        dataClass: record.dataClass,
+        agent: record,
+        chainStatus: "not_submitted",
+        nextAction: "使用 registrationId 调用 consumer/inspection；生产环境再由 relayer 将身份承诺锚定到 BOT Chain。",
+      });
+      return true;
+    }
+
+    const agents = await listRegisteredAgents();
+    sendJson(response, 200, {
+      schemaVersion: "truthpass.agent.registry.v1",
+      dataClass: agents.some((agent) => agent.dataClass === "external") ? "external" : "demo/synthetic",
+      registryMode: agentRegistryMode(),
+      authMode: access.authMode,
+      count: agents.length,
+      agents,
+      chainStatus: "not_submitted",
+    });
+    return true;
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    return true;
+  }
+}
+
 function buildConsumerSummary(inspection: Record<string, unknown>): string {
   const status = inspection.status === "accepted" || inspection.status === "accepted_with_scope" ? "按当前规则通过验收" : "暂未通过当前规则";
   const dataClass = inspection.dataClass === "demo/synthetic" ? "当前为演示数据" : "当前为外部数据";
@@ -486,6 +539,10 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
     return true;
   }
 
+  if (url.pathname === "/api/agent/register") {
+    return handleAgentRegistration(request, response);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/health") {
     return sendJson(response, 200, { status: "ok", service: "truthpass-web-bff", batchId: BATCH_ID, chain: await getMainnetStatus() }), true;
   }
@@ -532,40 +589,6 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
         privateKeys: "off_chain",
         note: "演示环境允许匿名查询；生产环境应增加 Agent 身份认证和请求限流。",
       },
-    }), true;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/agent/register") {
-    const access = agentRegistryAuthorized(request);
-    if (!access.authorized) return sendJson(response, 401, { error: "AGENT_REGISTRATION_AUTH_REQUIRED" }), true;
-    const body = await readJson(request);
-    const tenantHeader = typeof request.headers["x-truthpass-tenant"] === "string" ? request.headers["x-truthpass-tenant"] : "";
-    if (tenantHeader && body.tenantId === undefined) body.tenantId = tenantHeader;
-    const record = await buildAgentRegistration(body);
-    return sendJson(response, 201, {
-      schemaVersion: "truthpass.agent.registration.v1",
-      status: agentRegistryMode() === "postgres" ? "registered_persistent" : "registered_local",
-      authMode: access.authMode,
-      registryMode: agentRegistryMode(),
-      dataClass: record.dataClass,
-      agent: record,
-      chainStatus: "not_submitted",
-      nextAction: "使用 registrationId 调用 consumer/inspection；生产环境再由 relayer 将身份承诺锚定到 BOT Chain。",
-    }), true;
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/agent/register") {
-    const access = agentRegistryAuthorized(request);
-    if (!access.authorized) return sendJson(response, 401, { error: "AGENT_REGISTRATION_AUTH_REQUIRED" }), true;
-    const agents = await listRegisteredAgents();
-    return sendJson(response, 200, {
-      schemaVersion: "truthpass.agent.registry.v1",
-      dataClass: agents.some((agent) => agent.dataClass === "external") ? "external" : "demo/synthetic",
-      registryMode: agentRegistryMode(),
-      authMode: access.authMode,
-      count: agents.length,
-      agents,
-      chainStatus: "not_submitted",
     }), true;
   }
 

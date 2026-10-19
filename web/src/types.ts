@@ -109,6 +109,16 @@ export interface ChatEvent {
   dataMode?: "demo/synthetic" | "external";
   batchId?: string | null;
   traceId?: string;
+  provider?: string;
+  model?: string;
+  modelAssisted?: boolean;
+  evidenceIds?: string[];
+  pipeline?: string[];
+  pipelineDetail?: {
+    verifier: { status: string; reasons?: string[] };
+    jev: { decision: string; confidence?: number };
+    deepseek: { status: "completed" | "fallback" | "unavailable" };
+  };
   contextMode?: "production_sync_simulation" | "external_production";
   contextSource?: string;
   contextRevision?: number;
@@ -178,6 +188,9 @@ export interface JevDetection {
   contractAddress?: string;
   txHash?: string;
   explorerUrl?: string;
+  status?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified";
+  chainStatus?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified";
+  anchorStatus?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified";
   answers?: {
     route: JevChoiceAnswer;
     evidence_scope: JevChoiceAnswer;

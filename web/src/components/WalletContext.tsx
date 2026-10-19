@@ -397,6 +397,15 @@ export function WalletProvider({
 
   const targetBatch = selectedBatch || activeBatchId || "FO-2026-001";
   const walletReady = Boolean(address && chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec && walletRole);
+  const walletNextStep = !address
+    ? "选择一个钱包开始连接"
+    : bindingStatus !== "bound_verified"
+      ? "选择身份并完成签名绑定"
+      : chainId !== BOT_CHAIN_NETWORK_PARAMS.chainIdDec
+        ? "切换到 BOT Chain Mainnet (Chain ID 677)"
+        : txBusy
+          ? "等待钱包确认并核验主网回执"
+          : "回到页面继续下一步操作";
   const batchOptions = [
     "FO-2026-001",
     "FO-2026-002",
@@ -437,7 +446,7 @@ export function WalletProvider({
             <div className="wallet-modal-header">
               <div>
                 <span className="wallet-eyebrow">BOT CHAIN MAINNET · CHAIN ID 677 (0x2a5)</span>
-                <h3>多钱包连接与主网链上交互中心</h3>
+                <h3>连接你的钱包</h3>
               </div>
               <button className="close-button" type="button" onClick={() => setWalletModalOpen(false)} aria-label="关闭">
                 ×
@@ -445,9 +454,34 @@ export function WalletProvider({
             </div>
 
             <p className="wallet-modal-desc">
-              支持连接 <strong>MetaMask</strong>、<strong>OKX Wallet</strong>、<strong>Binance Wallet</strong> 等 EVM 钱包，面向{" "}
-              <strong>BOT Chain Mainnet (Chain ID: 677)</strong> 主网合约进行真实 ABI 编码、钱包签名与交易核验。
+              连接 <strong>MetaMask</strong>、<strong>OKX Wallet</strong> 或 <strong>Binance Wallet</strong> 后，按提示完成身份绑定和网络检查。每次上链操作都会在你自己的钱包里确认。
             </p>
+            <p className="wallet-custody-note">TruthPass 不会自动创建或托管钱包；请使用你自己控制的钱包。</p>
+
+            <div className="wallet-summary-grid" aria-label="钱包状态摘要">
+              <div className="wallet-summary-item">
+                <span>连接</span>
+                <strong>{address ? `${walletName ?? "EVM 钱包"} · ${shortHex(address)}` : "尚未连接"}</strong>
+              </div>
+              <div className="wallet-summary-item">
+                <span>身份</span>
+                <strong>{bindingStatus === "bound_verified" && walletRole ? WALLET_ROLE_LABELS[walletRole] : "待绑定"}</strong>
+              </div>
+              <div className="wallet-summary-item">
+                <span>网络</span>
+                <strong>{chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec ? "BOT Chain · 677" : address ? `需要 Chain 677（当前 ${chainId ?? "未知"}）` : "连接后检查"}</strong>
+              </div>
+              <div className="wallet-summary-item wallet-summary-next">
+                <span>下一步</span>
+                <strong>{walletNextStep}</strong>
+              </div>
+            </div>
+            {(txStage || txError) && (
+              <div className={txError ? "wallet-next-step-status error" : "wallet-next-step-status"} role={txError ? "alert" : "status"}>
+                <strong>{txError ? "需要处理" : "当前进度"}</strong>
+                <span>{txError ?? txStage?.label}</span>
+              </div>
+            )}
 
             <div className="wallet-identity-card">
               <div className="wallet-section-head">
@@ -526,7 +560,19 @@ export function WalletProvider({
               </div>
               {!options.some((option) => option.detected) && (
                 <div className="wallet-plugin-notice" role="status">
-                  <div><strong>未检测到钱包插件</strong><small>先安装官方插件，安装完成后回到这里重新检测。</small></div>
+                  <div>
+                    <strong>未检测到钱包插件</strong>
+                    <small>先安装官方插件，安装完成后回到这里重新检测。</small>
+                    <div className="wallet-install-actions" aria-label="官方钱包安装入口">
+                      {options
+                        .filter((option) => option.kind === "metamask" || option.kind === "okx" || option.kind === "binance")
+                        .map((option) => (
+                          <a key={option.kind} className="wallet-install-cta" href={option.installUrl} target="_blank" rel="noreferrer">
+                            安装 {option.name} ↗
+                          </a>
+                        ))}
+                    </div>
+                  </div>
                   <button type="button" className="wallet-action-ghost" onClick={() => setOptions(discoverWalletOptions())}>重新检测插件</button>
                 </div>
               )}
@@ -544,8 +590,11 @@ export function WalletProvider({
               )}
             </div>
 
-            {/* 2. 真实产品功能链上交互 */}
-            <div className="wallet-section">
+            <details className="wallet-technical-details">
+              <summary>技术详情（链上操作、合约、Calldata、目标批次、主网记录）</summary>
+              <div className="wallet-technical-body">
+                {/* 2. 真实产品功能链上交互 */}
+                <div className="wallet-section">
               <div className="wallet-section-head">
                 <b>2. 商品确认和争议处理</b>
                 <span>
@@ -744,10 +793,10 @@ export function WalletProvider({
                   </a>
                 </div>
               )}
-            </div>
+                </div>
 
-            {/* 3. BOT Chain Mainnet (677) 主网已部署合约与可验证交易记录 */}
-            <div className="wallet-section">
+                {/* 3. BOT Chain Mainnet (677) 主网已部署合约与可验证交易记录 */}
+                <div className="wallet-section">
               <div className="wallet-section-head">
                 <b>3. 公开记录查询</b>
                 <span>
@@ -841,7 +890,9 @@ export function WalletProvider({
                   </div>
                 </>
               )}
-            </div>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       )}

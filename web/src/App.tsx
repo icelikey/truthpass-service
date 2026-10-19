@@ -22,6 +22,7 @@ import { fetchProduct, fetchVerification } from "./api";
 import { saveVerificationRecord } from "./lib/supabase";
 import type { VerifyState } from "./types";
 import { PublicPageRouter } from "./PublicPages";
+import { ConsumerExperiencePage } from "./components/ConsumerExperiencePage";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export default function App() {
   const isInstitutionRoute = pathname === "/institution" || pathname === "/en/institution";
   const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
   const authRequested = new URLSearchParams(window.location.search).get("auth") === "1";
-  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers"].includes(pathname)
+  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers", "/design-preview", "/cases/rice", "/en/cases/rice"].includes(pathname)
     && !authRequested
     && !((pathname === "/" || pathname === "/en") && isConsumerView);
 
@@ -144,6 +145,43 @@ export default function App() {
       <ModalProvider>
         <WalletProvider activeBatchId="FO-2026-001" onToast={showToast}>
           <MerchantApp />
+        </WalletProvider>
+      </ModalProvider>
+    );
+  }
+
+  // The public consumer query is a focused, plain-language experience. The
+  // older evidence console remains available through the explicit /web-demo
+  // entry point and is not used for the public batch flow.
+  if ((pathname === "/" || pathname === "/en") && isConsumerView) {
+    return (
+      <ModalProvider>
+        <WalletProvider activeBatchId={batchId} onToast={showToast}>
+          <ConsumerExperiencePage
+            locale={pathname === "/en" ? "en" : "zh"}
+            batchId={batchId}
+            verifyState={verifyState}
+            stage={consumerStage}
+            userEmail={user?.email ?? null}
+            onOpenAuth={() => setAuthOpen(true)}
+            onOpenHistory={() => setHistoryOpen(true)}
+            onSignOut={signOut}
+            onStart={() => {
+              setVerifyState("running");
+              setConsumerStage("searching");
+            }}
+            onDone={handleDone}
+            onBatch={(id) => {
+              setBatchId(id);
+              setConsumerStage("batch_selected");
+            }}
+            onPurchasePrepared={() => setConsumerStage("purchase_prepared")}
+            onWalletPending={() => setConsumerStage("wallet_pending")}
+            onReceiptVerified={() => setConsumerStage("receipt_verified")}
+          />
+          <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuth={handleAuth} configured={authConfigured} />
+          <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
+          {toast && <div className="toast" role="status">{toast}</div>}
         </WalletProvider>
       </ModalProvider>
     );
