@@ -464,7 +464,19 @@ function weiQuantity(value: unknown, field: string, fallback = "0x38d7ea4c68000"
 }
 
 async function getBotChainMainnetStatus() {
-  refreshBotChainRpcInBackground();
+  // Serverless 实例没有可靠的跨请求内存。首次请求同步探测一次，
+  // 后续请求才使用短暂缓存并后台刷新，避免把“尚未探测”误报成在线。
+  if (!cachedRpcCheckedAt) {
+    try {
+      const res = await inspectBotChain();
+      cachedRpcReachable = res.contractCodePresent;
+    } catch {
+      cachedRpcReachable = false;
+    }
+    cachedRpcCheckedAt = new Date().toISOString();
+  } else {
+    refreshBotChainRpcInBackground();
+  }
   const rpcReady = cachedRpcReachable;
   return {
     network: BOT_CHAIN_MAINNET.network,

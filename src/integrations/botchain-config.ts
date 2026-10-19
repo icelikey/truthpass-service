@@ -150,14 +150,14 @@ export interface BotChainRpcResult {
   readOnly: true;
 }
 
-export async function inspectBotChain(fetchImpl: typeof fetch = fetch, config = BOT_CHAIN_MAINNET): Promise<BotChainRpcResult> {
+export async function inspectBotChain(fetchImpl: typeof fetch = fetch, config = BOT_CHAIN_MAINNET, timeoutMs = 5_000): Promise<BotChainRpcResult> {
   let requestId = 0;
   const rpc = async (method: string, params: unknown[]) => {
     const response = await fetchImpl(config.rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method, params }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error("BOT Chain RPC HTTP " + response.status);
     const body = await response.json() as { result?: string; error?: { message?: string } };
