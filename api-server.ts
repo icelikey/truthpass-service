@@ -1114,12 +1114,16 @@ function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContrac
 }
 
 function hasUnsupportedDemoClaim(text: string): boolean {
-  // A safe disclaimer such as “不能替代真实商品认证” is allowed. Only reject
-  // the same words when they are presented as a positive claim.
-  const withoutDisclaimers = text
-    .replace(/(?:不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无)[^。；;，,\n]{0,12}(?:真实认证|官方认证)/g, "")
-    .replace(/(?:不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无)[^。；;，,\n]{0,8}(?:已证明安全|安全无疑)/g, "");
-  return /(真实认证|官方认证|已证明安全|安全无疑)/.test(withoutDisclaimers);
+  // 安全免责声明可以出现这些词，但只能在同一句明确否定时放行。
+  const forbidden = /(真实认证|官方认证|已证明安全|安全无疑)/g;
+  const negation = /(不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无|不代表|不应|不得|不能把|不能直接)/;
+  for (const match of text.matchAll(forbidden)) {
+    const index = match.index ?? 0;
+    const sentenceStart = Math.max(0, text.slice(0, index).search(/[^。！？；;\n]*$/));
+    const prefix = text.slice(sentenceStart, index);
+    if (!negation.test(prefix)) return true;
+  }
+  return false;
 }
 
 function validConsumerModelText(text: string, contract?: ConsumerModelContract): boolean {
