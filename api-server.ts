@@ -1134,9 +1134,21 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
       if (typeof content !== "string" || !validConsumerModelText(content, contract)) {
-        const diagnostic = { event: "customer_service_provider_invalid_response", endpointHost: new URL(endpoint).host, at: new Date().toISOString() } as const;
+        const text = typeof content === "string" ? content.trim() : "";
+        const diagnostic = {
+          event: "customer_service_provider_invalid_response",
+          endpointHost: new URL(endpoint).host,
+          at: new Date().toISOString(),
+          hasContent: typeof content === "string",
+          length: text.length,
+          hasConclusion: /结论：/.test(text),
+          hasEvidence: /依据：/.test(text),
+          hasUncertainty: /不确定：/.test(text),
+          hasNextAction: /下一步：/.test(text),
+          containsForbiddenClaim: /(真实认证|官方认证|已证明安全|安全无疑)/.test(text),
+        } as const;
         lastCustomerModelDiagnostic = diagnostic;
-        console.warn(JSON.stringify({ ...diagnostic, hasContent: typeof content === "string" }));
+        console.warn(JSON.stringify(diagnostic));
         continue;
       }
       return { lines: [{ cls: "plain", text: content.trim() }], status: "model_assisted", dataMode: "demo/synthetic", sources };
