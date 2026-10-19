@@ -836,7 +836,14 @@ export async function handleApi(url: URL, request: IncomingMessage, response: Se
   }
 
   if (request.method === "GET" && url.pathname === "/api/jev/detection") {
-    const batchId = url.searchParams.get("batchId") ?? BATCH_ID;
+    const batchId = (url.searchParams.get("batchId") ?? BATCH_ID).trim().toUpperCase();
+    // Keep the legacy BFF honest as well as the integrated API: an unknown
+    // batch must not inherit the demo fixture and appear deterministically
+    // verified. Vercel normally reaches the integrated route first, but this
+    // entrypoint is still used by local `web:server` and older deployments.
+    if (batchId !== BATCH_ID) {
+      return sendJson(response, 404, { error: "unknown_batch", batchId, status: "unknown_batch", chainStatus: "unknown_batch" }), true;
+    }
     const inspection = await inspectBatch(batchId);
     const jev = inspection.jev && typeof inspection.jev === "object" ? inspection.jev as Record<string, unknown> : {};
     const decision = jev.decision && typeof jev.decision === "object" ? jev.decision as Record<string, unknown> : {};
