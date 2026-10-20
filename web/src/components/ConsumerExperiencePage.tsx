@@ -199,8 +199,8 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           </div>
           <div className="tp-consumer-evidence-column" id="evidence">
             <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "证据卡" : "EVIDENCE CARD"}</span><h2>{t.evidenceTitle}</h2></div>{batchId && <code>{batchId}</code>}</div>
-            <ProductPanel state={verifyState} batchId={batchId ?? "FO-2026-001"} />
-            <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} />
+            <ProductPanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
+            <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
           </div>
         </section>
 

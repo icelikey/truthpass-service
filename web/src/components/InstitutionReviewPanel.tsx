@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
+import type { TenantSiteConfig } from "../siteConfig";
 
 type ReviewAction = "inspection" | "review" | "arbitration";
 
@@ -31,7 +32,7 @@ const EN_ACTIONS: Record<ReviewAction, { title: string; detail: string; next: st
   },
 };
 
-export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en" }) {
+export function InstitutionReviewPanel({ locale = "zh", tenant }: { locale?: "zh" | "en"; tenant?: TenantSiteConfig }) {
   const { address, chainId, walletName, walletRole, bindingStatus, setWalletModalOpen, bindWalletRole, executeOnChainAction, txBusy, lastTx } = useWallet();
   const [active, setActive] = useState<ReviewAction>("inspection");
   const [message, setMessage] = useState("");
@@ -39,10 +40,21 @@ export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en"
   const action = useMemo(() => ACTIONS.find((item) => item.id === active) ?? ACTIONS[0], [active]);
   const walletReady = Boolean(address && chainId === 677 && bindingStatus === "bound_verified");
   const en = locale === "en";
+  const configuredBatch = tenant?.batch.defaultBatchId ?? "FO-2026-001";
+  const batchPrefix = configuredBatch.split("-")[0];
+  const queryBatch = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase() : null;
+  const batchId = queryBatch?.startsWith(`${batchPrefix}-`) ? queryBatch : configuredBatch;
+  const tenantId = tenant?.tenantId ?? "demo-tenant";
+  const productName = tenant?.product.name ?? (en ? "Hailan Nutrition · Deep Sea Fish Oil" : "海蓝营养 · 深海鱼油软胶囊");
+  const tenantHome = tenant ? (en ? `/en/sites/${tenant.slug}` : `/sites/${tenant.slug}`) : (en ? "/en" : "/");
+  const tenantInstitution = tenant ? `${tenantHome}/institution?batch=${encodeURIComponent(batchId)}` : (en ? "/en/institution" : "/institution");
+  const tenantLocaleHref = tenant
+    ? `${en ? `/sites/${tenant.slug}` : `/en/sites/${tenant.slug}`}/institution?batch=${encodeURIComponent(batchId)}`
+    : (en ? "/institution" : "/en/institution");
   const localizedAction = en ? EN_ACTIONS[action.id] : { title: action.title, detail: action.detail, next: action.next, role: WALLET_ROLE_LABELS[action.role] };
 
   const bind = async () => {
-    const ok = await bindWalletRole(action.role, "demo", authorizationToken.trim() || undefined);
+    const ok = await bindWalletRole(action.role, tenantId, authorizationToken.trim() || undefined);
     setMessage(ok
       ? (en ? `Bound ${localizedAction.role}; the next signature will include the batch and role.` : `已绑定${WALLET_ROLE_LABELS[action.role]}身份；下一次签名会带上批次和角色。`)
       : (en ? "Identity binding is incomplete. A real institution needs an administrator invitation and cannot self-declare a role." : "身份绑定未完成。真实机构需要管理员邀请令牌，不能自行声明角色。"));
@@ -56,7 +68,7 @@ export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en"
     }
     try {
       const chainAction = action.id === "inspection" ? "evidence" : action.id === "review" ? "verification" : "resolve_challenge";
-      await executeOnChainAction({ action: chainAction, batchId: "FO-2026-001", reason: action.id + ":institution-confirmation" });
+      await executeOnChainAction({ action: chainAction, batchId, reason: action.id + ":institution-confirmation" });
       setMessage(en ? "Wallet receipt verified. This institution action is now appended to the batch record." : "钱包回执已核验，这次机构操作已追加到批次记录。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (en ? "The wallet action was not confirmed." : "钱包操作没有确认成功。"));
@@ -66,14 +78,14 @@ export function InstitutionReviewPanel({ locale = "zh" }: { locale?: "zh" | "en"
   return (
     <main className="institution-shell">
       <header className="institution-header">
-        <a href={en ? "/en" : "/"} className="institution-brand">TRUTH<span>PASS</span></a>
+        <a href={tenantHome} className="institution-brand">TRUTH<span>PASS</span></a>
         <div><span className="eyebrow">INSTITUTION REVIEW</span><h1>{en ? "Review one batch. Keep every decision traceable." : "一批一查，出了问题找得到。"}</h1><p>{en ? "Inspection, review, and arbitration each leave a record. The agent organizes evidence; the assigned wallet confirms it." : "检测、审核、仲裁各自留下记录。Agent 只整理依据，最终确认由对应钱包完成。"}</p></div>
-        <div className="institution-header-actions"><a className="institution-language" href={en ? "/institution" : "/en/institution"}>{en ? "中文" : "English"}</a><button type="button" className="merchant-secondary" onClick={() => setWalletModalOpen(true)}>{address ? `${walletName ?? (en ? "Wallet" : "钱包")} · ${shortHex(address)}` : (en ? "Open institution wallet" : "打开机构钱包")}</button></div>
+        <div className="institution-header-actions"><a className="institution-language" href={tenantLocaleHref}>{en ? "中文" : "English"}</a><a className="institution-language" href={tenantInstitution}>{en ? "Current site" : "当前站点"}</a><button type="button" className="merchant-secondary" onClick={() => setWalletModalOpen(true)}>{address ? `${walletName ?? (en ? "Wallet" : "钱包")} · ${shortHex(address)}` : (en ? "Open institution wallet" : "打开机构钱包")}</button></div>
       </header>
 
       <section className="institution-status-card" aria-label="机构钱包状态">
         <div><span className="eyebrow">{en ? "Connected wallet" : "当前连接"}</span><strong>{address ? shortHex(address) : (en ? "Not connected" : "尚未连接")}</strong><small>{chainId === 677 ? "BOT Chain 677" : (en ? "Chain 677 required" : "需要 Chain 677")} · {bindingStatus === "bound_verified" ? (en ? "Identity bound" : "身份已绑定") : (en ? "Identity not bound" : "身份待绑定")}</small></div>
-        <div><span className="eyebrow">{en ? "Current batch" : "当前批次"}</span><strong>FO-2026-001</strong><small>{en ? "Hailan Nutrition · Deep Sea Fish Oil" : "海蓝营养 · 深海鱼油软胶囊"}</small></div>
+          <div><span className="eyebrow">{en ? "Current batch" : "当前批次"}</span><strong>{batchId}</strong><small>{productName}</small></div>
         <div><span className="eyebrow">{en ? "Data mode" : "资料模式"}</span><strong>DEMO / SYNTHETIC</strong><small>{en ? "Demo data is not certification. A signature records responsibility only." : "不能替代真实认证，签名只留下责任记录。"}</small></div>
       </section>
 

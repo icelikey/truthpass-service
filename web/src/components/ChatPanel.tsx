@@ -27,16 +27,38 @@ const QUICK_PROMPTS = [
   { label: "现在能不能继续了解？", q: "现在能不能继续了解？" },
   { label: "链上有没有记录？", q: "查看这批商品的链上状态" },
 ];
+const EN_QUICK_PROMPTS = [
+  { label: "What is this batch?", q: "What is this batch?" },
+  { label: "How do I read the test results?", q: "How do I read the test results?" },
+  { label: "Any delivery issues?", q: "Are there any delivery issues?" },
+  { label: "What evidence is missing?", q: "What evidence is still missing?" },
+  { label: "Can I continue?", q: "Can I continue learning about this batch?" },
+  { label: "Is there a chain record?", q: "Check the chain status for this batch" },
+];
+const RICE_BATCHES = [
+  { id: "RC-2026-001", name: "北境稻作 · 五常米" },
+  { id: "RC-2026-002", name: "北境稻作 · 复核批次" },
+  { id: "RC-2026-003", name: "北境稻作 · 已通过范围批次" },
+];
 
 type AgentSection = { label: "结论" | "依据" | "不确定" | "下一步"; text: string };
 
-function parseAgentSections(lines: ChatLine[]): AgentSection[] {
+function parseAgentSections(lines: ChatLine[], locale: "zh" | "en" = "zh"): AgentSection[] {
   const content = lines.map((line) => line.text.trim()).filter(Boolean).join(" ");
   if (!content) return [];
-  const matches = [...content.matchAll(/(结论|依据|不确定|下一步)\s*[:：]/g)];
+  const matches = [...content.matchAll(locale === "en" ? /(Conclusion|Evidence|Uncertain|Next step)\s*:\s*/gi : /(结论|依据|不确定|下一步)\s*[:：]/g)];
+  const canonical = (label: string): AgentSection["label"] => {
+    if (locale === "en") {
+      if (/^conclusion$/i.test(label)) return "结论";
+      if (/^evidence$/i.test(label)) return "依据";
+      if (/^uncertain$/i.test(label)) return "不确定";
+      return "下一步";
+    }
+    return label as AgentSection["label"];
+  };
   if (matches.length >= 2) {
     return matches.map((match, index) => ({
-      label: match[1] as AgentSection["label"],
+      label: canonical(match[1]),
       text: content.slice(match.index! + match[0].length, matches[index + 1]?.index ?? content.length).trim(),
     })).filter((section) => section.text.length > 0);
   }
@@ -102,6 +124,7 @@ function MessageView({
   onHandoff,
   txBusy,
   walletReady,
+  locale = "zh",
 }: {
   message: ChatMessage;
   onOrder: (item: RecommendItem) => void;
@@ -109,6 +132,7 @@ function MessageView({
   onHandoff: () => void;
   txBusy: boolean;
   walletReady: boolean;
+  locale?: "zh" | "en";
 }) {
   if (message.role === "user") {
     return (
@@ -119,25 +143,28 @@ function MessageView({
   }
 
   const agentMode = message.meta?.agentMode;
+  const en = locale === "en";
   const serviceStatus = message.meta?.serviceStatus ?? agentMode;
   const dataMode = message.meta?.dataMode ?? "demo/synthetic";
   const statusMeta = serviceStatusMeta(serviceStatus);
-  const agentLabel = agentMode === "model_assisted" ? "智能回答" : agentMode === "deterministic_fallback" ? "基础回答" : "商品助手";
+  const agentLabel = en
+    ? (agentMode === "model_assisted" ? "Model-assisted" : agentMode === "deterministic_fallback" ? "Evidence fallback" : "Product Agent")
+    : (agentMode === "model_assisted" ? "智能回答" : agentMode === "deterministic_fallback" ? "基础回答" : "商品助手");
   const isLoading = !message.done && message.lines.length === 0;
   const showHandoff =
     serviceStatus === "provider_unavailable" ||
     serviceStatus === "rate_limited" ||
     serviceStatus === "deterministic_fallback" ||
     Boolean(message.error);
-  const structuredSections = message.done ? parseAgentSections(message.lines) : [];
+  const structuredSections = message.done ? parseAgentSections(message.lines, locale) : [];
 
   return (
     <div className="msg agent">
-      <div className="chat-meta" aria-label="回答元信息">
+      <div className="chat-meta" aria-label={en ? "Answer metadata" : "回答元信息"}>
         <span className={`status-pill ${agentMode === "model_assisted" ? "verified" : "fallback"}`}>
           {agentLabel}
         </span>
-        <span className={`mode-badge ${dataMode === "external" ? "external" : ""}`}>{dataMode === "external" ? "真实资料" : "演示资料"}</span>
+        <span className={`mode-badge ${dataMode === "external" ? "external" : ""}`}>{dataMode === "external" ? (en ? "External data" : "真实资料") : (en ? "Demo data" : "演示资料")}</span>
         {statusMeta && serviceStatus !== agentMode && (
           <span className={`status-pill ${statusMeta.cls}`}>{statusMeta.pill}</span>
         )}
@@ -145,38 +172,38 @@ function MessageView({
           <span className="batch-id-chip"><code>{message.meta.batchId}</code></span>
         )}
         {message.meta?.contextRevision !== undefined && (
-          <span className="batch-id-chip">资料更新 v{message.meta.contextRevision}</span>
+          <span className="batch-id-chip">{en ? "Context" : "资料更新"} v{message.meta.contextRevision}</span>
         )}
         {message.meta?.chainContext && (
           <span className={`batch-id-chip chain-chat-chip ${message.meta.chainContext.rpcReachable ? "live" : "offline"}`}>
-            {message.meta.chainContext.rpcReachable ? "链在线" : "链暂不可读"} · {message.meta.chainContext.anchorStatus}
+            {message.meta.chainContext.rpcReachable ? (en ? "Chain online" : "链在线") : (en ? "Chain unavailable" : "链暂不可读")} · {message.meta.chainContext.anchorStatus}
           </span>
         )}
       </div>
       {(message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
         <details className="agent-trace-details">
-          <summary>回答依据 · {message.meta.modelAssisted ? `${message.meta.provider ?? "模型"} 已参与解释` : "基础回答"} </summary>
+          <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Evidence fallback" : "基础回答")} </summary>
           <div className="agent-trace-grid">
-            <span><b>模型</b>{message.meta.modelAssisted ? `${message.meta.provider ?? "兼容接口"} · ${message.meta.model ?? "已配置模型"}` : "deterministic fallback"}</span>
-            <span><b>流程</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? "规则核验" : stage === "jev" ? "JEV 分流" : stage === "deepseek" ? "DeepSeek 解释" : stage).join(" → ")}</span>
-            {message.meta.pipelineDetail && <span><b>结果</b>规则：{message.meta.pipelineDetail.verifier.status} · JEV：{message.meta.pipelineDetail.jev.decision} · 模型：{message.meta.pipelineDetail.deepseek.status}</span>}
-            <span><b>引用</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : "当前回答没有额外证据 ID"}</span>
+            <span><b>{en ? "Model" : "模型"}</b>{message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Compatible API" : "兼容接口")} · ${message.meta.model ?? (en ? "configured model" : "已配置模型")}` : "deterministic fallback"}</span>
+            <span><b>{en ? "Pipeline" : "流程"}</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? (en ? "Rule checks" : "规则核验") : stage === "jev" ? "JEV" + (en ? " routing" : " 分流") : stage === "deepseek" ? (en ? "DeepSeek explanation" : "DeepSeek 解释") : stage).join(" → ")}</span>
+            {message.meta.pipelineDetail && <span><b>{en ? "Result" : "结果"}</b>Verifier: {message.meta.pipelineDetail.verifier.status} · JEV: {message.meta.pipelineDetail.jev.decision} · Model: {message.meta.pipelineDetail.deepseek.status}</span>}
+            <span><b>{en ? "Citations" : "引用"}</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : (en ? "No additional evidence IDs" : "当前回答没有额外证据 ID")}</span>
             <span><b>Trace ID</b><code>{message.meta.traceId ?? "—"}</code></span>
           </div>
         </details>
       )}
 
       {isLoading && (
-        <div className="chat-sse-state loading" role="status">正在生成回答…</div>
+        <div className="chat-sse-state loading" role="status">{en ? "Generating an answer…" : "正在生成回答…"}</div>
       )}
       {!message.done && message.lines.length > 0 && (
-        <div className="chat-sse-state loading" role="status">流式输出中…</div>
+        <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
       {message.done && statusMeta?.sse === "fallback" && (
-        <div className="chat-sse-state fallback" role="status">当前使用基础回答，内容仍来自已登记资料。</div>
+        <div className="chat-sse-state fallback" role="status">{en ? "Using an evidence fallback. The content still comes from registered records." : "当前使用基础回答，内容仍来自已登记资料。"}</div>
       )}
       {message.done && statusMeta?.sse === "unavailable" && (
-        <div className="chat-sse-state unavailable" role="status">模型服务暂不可用，请稍后重试或转人工。</div>
+        <div className="chat-sse-state unavailable" role="status">{en ? "The model service is unavailable. Try again or request human support." : "模型服务暂不可用，请稍后重试或转人工。"}</div>
       )}
       {message.done && statusMeta?.sse === "rate-limited" && (
         <div className="chat-sse-state rate-limited" role="status">请求过于频繁（rate limited），请稍后再问。</div>
@@ -184,10 +211,10 @@ function MessageView({
 
       <div className="msg-bubble">
         {structuredSections.length > 0 ? (
-          <div className="agent-structured-answer" aria-label="Agent 回答结构">
+          <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
             {structuredSections.map((section, index) => (
               <section key={`${section.label}-${index}`} className={`agent-answer-section agent-answer-${section.label}`}>
-                <strong>{section.label}</strong>
+                <strong>{en ? ({ "结论": "Conclusion", "依据": "Evidence", "不确定": "Uncertain", "下一步": "Next step" }[section.label]) : section.label}</strong>
                 <p>{section.text}</p>
               </section>
             ))}
@@ -196,7 +223,7 @@ function MessageView({
           <LineView key={i} line={line} />
         ))}
         {!message.done && message.lines.length === 0 && (
-          <div className="thinking">TruthPass 正在整理证据与来源…</div>
+          <div className="thinking">{en ? "TruthPass is organizing the evidence and sources…" : "TruthPass 正在整理证据与来源…"}</div>
         )}
         {message.recommendations && (
           <div className="recommend-list">
@@ -285,6 +312,7 @@ function MessageView({
 export function ChatPanel({
   onStart,
   onDone,
+  onMeta,
   onBatch,
   onPurchasePrepared,
   onWalletPending,
@@ -293,10 +321,13 @@ export function ChatPanel({
   onPromptConsumed,
   batchId,
   autoQueryBatch,
+  autoQueryPrompt,
   locale = "zh",
+  productLabel,
 }: {
   onStart: () => void;
   onDone: () => void;
+  onMeta?: (meta: ChatMessage["meta"]) => void;
   onBatch: (id: string) => void;
   onPurchasePrepared?: () => void;
   onWalletPending?: () => void;
@@ -306,7 +337,10 @@ export function ChatPanel({
   batchId: string | null;
   /** Run the same real Agent query as the batch selector when a consumer searches above the chat. */
   autoQueryBatch?: string | null;
+  /** Optional prompt for a quick action while keeping the same batch scope. */
+  autoQueryPrompt?: string | null;
   locale?: "zh" | "en";
+  productLabel?: string;
 }) {
   const { messages, ask, pushUser, pushAgent } = useChatStream();
   const en = locale === "en";
@@ -327,6 +361,7 @@ export function ChatPanel({
   const chatLogRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
+  const batchOptions = productLabel?.includes("米") || productLabel?.toLowerCase().includes("rice") ? RICE_BATCHES : FISH_OIL_BATCHES;
   const lastAutoQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -339,6 +374,12 @@ export function ChatPanel({
     const el = chatLogRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    if (!onMeta) return;
+    const latestAgent = [...messages].reverse().find((message) => message.role === "agent" && message.meta);
+    onMeta(latestAgent?.meta);
+  }, [messages, onMeta]);
 
   const runVerify = async (question: string, batch?: string) => {
     if (!question.trim() || busy) return;
@@ -355,10 +396,12 @@ export function ChatPanel({
   };
 
   useEffect(() => {
-    if (!autoQueryBatch || lastAutoQueryRef.current === autoQueryBatch || busy) return;
-    lastAutoQueryRef.current = autoQueryBatch;
-    void runVerify(`查询批次 ${autoQueryBatch}`, autoQueryBatch);
-  }, [autoQueryBatch, busy]);
+    if ((!autoQueryBatch && !autoQueryPrompt) || busy) return;
+    const requestKey = `${autoQueryBatch ?? batchId ?? ""}:${autoQueryPrompt ?? "batch"}`;
+    if (lastAutoQueryRef.current === requestKey) return;
+    lastAutoQueryRef.current = requestKey;
+    void runVerify(autoQueryPrompt ?? `查询批次 ${autoQueryBatch}`, autoQueryBatch ?? batchId ?? undefined);
+  }, [autoQueryBatch, autoQueryPrompt, batchId, busy]);
 
   const recommend = async (text: string) => {
     setInput("");
@@ -509,10 +552,10 @@ export function ChatPanel({
             <span className="status-pill pending">{en ? "Product Agent" : "商品助手"}</span>
           </div>
           <div className="msg-bubble">
-            <div className="agent-structured-answer" aria-label="Agent 回答结构">
+            <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
               <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "结论"}</strong><p>{en ? "I will show the product evidence without making a quality promise for anyone." : "我帮你看商品依据，不替任何一方做质量承诺。"}</p></section>
               <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "依据"}</strong><p>{en ? "Production, testing, delivery, and aftercare records are grouped by batch." : "生产、检测、运输和售后资料都按批次整理。"}</p></section>
-              <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "不确定"}</strong><p>{en ? "This fish oil record is synthetic demo data and is not certification." : "当前鱼油资料是演示资料，不能替代真实认证。"}</p></section>
+              <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "不确定"}</strong><p>{en ? `This ${productLabel ?? "product"} record is synthetic demo data and is not certification.` : `当前${productLabel ?? "商品"}资料是演示资料，不能替代真实认证。`}</p></section>
               <section className="agent-answer-section agent-answer-下一步"><strong>{en ? "Next step" : "下一步"}</strong><p>{en ? "Choose a batch or ask me what evidence is still missing." : "先选择批次，或者直接问我“还缺什么资料”。"}</p></section>
             </div>
           </div>
@@ -526,6 +569,7 @@ export function ChatPanel({
             onHandoff={handleHandoff}
             txBusy={txBusy}
             walletReady={walletReady}
+            locale={locale}
           />
         ))}
       </div>
@@ -546,7 +590,7 @@ export function ChatPanel({
             </button>
             {batchOpen && (
               <div className="batch-menu">
-                {FISH_OIL_BATCHES.map((b) => (
+                {batchOptions.map((b) => (
                   <button
                     key={b.id}
                     type="button"
@@ -567,7 +611,7 @@ export function ChatPanel({
         {batchId && (
           <div className="quick-group">
             <span className="chat-quick-label">{en ? "Ask about:" : "你想了解："}</span>
-            {(en ? QUICK_PROMPTS.map((prompt) => ({ ...prompt, label: prompt.label === "检测" ? "Testing" : prompt.label === "运输" ? "Delivery" : prompt.label === "缺口" ? "Missing" : prompt.label === "链状态" ? "Chain" : prompt.label, q: prompt.q })) : QUICK_PROMPTS).map((prompt) => (
+            {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).map((prompt) => (
               <button
                 key={prompt.label}
                 type="button"
@@ -578,8 +622,8 @@ export function ChatPanel({
                 {prompt.label}
               </button>
             ))}
-            <button type="button" aria-label="请求人工客服接手" onClick={handleHandoff} disabled={busy}>
-              转人工
+            <button type="button" aria-label={en ? "Request human support" : "请求人工客服接手"} onClick={handleHandoff} disabled={busy}>
+              {en ? "Human support" : "转人工"}
             </button>
           </div>
         )}
@@ -596,7 +640,7 @@ export function ChatPanel({
             <div className="sensor-transfer-head"><div><span className="chat-quick-label">{en ? "Server sensor replay" : "服务器模拟传感"}</span><strong>{sensorRun.mode === "normal" ? (en ? "Temperature normal" : "温控正常") : sensorRun.mode === "cold_chain_gap" ? (en ? "Cold-chain gap" : "冷链异常") : (en ? "Device offline" : "设备离线")}</strong></div><span className={`sensor-check-pill ${sensorRun.verification?.status === "accepted" ? "pass" : "review"}`}>{sensorRun.verification?.status === "accepted" ? (en ? "Verified" : "校验通过") : (en ? "Needs review" : "进入复核")}</span></div>
             <div className="sensor-transfer-steps">{sensorRun.pipeline.map((step, index) => <span key={step} className={index === sensorRun.pipeline.length - 1 ? "done" : ""}><b>{index + 1}</b>{step}{index < sensorRun.pipeline.length - 1 && <i>→</i>}</span>)}</div>
             <p>{sensorRun.message}</p>
-            <small>证据编号 {sensorRun.evidenceId} · payload 已生成摘要 · {sensorRun.verification?.status ?? "待校验"}</small>
+            <small>{en ? "Evidence" : "证据编号"} {sensorRun.evidenceId} · {en ? "payload digest generated" : "payload 已生成摘要"} · {sensorRun.verification?.status ?? (en ? "pending" : "待校验")}</small>
           </div>
         )}
       </div>
@@ -615,7 +659,7 @@ export function ChatPanel({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? "Ask about a product or batch, e.g. fish oil / FO-2026-001" : "输入商品名或批次号，例如：鱼油 / FO-2026-001")}
+          placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? `Ask about ${productLabel ?? "a product"} or batch` : `输入${productLabel ?? "商品"}或批次号`)}
           autoComplete="off"
           disabled={busy}
           aria-label={en ? "Agent question" : "Agent 问题输入框"}

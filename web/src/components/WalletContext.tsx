@@ -23,6 +23,15 @@ export const WALLET_ROLE_LABELS: Record<WalletRole, string> = {
   arbitration: "仲裁方",
   enterprise_agent: "企业 Agent",
 };
+const WALLET_ROLE_LABELS_EN: Record<WalletRole, string> = {
+  consumer: "Consumer",
+  producer: "Producer",
+  inspection: "Inspection lab",
+  logistics: "Logistics",
+  review: "Reviewer",
+  arbitration: "Arbitrator",
+  enterprise_agent: "Enterprise Agent",
+};
 
 export interface WalletContextValue {
   address: string | null;
@@ -62,11 +71,14 @@ export function WalletProvider({
   children,
   activeBatchId,
   onToast,
+  locale = "zh",
 }: {
   children: ReactNode;
   activeBatchId: string | null;
   onToast: (msg: string) => void;
+  locale?: "zh" | "en";
 }) {
+  const en = locale === "en";
   const queryClient = useQueryClient();
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
@@ -326,7 +338,7 @@ export function WalletProvider({
 
       setTxBusy(true);
       try {
-        setTxStage({ step: 1, label: "第 1/3 步 · 正在准备真实主网交易…", detail: `批次 ${params.batchId}` });
+        setTxStage({ step: 1, label: en ? "Step 1/3 · Preparing the mainnet transaction…" : "第 1/3 步 · 正在准备真实主网交易…", detail: `${en ? "Batch " : "批次 "}${params.batchId}` });
         const ensuredChainId = await ensureBotChainMainnet(provider);
         setChainId(ensuredChainId);
         if (ensuredChainId !== BOT_CHAIN_NETWORK_PARAMS.chainIdDec) {
@@ -346,15 +358,15 @@ export function WalletProvider({
         const calldataHex = txReq.data;
         setTxStage({
           step: 2,
-          label: `第 2/3 步 · 请在 ${walletName ?? "钱包"} 中确认交易并支付 BOT Gas…`,
-          detail: `目标 ${shortHex(txReq.to, 10, 8)} · ${prepared.description}`,
+          label: en ? `Step 2/3 · Confirm the transaction in ${walletName ?? "your wallet"} and pay BOT Gas…` : `第 2/3 步 · 请在 ${walletName ?? "钱包"} 中确认交易并支付 BOT Gas…`,
+          detail: `${en ? "Target " : "目标 "}${shortHex(txReq.to, 10, 8)} · ${prepared.description}`,
         });
         const txHash = (await provider.request({
           method: "eth_sendTransaction",
           params: [{ from: address, to: txReq.to, data: txReq.data, value: txReq.value }],
         })) as string;
         if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error("钱包返回了无效交易哈希");
-        setTxStage({ step: 3, label: "第 3/3 步 · 等待 BOT Chain Mainnet 回执…", detail: shortHex(txHash, 12, 8) });
+        setTxStage({ step: 3, label: en ? "Step 3/3 · Waiting for the BOT Chain Mainnet receipt…" : "第 3/3 步 · 等待 BOT Chain Mainnet 回执…", detail: shortHex(txHash, 12, 8) });
         const receipt = await waitForTransactionReceipt(provider, txHash, 80, 1500);
         if (!receipt || receipt.status !== 1) throw new Error("交易未确认成功，请检查钱包余额、网络或回执状态");
         const confirmed = await confirmChainTx({
@@ -398,24 +410,25 @@ export function WalletProvider({
   const targetBatch = selectedBatch || activeBatchId || "FO-2026-001";
   const walletReady = Boolean(address && chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec && walletRole);
   const walletNextStep = !address
-    ? "选择一个钱包开始连接"
+    ? (en ? "Choose a wallet to connect" : "选择一个钱包开始连接")
     : bindingStatus !== "bound_verified"
-      ? "选择身份并完成签名绑定"
+      ? (en ? "Choose an identity and sign the binding" : "选择身份并完成签名绑定")
       : chainId !== BOT_CHAIN_NETWORK_PARAMS.chainIdDec
-        ? "切换到 BOT Chain Mainnet (Chain ID 677)"
+        ? (en ? "Switch to BOT Chain Mainnet (Chain ID 677)" : "切换到 BOT Chain Mainnet (Chain ID 677)")
         : txBusy
-          ? "等待钱包确认并核验主网回执"
-          : "回到页面继续下一步操作";
-  const batchOptions = [
-    "FO-2026-001",
-    "FO-2026-002",
-    "FO-2026-003",
-    "FO-2026-004",
-    "FO-2026-005",
-    "FO-2026-006",
-    "FO-2026-007",
-    "FO-2026-008",
-  ];
+          ? (en ? "Waiting for wallet confirmation and mainnet receipt" : "等待钱包确认并核验主网回执")
+          : (en ? "Return to the page for the next action" : "回到页面继续下一步操作");
+  // Keep the technical transaction selector inside the active tenant's
+  // batch namespace. A rice tenant must never be offered fish-oil batches
+  // (and vice versa), even though this modal is shared by every site.
+  const batchSeed = activeBatchId || selectedBatch || "FO-2026-001";
+  const batchMatch = /^([A-Z]+)-(\d{4})-(\d+)$/.exec(batchSeed);
+  const batchPrefix = batchMatch?.[1] ?? "FO";
+  const batchYear = batchMatch?.[2] ?? "2026";
+  const batchWidth = Math.max(3, batchMatch?.[3]?.length ?? 3);
+  const batchOptions = Array.from({ length: 8 }, (_, index) =>
+    `${batchPrefix}-${batchYear}-${String(index + 1).padStart(batchWidth, "0")}`,
+  );
 
   return (
     <WalletContext.Provider
@@ -446,39 +459,39 @@ export function WalletProvider({
             <div className="wallet-modal-header">
               <div>
                 <span className="wallet-eyebrow">BOT CHAIN MAINNET · CHAIN ID 677 (0x2a5)</span>
-                <h3>连接你的钱包</h3>
+                <h3>{en ? "Connect your wallet" : "连接你的钱包"}</h3>
               </div>
-              <button className="close-button" type="button" onClick={() => setWalletModalOpen(false)} aria-label="关闭">
+              <button className="close-button" type="button" onClick={() => setWalletModalOpen(false)} aria-label={en ? "Close" : "关闭"}>
                 ×
               </button>
             </div>
 
             <p className="wallet-modal-desc">
-              连接 <strong>MetaMask</strong>、<strong>OKX Wallet</strong> 或 <strong>Binance Wallet</strong> 后，按提示完成身份绑定和网络检查。每次上链操作都会在你自己的钱包里确认。
+              {en ? <>Connect <strong>MetaMask</strong>, <strong>OKX Wallet</strong>, or <strong>Binance Wallet</strong>, then follow the prompts to bind an identity and check the network. Every on-chain action is confirmed in your own wallet.</> : <>连接 <strong>MetaMask</strong>、<strong>OKX Wallet</strong> 或 <strong>Binance Wallet</strong> 后，按提示完成身份绑定和网络检查。每次上链操作都会在你自己的钱包里确认。</>}
             </p>
-            <p className="wallet-custody-note">TruthPass 不会自动创建或托管钱包；请使用你自己控制的钱包。</p>
+            <p className="wallet-custody-note">{en ? "TruthPass never creates or holds a wallet for you; use a wallet you control." : "TruthPass 不会自动创建或托管钱包；请使用你自己控制的钱包。"}</p>
 
-            <div className="wallet-summary-grid" aria-label="钱包状态摘要">
+            <div className="wallet-summary-grid" aria-label={en ? "Wallet status summary" : "钱包状态摘要"}>
               <div className="wallet-summary-item">
-                <span>连接</span>
-                <strong>{address ? `${walletName ?? "EVM 钱包"} · ${shortHex(address)}` : "尚未连接"}</strong>
+                <span>{en ? "Connection" : "连接"}</span>
+                <strong>{address ? `${walletName ?? (en ? "EVM wallet" : "EVM 钱包")} · ${shortHex(address)}` : (en ? "Not connected" : "尚未连接")}</strong>
               </div>
               <div className="wallet-summary-item">
-                <span>身份</span>
-                <strong>{bindingStatus === "bound_verified" && walletRole ? WALLET_ROLE_LABELS[walletRole] : "待绑定"}</strong>
+                <span>{en ? "Identity" : "身份"}</span>
+                <strong>{bindingStatus === "bound_verified" && walletRole ? (en ? WALLET_ROLE_LABELS_EN[walletRole] : WALLET_ROLE_LABELS[walletRole]) : (en ? "Not bound" : "待绑定")}</strong>
               </div>
               <div className="wallet-summary-item">
-                <span>网络</span>
-                <strong>{chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec ? "BOT Chain · 677" : address ? `需要 Chain 677（当前 ${chainId ?? "未知"}）` : "连接后检查"}</strong>
+                <span>{en ? "Network" : "网络"}</span>
+                <strong>{chainId === BOT_CHAIN_NETWORK_PARAMS.chainIdDec ? "BOT Chain · 677" : address ? (en ? `Chain 677 required (current ${chainId ?? "unknown"})` : `需要 Chain 677（当前 ${chainId ?? "未知"}）`) : (en ? "Checked after connection" : "连接后检查")}</strong>
               </div>
               <div className="wallet-summary-item wallet-summary-next">
-                <span>下一步</span>
+                <span>{en ? "Next step" : "下一步"}</span>
                 <strong>{walletNextStep}</strong>
               </div>
             </div>
             {(txStage || txError) && (
               <div className={txError ? "wallet-next-step-status error" : "wallet-next-step-status"} role={txError ? "alert" : "status"}>
-                <strong>{txError ? "需要处理" : "当前进度"}</strong>
+                <strong>{txError ? (en ? "Action required" : "需要处理") : (en ? "Current progress" : "当前进度")}</strong>
                 <span>{txError ?? txStage?.label}</span>
               </div>
             )}
@@ -486,14 +499,14 @@ export function WalletProvider({
             <div className="wallet-identity-card">
               <div className="wallet-section-head">
                 <div>
-                  <b>先确认你代表谁</b>
-                  <small>签名只证明当前钱包的控制权，不会发起转账。绑定后，页面会按身份显示可做的事。</small>
+                  <b>{en ? "Confirm who you represent" : "先确认你代表谁"}</b>
+                  <small>{en ? "A signature proves control of this wallet only; it does not transfer funds. After binding, available actions are shown for this identity." : "签名只证明当前钱包的控制权，不会发起转账。绑定后，页面会按身份显示可做的事。"}</small>
                 </div>
                 <span className={bindingStatus === "bound_verified" ? "wallet-connected-pill" : "wallet-disconnected-pill"}>
-                  {bindingStatus === "bound_verified" ? `✓ 已绑定：${walletRole ? WALLET_ROLE_LABELS[walletRole] : "已验证"}` : "尚未绑定身份"}
+                  {bindingStatus === "bound_verified" ? `✓ ${en ? "Bound: " : "已绑定："}${walletRole ? (en ? WALLET_ROLE_LABELS_EN[walletRole] : WALLET_ROLE_LABELS[walletRole]) : (en ? "Verified" : "已验证")}` : (en ? "Identity not bound" : "尚未绑定身份")}
                 </span>
               </div>
-              <div className="wallet-role-picker" role="list" aria-label="选择钱包身份">
+              <div className="wallet-role-picker" role="list" aria-label={en ? "Choose wallet identity" : "选择钱包身份"}>
                 {(Object.keys(WALLET_ROLE_LABELS) as WalletRole[]).map((role) => (
                   <button
                     key={role}
@@ -502,25 +515,25 @@ export function WalletProvider({
                     disabled={!address || bindingStatus === "binding"}
                     onClick={() => void bindWalletRole(role)}
                   >
-                    {WALLET_ROLE_LABELS[role]}
+                    {en ? WALLET_ROLE_LABELS_EN[role] : WALLET_ROLE_LABELS[role]}
                   </button>
                 ))}
               </div>
               <small className="wallet-binding-note">
-                {bindingStatus === "binding" ? "请在钱包弹窗中确认身份签名…" : bindingStatus === "error" ? "绑定未完成，请重新选择身份并签名。" : "没有对应身份权限时，相关操作不会完成。"}
+                {bindingStatus === "binding" ? (en ? "Confirm the identity signature in your wallet…" : "请在钱包弹窗中确认身份签名…") : bindingStatus === "error" ? (en ? "Binding did not complete. Choose an identity and sign again." : "绑定未完成，请重新选择身份并签名。") : (en ? "Actions require the corresponding identity permission." : "没有对应身份权限时，相关操作不会完成。")}
               </small>
             </div>
 
             {/* 1. 钱包选择器 */}
             <div className="wallet-section">
               <div className="wallet-section-head">
-                <b>1. 选择并连接 EVM 钱包</b>
+                <b>{en ? "1. Choose and connect an EVM wallet" : "1. 选择并连接 EVM 钱包"}</b>
                 {address ? (
                   <span className="wallet-connected-pill">
-                    ● 已连接 {walletName} · {shortHex(address)} · Chain {chainId ?? 677}
+                    ● {en ? "Connected" : "已连接"} {walletName} · {shortHex(address)} · Chain {chainId ?? 677}
                   </span>
                 ) : (
-                  <span className="wallet-disconnected-pill">未连接或未绑定身份（绑定后才会启用对应操作）</span>
+                  <span className="wallet-disconnected-pill">{en ? "Not connected or bound (actions unlock after binding)" : "未连接或未绑定身份（绑定后才会启用对应操作）"}</span>
                 )}
               </div>
               <div className="wallet-grid">
@@ -539,20 +552,20 @@ export function WalletProvider({
                           <strong>{opt.name}</strong>
                           <span className={opt.detected ? "wallet-badge detected" : "wallet-badge"}>
                             {isConnected
-                              ? "✓ 当前已连接"
+                              ? (en ? "✓ Connected" : "✓ 当前已连接")
                               : connecting && isSelected
-                                ? "⏳ 正在请求授权…"
+                                ? (en ? "⏳ Requesting authorization…" : "⏳ 正在请求授权…")
                                 : isSelected
-                                  ? "已选中"
+                                ? (en ? "Selected" : "已选中")
                                   : opt.detected
-                                    ? "已检测到插件"
-                                    : "未检测到插件"}
+                                    ? (en ? "Extension detected" : "已检测到插件")
+                                    : (en ? "Extension not detected" : "未检测到插件")}
                           </span>
                         </div>
                         <small>{opt.subtitle}</small>
                       </button>
                       {!opt.detected && <a className="wallet-install-link" href={opt.installUrl} target="_blank" rel="noreferrer">
-                        安装 {opt.name} 插件 ↗
+                        {en ? "Install " : "安装 "}{opt.name} {en ? "extension" : "插件"} ↗
                       </a>}
                     </div>
                   );
@@ -561,30 +574,30 @@ export function WalletProvider({
               {!options.some((option) => option.detected) && (
                 <div className="wallet-plugin-notice" role="status">
                   <div>
-                    <strong>未检测到钱包插件</strong>
-                    <small>先安装官方插件，安装完成后回到这里重新检测。</small>
-                    <div className="wallet-install-actions" aria-label="官方钱包安装入口">
+                    <strong>{en ? "No wallet extension detected" : "未检测到钱包插件"}</strong>
+                    <small>{en ? "Install an official extension, then return here to detect it again." : "先安装官方插件，安装完成后回到这里重新检测。"}</small>
+                    <div className="wallet-install-actions" aria-label={en ? "Official wallet installation links" : "官方钱包安装入口"}>
                       {options
                         .filter((option) => option.kind === "metamask" || option.kind === "okx" || option.kind === "binance")
                         .map((option) => (
                           <a key={option.kind} className="wallet-install-cta" href={option.installUrl} target="_blank" rel="noreferrer">
-                            安装 {option.name} ↗
+                            {en ? "Install " : "安装 "}{option.name} ↗
                           </a>
                         ))}
                     </div>
                   </div>
-                  <button type="button" className="wallet-action-ghost" onClick={() => setOptions(discoverWalletOptions())}>重新检测插件</button>
+                  <button type="button" className="wallet-action-ghost" onClick={() => setOptions(discoverWalletOptions())}>{en ? "Detect extensions again" : "重新检测插件"}</button>
                 </div>
               )}
               {address && (
                 <div className="wallet-bar-actions">
                   {chainId !== 677 && (
                     <button type="button" className="wallet-action-primary" onClick={switchToBotChain}>
-                      切换钱包网络至 BOT Chain Mainnet (Chain ID 677)
+                      {en ? "Switch wallet network to BOT Chain Mainnet (Chain ID 677)" : "切换钱包网络至 BOT Chain Mainnet (Chain ID 677)"}
                     </button>
                   )}
                   <button type="button" className="wallet-action-ghost" onClick={disconnectWallet}>
-                    断开钱包 ({shortHex(address)})
+                    {en ? "Disconnect wallet" : "断开钱包"} ({shortHex(address)})
                   </button>
                 </div>
               )}
@@ -768,7 +781,7 @@ export function WalletProvider({
                         公开记录位置：<code>{shortHex(lastTx.contractAddress, 8, 6)}</code>
                       </span>
                       <span>
-                        主网区块：<code>#{lastTx.blockNumber ?? 25873910}</code>
+                        主网区块：<code>{lastTx.blockNumber !== undefined ? `#${lastTx.blockNumber}` : "回执未返回区块号"}</code>
                       </span>
                     </div>
                     {lastTx.calldata && (
@@ -803,7 +816,7 @@ export function WalletProvider({
                   RPC:{" "}
                   <strong className={chainStatus?.liveRpc?.reachable ? "green-text" : "amber-text"}>
                     {chainStatus?.liveRpc?.reachable
-                      ? `在线 · 最新区块 #${chainStatus.liveRpc?.latestBlockNumber ?? 26438105}`
+                      ? `在线${chainStatus.liveRpc?.latestBlockNumber !== undefined ? ` · 最新区块 #${chainStatus.liveRpc.latestBlockNumber}` : " · 区块高度未读取"}`
                       : "https://rpc.botchain.ai"}
                   </strong>
                 </span>
@@ -845,7 +858,7 @@ export function WalletProvider({
 
                   <div className="mainnet-tx-list">
                     <div className="mainnet-tx-title">
-                      已验证的主网业务交易记录 (scan.botchain.ai)
+                      本会话 receipt 与历史回放凭证 (scan.botchain.ai)
                       {(chainStatus.sessionTransactions?.length ?? 0) > 0 && (
                         <span className="session-count-pill">
                           含本次会话新增 {chainStatus.sessionTransactions.length} 笔交互
@@ -860,17 +873,19 @@ export function WalletProvider({
                             label: `🟢 本次会话交互 · ${s.event} (${s.providerName || "Wallet"})`,
                             batchId: s.batchId,
                             txHash: s.txHash,
-                            blockNumber: s.blockNumber ?? 0,
+                            blockNumber: s.blockNumber,
                             contractAddress: s.contractAddress,
                             explorerUrl: s.explorerUrl,
                           })),
                           ...(chainStatus.verifiedTransactions ?? []).map((v, i) => ({
                             ...v,
+                            label: `历史回放凭证 · ${v.label}`,
                             rowKey: `ver-${i}-${v.txHash}`,
                           })),
                         ]
                       : (chainStatus.verifiedTransactions ?? []).map((v, i) => ({
                           ...v,
+                          label: `历史回放凭证 · ${v.label}`,
                           rowKey: `ver-${i}-${v.txHash}`,
                         }))
                     ).map((tx: any) => (
@@ -878,7 +893,7 @@ export function WalletProvider({
                         <div>
                           <b>{tx.label}</b>
                           <span>
-                            批次 {tx.batchId || "FO-2026-001"} · {tx.blockNumber ? `区块 #${tx.blockNumber}` : "实时广播"}
+                            批次 {tx.batchId || "未知"} · {tx.blockNumber ? `区块 #${tx.blockNumber}` : "回执区块未读取"}
                           </span>
                           <code>{tx.txHash}</code>
                         </div>

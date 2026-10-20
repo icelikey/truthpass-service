@@ -23,6 +23,8 @@ import { saveVerificationRecord } from "./lib/supabase";
 import type { VerifyState } from "./types";
 import { PublicPageRouter } from "./PublicPages";
 import { ConsumerExperiencePage } from "./components/ConsumerExperiencePage";
+import { TenantSitePage } from "./components/TenantSitePage";
+import { getTenantSite } from "./siteConfig";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -46,6 +48,13 @@ export default function App() {
   const toastTimer = useRef<number | undefined>(undefined);
   const inQueryMode = !!batchId;
   const pathname = window.location.pathname;
+  const tenantMatch = pathname.match(/^\/(en\/)?sites\/([^/]+)(?:\/([^/]+))?\/?$/);
+  const tenantSite = tenantMatch ? getTenantSite(tenantMatch[2]) : null;
+  const tenantLocale = tenantMatch?.[1] ? "en" : "zh";
+  const tenantView = (tenantMatch?.[3] || "home") as "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
+  const tenantBatchQuery = new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase() || "";
+  const tenantBatchPrefix = tenantSite?.batch.defaultBatchId.split("-")[0];
+  const tenantActiveBatch = tenantSite && tenantBatchQuery.startsWith(`${tenantBatchPrefix}-`) ? tenantBatchQuery : tenantSite?.batch.defaultBatchId ?? null;
   const isMerchantRoute = pathname.startsWith("/merchant");
   const isInstitutionRoute = pathname === "/institution" || pathname === "/en/institution";
   const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
@@ -127,7 +136,33 @@ export default function App() {
   };
 
   if (isPublicPageRoute) {
+    if (pathname === "/cases/rice" || pathname === "/en/cases/rice") {
+      const legacySite = getTenantSite("rice-demo")!;
+      const legacyLocale = pathname.startsWith("/en/") ? "en" : "zh";
+      return (
+        <ModalProvider>
+          <WalletProvider activeBatchId={legacySite.batch.defaultBatchId} onToast={showToast} locale={legacyLocale}>
+            <TenantSitePage site={legacySite} view="home" locale={legacyLocale} />
+            {toast && <div className="toast" role="status">{toast}</div>}
+          </WalletProvider>
+        </ModalProvider>
+      );
+    }
     return <PublicPageRouter pathname={pathname} />;
+  }
+
+  if (tenantMatch) {
+    if (!tenantSite || !["home", "agent", "wallet", "merchant", "institution", "developers", "preview"].includes(tenantView)) {
+      return <div className="tp-route-missing"><h1>404</h1><p>企业站点不存在，或页面还没有发布。</p><a href="/">回到 TruthPass</a></div>;
+    }
+    return (
+      <ModalProvider>
+          <WalletProvider activeBatchId={tenantActiveBatch} onToast={showToast} locale={tenantLocale as "zh" | "en"}>
+          <TenantSitePage site={tenantSite} view={tenantView} locale={tenantLocale as "zh" | "en"} />
+          {toast && <div className="toast" role="status">{toast}</div>}
+        </WalletProvider>
+      </ModalProvider>
+    );
   }
 
   if (isInstitutionRoute) {

@@ -76,6 +76,32 @@ const LEGACY_WEB = existsSync(join(WEB_DIST, "legacy")) ? join(WEB_DIST, "legacy
 const PORT = Number(process.env.PORT || 4173);
 const BATCH_ID = "FO-2026-001";
 const invokeAgent = createCompatibleAgentInvoker();
+type SiteLifecycleStatus = "draft" | "preview" | "published" | "archived";
+type ServerSiteRevision = { revisionId: string; status: SiteLifecycleStatus; createdAt: string; config: Record<string, unknown> };
+const siteStore = new Map<string, { config: Record<string, unknown>; revisions: ServerSiteRevision[] }>([
+  ["rice-demo", {
+    config: {
+      tenantId: "tenant-rice-demo", slug: "rice-demo", siteStatus: "published", templateVersion: "truthpass-site-v1",
+      brand: { name: "北境稻作", mark: "稻", slogans: { zh: "一粒米，先看证据。", en: "One grain. See the record first." } },
+      product: { productId: "rice-wuchang", name: "北境稻作 · 五常米", category: "粮食", demoMode: "demo/synthetic" },
+      batch: { defaultBatchId: "RC-2026-001", evidenceCategories: ["产地", "天气", "土壤", "农残检测", "仓储运输"] },
+      agent: { enabled: true, allowedTools: ["inspect_batch", "explain_batch", "lifecycle", "chain_status"] },
+      wallet: { chainId: 677, allowedRoles: ["consumer", "producer", "inspection", "review", "logistics", "arbitration"] },
+    },
+    revisions: [{ revisionId: "rice-demo-r1", status: "published", createdAt: new Date().toISOString(), config: {} }],
+  }],
+  ["fish-oil-demo", {
+    config: {
+      tenantId: "tenant-fish-oil-demo", slug: "fish-oil-demo", siteStatus: "published", templateVersion: "truthpass-site-v1",
+      brand: { name: "深海营养", mark: "海", slogans: { zh: "每一粒，都有依据。", en: "Every capsule has a record." } },
+      product: { productId: "fish-oil", name: "深海鱼油", category: "营养食品", demoMode: "demo/synthetic" },
+      batch: { defaultBatchId: "FO-2026-001", evidenceCategories: ["原料来源", "检测报告", "冷链", "出货记录"] },
+      agent: { enabled: true, allowedTools: ["inspect_batch", "explain_batch", "lifecycle", "chain_status"] },
+      wallet: { chainId: 677, allowedRoles: ["consumer", "producer", "inspection", "review", "logistics", "arbitration"] },
+    },
+    revisions: [{ revisionId: "fish-oil-demo-r1", status: "published", createdAt: new Date().toISOString(), config: {} }],
+  }],
+]);
 let lastCustomerModelDiagnostic: { endpointHost: string; status?: number; errorType?: string; event: string; at: string } | null = null;
 const publicPolicyRegistry = createDefaultProductPolicyRegistry();
 const anonymousConsumers = new AnonymousConsumerRegistry();
@@ -161,11 +187,23 @@ const assessment = await inspectionTools.assessProductBatch({ task, evidenceId: 
 
 // ---------- 多批次展示数据（demo 编造，001 走真实验收） ----------
 type HeavyMetals = { pb: number; hg: number; cd: number; as: number };
+type DemoBatch = {
+  name: string;
+  image: string;
+  epaDha: number;
+  peroxide: number;
+  totox: number;
+  coldGap: number;
+  productionDate: string;
+  origin: string;
+  passed: boolean;
+  heavyMetals: HeavyMetals;
+};
 
 const HEAVY_METAL_LIMITS: HeavyMetals = { pb: 0.5, hg: 0.1, cd: 0.1, as: 1.0 };
 const HEAVY_METAL_LABELS: Record<keyof HeavyMetals, string> = { pb: "铅 Pb", hg: "汞 Hg", cd: "镉 Cd", as: "砷 As" };
 
-const FISH_OIL_BATCHES: Record<string, { name: string; image: string; epaDha: number; peroxide: number; totox: number; coldGap: number; productionDate: string; origin: string; passed: boolean; heavyMetals: HeavyMetals }> = {
+const FISH_OIL_BATCHES: Record<string, DemoBatch> = {
   "FO-2026-001": { name: "深海鱼油软胶囊", image: "/assets/fish-oil-product.png", epaDha: 78, peroxide: 2.1, totox: 11, coldGap: 2, productionDate: "2026-01-12", origin: "北太平洋海域", passed: true, heavyMetals: { pb: 0.02, hg: 0.01, cd: 0.03, as: 0.1 } },
   "FO-2026-002": { name: "高纯度 Omega-3 鱼油", image: "/assets/fish-oil-002.png", epaDha: 82, peroxide: 1.8, totox: 9, coldGap: 1.5, productionDate: "2026-02-08", origin: "挪威海域", passed: true, heavyMetals: { pb: 0.01, hg: 0.02, cd: 0.02, as: 0.15 } },
   "FO-2026-003": { name: "儿童 DHA 鱼油滴剂", image: "/assets/fish-oil-003.png", epaDha: 90, peroxide: 1.2, totox: 6, coldGap: 3, productionDate: "2026-03-15", origin: "阿拉斯加海域", passed: true, heavyMetals: { pb: 0.03, hg: 0.01, cd: 0.01, as: 0.08 } },
@@ -177,6 +215,25 @@ const FISH_OIL_BATCHES: Record<string, { name: string; image: string; epaDha: nu
   "FO-2026-009": { name: "鱼油凝胶软糖", image: "/assets/fish-oil-009.png", epaDha: 55, peroxide: 2.5, totox: 12, coldGap: 2.5, productionDate: "2026-07-15", origin: "南太平洋海域", passed: false, heavyMetals: { pb: 0.04, hg: 0.02, cd: 0.05, as: 0.2 } },
   "FO-2026-010": { name: "高纯度磷虾油胶囊", image: "/assets/fish-oil-010.png", epaDha: 86, peroxide: 6.5, totox: 18, coldGap: 3, productionDate: "2026-07-28", origin: "南极海域", passed: false, heavyMetals: { pb: 0.05, hg: 0.03, cd: 0.15, as: 0.3 } },
 };
+
+// Rice is the first non-fish tenant example. It intentionally stays synthetic,
+// but it must exercise the same public product, evidence, lifecycle, JEV and
+// Agent paths so the tenant site is not a dead visual mock.
+const RICE_BATCHES: Record<string, DemoBatch> = {
+  "RC-2026-001": { name: "北境稻作 · 五常米", image: "/assets/brand-mark.png", epaDha: 0, peroxide: 0, totox: 0, coldGap: 0, productionDate: "2026-09-18", origin: "黑龙江五常 · 演示产地", passed: true, heavyMetals: { pb: 0.02, hg: 0.01, cd: 0.01, as: 0.05 } },
+  "RC-2026-002": { name: "北境稻作 · 复核批次", image: "/assets/brand-mark.png", epaDha: 0, peroxide: 0, totox: 0, coldGap: 0, productionDate: "2026-09-28", origin: "黑龙江五常 · 演示产地", passed: false, heavyMetals: { pb: 0.03, hg: 0.01, cd: 0.02, as: 0.08 } },
+  "RC-2026-003": { name: "北境稻作 · 已通过范围批次", image: "/assets/brand-mark.png", epaDha: 0, peroxide: 0, totox: 0, coldGap: 0, productionDate: "2026-10-04", origin: "黑龙江五常 · 演示产地", passed: true, heavyMetals: { pb: 0.01, hg: 0.01, cd: 0.01, as: 0.04 } },
+  "RC-2026-004": { name: "北境稻作 · 待补资料批次", image: "/assets/brand-mark.png", epaDha: 0, peroxide: 0, totox: 0, coldGap: 0, productionDate: "2026-10-10", origin: "黑龙江五常 · 演示产地", passed: false, heavyMetals: { pb: 0.04, hg: 0.02, cd: 0.03, as: 0.09 } },
+  "RC-2026-005": { name: "北境稻作 · 仓储复核批次", image: "/assets/brand-mark.png", epaDha: 0, peroxide: 0, totox: 0, coldGap: 0, productionDate: "2026-10-15", origin: "黑龙江五常 · 演示产地", passed: true, heavyMetals: { pb: 0.02, hg: 0.01, cd: 0.01, as: 0.05 } },
+};
+
+function demoBatchFor(batchId: string): DemoBatch | undefined {
+  return FISH_OIL_BATCHES[batchId] ?? RICE_BATCHES[batchId];
+}
+
+function isRiceBatch(batchId: string): boolean {
+  return batchId.toUpperCase().startsWith("RC-");
+}
 
 type LifecycleStage = "production" | "inspection" | "cold_chain" | "shipment" | "purchase" | "after_sales" | "regulatory_review";
 type LifecycleStatus = "synced" | "verified" | "pending" | "awaiting_user";
@@ -272,6 +329,15 @@ function metricsFor(batchId: string) {
       { key: "heavy-metal", icon: "alert", label: "重金属报告", value: "当前批次未登记", unit: "铅 / 汞 / 镉 / 砷", bar: 0, status: "missing" },
     ];
   }
+  if (isRiceBatch(batchId)) {
+    const rice = RICE_BATCHES[batchId] ?? RICE_BATCHES["RC-2026-001"];
+    return [
+      { key: "origin", icon: "sensor", label: "产地与土壤", value: rice.passed ? "已登记" : "待补资料", unit: "产地、土壤和种植记录", bar: rice.passed ? 92 : 56, status: rice.passed ? "pass" : "missing" },
+      { key: "weather", icon: "fish", label: "天气记录", value: rice.passed ? "已关联" : "部分缺失", unit: "播种至收获的气候记录", bar: rice.passed ? 88 : 45, status: rice.passed ? "pass" : "missing" },
+      { key: "pesticide", icon: "warning", label: "农残检测", value: rice.passed ? "达当前范围" : "待复核", unit: "第三方检测指标", bar: rice.passed ? 86 : 62, status: rice.passed ? "pass" : "fail" },
+      { key: "logistics", icon: "snowflake", label: "仓储运输", value: rice.passed ? "已覆盖" : "有缺口", unit: "仓储、出货与运输记录", bar: rice.passed ? 80 : 48, status: rice.passed ? "pass" : "missing" },
+    ];
+  }
   const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
   const hm = heavyMetalStatus(b.heavyMetals);
   return [
@@ -287,6 +353,16 @@ function numberValue(value: unknown): number | undefined {
 }
 
 function journeyFor(batchId: string) {
+  if (isRiceBatch(batchId)) {
+    const b = RICE_BATCHES[batchId] ?? RICE_BATCHES["RC-2026-001"];
+    return [
+      { step: 1, icon: "sensor", title: "产地与种植", desc: `${b.origin} · 种植记录` },
+      { step: 2, icon: "fish", title: "天气与土壤", desc: `${b.productionDate} · 田间资料关联` },
+      { step: 3, icon: "rule", title: "农残检测", desc: "第三方检测报告 · 当前范围核验" },
+      { step: 4, icon: "snowflake", title: "仓储运输", desc: "仓储、出货和运输记录 · 演示数据" },
+      { step: 5, icon: "chain", title: "批次摘要", desc: "Evidence Root · 等待外部钱包签名" },
+    ];
+  }
   const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
   return [
     { step: 1, icon: "fish", title: "产地捕捞", desc: `${b.origin} · 纯净深海` },
@@ -302,6 +378,17 @@ function evidenceHash(seed: string): string {
 }
 
 function evidenceFor(batchId: string) {
+  if (isRiceBatch(batchId)) {
+    const b = RICE_BATCHES[batchId] ?? RICE_BATCHES["RC-2026-001"];
+    const stamp = `${b.productionDate}T`;
+    return [
+      { step: 1, icon: "sensor", title: "种植资料", source: "生产方 · 产地 / 天气 / 土壤", description: "记录产地、播种、天气和土壤字段，绑定到当前大米批次。", hash: evidenceHash(`${batchId}:origin`), verifiedAt: `${stamp}08:30:00Z` },
+      { step: 2, icon: "agent", title: "Agent 关联", source: "TruthPass Agent · 批次关系整理", description: "Agent 只整理当前批次的生产、检测和物流资料，不替代规则核验。", hash: evidenceHash(`${batchId}:agent`), verifiedAt: `${stamp}12:00:00Z` },
+      { step: 3, icon: "jev", title: "JEV 判别", source: "JEV 决策门 · route_to_rule · 0.94", description: "识别缺失字段和冲突，决定继续解释、补资料或转人工复核。", hash: evidenceHash(`${batchId}:jev`), verifiedAt: `${stamp}13:40:00Z` },
+      { step: 4, icon: "rule", title: "规则验收", source: "rice-origin-policy@v1", description: "按批次、时间、样品和检测报告关系执行确定性检查。", hash: evidenceHash(`${batchId}:rule`), verifiedAt: `${stamp}14:00:00Z` },
+      { step: 5, icon: "chain", title: "链上摘要计划", source: "BOT Chain Mainnet (677) · anchor_pending", description: "原始报告留在链下，批次证据根等待外部钱包签名后锚定。", hash: evidenceHash(`${batchId}:root`), verifiedAt: `${stamp}14:05:00Z` },
+    ];
+  }
   const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
   const stamp = `${b.productionDate}T`;
   const verifiedEvidenceTx = BOT_CHAIN_MAINNET.verifiedTransactions[0];
@@ -326,6 +413,31 @@ function evidenceFor(batchId: string) {
 
 function productionProcessFor(batchId: string) {
   if (batchId === BATCH_ID) return productionSummary;
+  if (isRiceBatch(batchId)) {
+    const b = RICE_BATCHES[batchId] ?? RICE_BATCHES["RC-2026-001"];
+    return {
+      schemaVersion: "production.public.v1" as const,
+      dataMode: "demo/synthetic" as const,
+      status: b.passed ? "conformant" as const : "review" as const,
+      originRegion: b.origin,
+      sourceKinds: ["manufacturer", "third_party", "platform_device"] as const,
+      observedStageCount: b.passed ? 5 : 3,
+      requiredStageCount: 5,
+      stages: [
+        { stage: "origin", label: "产地登记", status: "observed" as const },
+        { stage: "weather", label: "天气记录", status: b.passed ? "observed" as const : "missing" as const },
+        { stage: "soil", label: "土壤记录", status: "observed" as const },
+        { stage: "pesticide", label: "农残检测", status: b.passed ? "observed" as const : "missing" as const },
+        { stage: "logistics", label: "仓储运输", status: b.passed ? "observed" as const : "not_covered" as const },
+      ],
+      missingStages: b.passed ? [] : ["天气或农残补充资料", "仓储运输覆盖"],
+      facts: [
+        { label: "产地", value: b.origin, stage: "origin", sourceKind: "manufacturer" },
+        { label: "生产日期", value: b.productionDate, stage: "origin", sourceKind: "manufacturer" },
+        { label: "检测模式", value: "演示第三方资料", stage: "pesticide", sourceKind: "third_party" },
+      ],
+    };
+  }
   const b = FISH_OIL_BATCHES[batchId];
   return { ...productionSummary, originRegion: b?.origin };
 }
@@ -1371,7 +1483,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
   }
 
   if (!batchId) {
-    const available = Object.keys(FISH_OIL_BATCHES).filter((id) => repository.getBatch(id));
+    const available = [...Object.keys(FISH_OIL_BATCHES), ...Object.keys(RICE_BATCHES)].filter((id) => repository.getBatch(id) || demoBatchFor(id));
     const fallback: ChatReplyResult = {
       lines: [{ cls: "plain", text: available.length ? "结论：我可以帮你查商品和批次。依据：当前服务已登记可查询批次；来源：customer_fallback。不确定：未提供批次号时无法核对具体证据。下一步：请提供商品名和批次号。" : "结论：目前不能核对具体批次。依据：系统未收到有效批次号；来源：customer_fallback。不确定：没有批次号就不能判断证据状态。下一步：请提供商品名和批次号。" }],
       status: "deterministic_fallback",
@@ -1383,7 +1495,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
     return;
   }
 
-  const b = FISH_OIL_BATCHES[batchId];
+  const b = demoBatchFor(batchId);
   if (!b) {
     streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "结论：暂时不能判断批次 " + batchId + "。依据：当前批次没有已登记证据；来源：batch_lookup。不确定：不会用其他批次的数据代替。下一步：请核对批次号，或转人工登记证据。" }], {
       agentMode: "deterministic_fallback",
@@ -1786,7 +1898,85 @@ async function loadAgentAuditRun(tenantId: string, runId: string): Promise<Recor
 
 async function runPublicAgentCollaboration(batchId: string, question: string, tenantId = "demo"): Promise<Record<string, unknown>> {
   const batch = repository.getBatch(batchId);
-  if (!batch) throw new Error("批次不存在: " + batchId);
+  if (!batch) {
+    const rice = RICE_BATCHES[batchId];
+    if (!rice) throw new Error("批次不存在: " + batchId);
+    const evidence: ConsumerEvidenceSnapshot["evidence"] = [
+      { evidenceId: `rice-origin-${batchId}`, kind: "production", issuerId: "rice-merchant-demo", sourceKind: "manufacturer", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
+      { evidenceId: `rice-inspection-${batchId}`, kind: "inspection", issuerId: "rice-lab-demo", sourceKind: "third_party", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
+      ...(rice.passed ? [{ evidenceId: `rice-storage-${batchId}`, kind: "cold_chain" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
+      ...(rice.passed ? [{ evidenceId: `rice-shipment-${batchId}`, kind: "shipment" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
+    ];
+    const snapshot: ConsumerEvidenceSnapshot = {
+      batchId,
+      dataMode: "demo/synthetic",
+      decision: rice.passed ? "accepted" : "not_assessed",
+      decisionReasons: rice.passed ? [] : ["天气、农残或仓储运输资料仍有缺口"],
+      evidence,
+    };
+    const card = answerConsumerQuestion(question, snapshot);
+    const selectedFactIds = card.facts.map((_, index) => `F${index}`);
+    const findings = [
+      { code: "batch_scoped", summary: "当前资料只绑定到这个大米批次。", sourceIds: evidence.slice(0, 1).map((item) => item.evidenceId) },
+      { code: rice.passed ? "scope_passed" : "evidence_gap", summary: rice.passed ? "当前演示规则范围内资料齐全。" : "当前演示批次仍有资料缺口，不能直接形成完整结论。", sourceIds: evidence.map((item) => item.evidenceId) },
+    ];
+    const verification = {
+      schemaVersion: "truthpass.cli.verification.v1",
+      status: rice.passed ? "accepted" : "missing_evidence",
+      dataClass: "demo/synthetic",
+      policy: { id: "rice-origin-policy", version: "v1" },
+      assessment: { status: rice.passed ? "accepted" : "missing_evidence", reasons: snapshot.decisionReasons },
+      reasons: snapshot.decisionReasons,
+      evidence: evidence.map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, sourceKind: item.sourceKind, status: item.status, dataMode: item.dataMode })),
+      evidenceRoot: evidenceHash(`${batchId}:root`),
+      anchor: { status: "anchor_pending", network: BOT_CHAIN_MAINNET.network, submitted: false, chainId: BOT_CHAIN_MAINNET.chainId, contractAddress: BOT_CHAIN_MAINNET.contractAddress },
+    };
+    const lifecycle = lifecyclePublicView(batchId);
+    const reportHash = evidenceHash(JSON.stringify({ batchId, question, verification, findings }));
+    const agentAudit = {
+      schemaVersion: "truthpass.agent.audit.v1",
+      runId: reportHash,
+      verifierVersion: "deterministic-verifier-v1",
+      records: [
+        { role: "production", inputEvidenceIds: evidence.filter((item) => item.kind === "production").map((item) => item.evidenceId), citedEvidenceIds: findings[0].sourceIds, outputStatus: "contract_validated", writeBoundary: "read_only_analysis" },
+        { role: "inspection", inputEvidenceIds: evidence.filter((item) => item.kind !== "production").map((item) => item.evidenceId), citedEvidenceIds: evidence.map((item) => item.evidenceId), outputStatus: "contract_validated", writeBoundary: "read_only_analysis" },
+        { role: "consumer", inputEvidenceIds: card.evidenceIds, selectedFactIds, outputStatus: "fact_selection_validated", writeBoundary: "no_purchase_or_payment" },
+      ],
+      finalDecisionSource: "deterministic_verifier",
+    };
+    const auditRun = { ...agentAudit, tenantId, batchId, question, dataMode: "demo/synthetic", createdAt: new Date().toISOString() };
+    agentAuditRuns.set(reportHash, auditRun);
+    await persistAgentAuditRun(reportHash, tenantId, auditRun);
+    return {
+      schemaVersion: "truthpass.agent.collaboration.v1",
+      batchId,
+      question,
+      agentMode: "deterministic_fallback",
+      dataMode: "demo/synthetic",
+      contextMode: lifecycle.contextMode,
+      contextSource: "tenant_demo_fixture",
+      contextRevision: lifecycle.contextRevision,
+      syncedAt: lifecycle.syncedAt,
+      verifierVersion: "deterministic-verifier-v1",
+      agentAudit,
+      writePlan: {
+        status: rice.passed ? "pending_wallet_signature" : "blocked_by_verifier",
+        action: "verification",
+        eventName: "VerificationRecorded",
+        requiredRole: "VERIFIER_ROLE",
+        evidenceRoot: verification.evidenceRoot,
+        reportHash,
+        nextAction: rice.passed ? "连接审核机构钱包，准备批次摘要签名。" : "先补齐大米批次资料，再提交机构复核。",
+      },
+      verification,
+      evidenceCard: card,
+      selectedFacts: card.facts,
+      analyses: {
+        production: { schemaVersion: "agent.output.v1", role: "production", batchId, findings: findings.slice(0, 1) },
+        inspection: { schemaVersion: "agent.output.v1", role: "inspection", batchId, findings: findings.slice(1) },
+      },
+    };
+  }
   const inspection = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
   const verification = inspection.verification;
   const assessment = verification.assessment;
@@ -1911,10 +2101,11 @@ async function mcpInspectBatch(batchId: string, traceId: string) {
     const result = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
     return { ...result, traceId, dataMode: result.verification.dataClass };
   }
-  const fixture = FISH_OIL_BATCHES[batchId];
+  const fixture = demoBatchFor(batchId);
   if (!fixture) throw new Error("BATCH_NOT_FOUND");
   const status = fixture.passed ? "accepted" : "rejected";
-  const reasons = fixture.passed ? [] : ["演示批次存在未通过的指标，需人工复核"];
+  const reasons = fixture.passed ? [] : [isRiceBatch(batchId) ? "演示批次仍有产地、检测或运输资料缺口，需人工复核" : "演示批次存在未通过的指标，需人工复核"];
+  const fixturePolicy = isRiceBatch(batchId) ? { id: "rice-origin-policy", version: "v1" } : { id: policy.policyId, version: policy.version };
   return {
     schemaVersion: "truthpass.cli.inspect.v1",
     command: "inspect",
@@ -1932,7 +2123,7 @@ async function mcpInspectBatch(batchId: string, traceId: string) {
       batchId,
       status,
       dataClass: "demo/synthetic",
-      policy: { id: policy.policyId, version: policy.version },
+       policy: fixturePolicy,
       assessment: { status, reasons, epaDhaPercent: fixture.epaDha, peroxideValue: fixture.peroxide, coldChainGapHours: fixture.coldGap },
       reasons,
       evidence: [],
@@ -1945,7 +2136,7 @@ async function mcpInspectBatch(batchId: string, traceId: string) {
 const mcpHttpHandler = createTruthPassMcpHttpHandler({
   origin: () => "*",
   defaultBatchId: BATCH_ID,
-  knownBatch: (batchId) => Boolean(FISH_OIL_BATCHES[batchId] || repository.getBatch(batchId)),
+  knownBatch: (batchId) => Boolean(demoBatchFor(batchId) || repository.getBatch(batchId)),
   manifest: (origin) => ({
     schemaVersion: "truthpass.agent.manifest.v1",
     service: "truthpass-integrated-api",
@@ -1982,6 +2173,69 @@ const mcpHttpHandler = createTruthPassMcpHttpHandler({
 // ---------- 路由 ----------
 export async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const p = url.pathname;
+
+  // Configuration driven tenant sites. This in-memory adapter keeps the
+  // preview and publish contract usable before the Supabase tenant tables are
+  // enabled; production persistence can replace this store without changing
+  // the public API.
+  const siteMatch = p.match(/^\/api\/sites\/([^/]+)(?:\/([^/]+))?$/);
+  if (p === "/api/sites" && req.method === "POST") {
+    try {
+      const input = await readBody(req);
+      const slug = String(input.slug ?? "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+      if (!slug) { sendJson(res, 422, { error: "site_slug_required" }); return true; }
+      if (siteStore.has(slug)) { sendJson(res, 409, { error: "site_already_exists", slug }); return true; }
+      const config = { ...input, slug, tenantId: String(input.tenantId ?? `tenant-${slug}`), siteStatus: "draft", templateVersion: "truthpass-site-v1" } as Record<string, unknown>;
+      const revision: ServerSiteRevision = { revisionId: `${slug}-r1`, status: "draft", createdAt: new Date().toISOString(), config };
+      siteStore.set(slug, { config, revisions: [revision] });
+      sendJson(res, 201, { schemaVersion: "truthpass.site.v1", config, revision });
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid_site_payload" });
+    }
+    return true;
+  }
+  if (siteMatch) {
+    const slug = decodeURIComponent(siteMatch[1]);
+    const action = siteMatch[2];
+    const record = siteStore.get(slug);
+    if (!record) { sendJson(res, 404, { error: "site_not_found", slug }); return true; }
+    if (!action && req.method === "GET") {
+      sendJson(res, 200, { schemaVersion: "truthpass.site.v1", config: record.config, revision: record.revisions[record.revisions.length - 1] });
+      return true;
+    }
+    if (action === "revisions" && req.method === "GET") {
+      sendJson(res, 200, { schemaVersion: "truthpass.site.revisions.v1", slug, revisions: record.revisions });
+      return true;
+    }
+    if (action === "preview" && req.method === "POST") {
+      const input = await readBody(req);
+      const revision: ServerSiteRevision = { revisionId: `${slug}-preview-${Date.now()}`, status: "preview", createdAt: new Date().toISOString(), config: { ...record.config, ...input, siteStatus: "preview" } };
+      record.revisions.push(revision);
+      sendJson(res, 200, { schemaVersion: "truthpass.site.preview.v1", preview: revision });
+      return true;
+    }
+    if (action === "publish" && req.method === "POST") {
+      const current = record.revisions[record.revisions.length - 1];
+      if (!current || (current.status !== "preview" && current.status !== "draft")) {
+        sendJson(res, 409, { error: "site_revision_not_ready", slug }); return true;
+      }
+      const revision: ServerSiteRevision = { ...current, revisionId: `${slug}-published-${Date.now()}`, status: "published", createdAt: new Date().toISOString(), config: { ...current.config, siteStatus: "published" } };
+      record.config = revision.config;
+      record.revisions.push(revision);
+      sendJson(res, 200, { schemaVersion: "truthpass.site.publish.v1", config: record.config, revision });
+      return true;
+    }
+    if (action === "rollback" && req.method === "POST") {
+      const input = await readBody(req);
+      const target = record.revisions.find((item) => item.revisionId === String(input.revisionId ?? ""));
+      if (!target) { sendJson(res, 404, { error: "revision_not_found", slug }); return true; }
+      const revision: ServerSiteRevision = { ...target, revisionId: `${slug}-rollback-${Date.now()}`, status: "published", createdAt: new Date().toISOString(), config: { ...target.config, siteStatus: "published" } };
+      record.config = revision.config;
+      record.revisions.push(revision);
+      sendJson(res, 200, { schemaVersion: "truthpass.site.rollback.v1", config: record.config, revision });
+      return true;
+    }
+  }
 
   if (p === "/mcp" || p === "/api/mcp") {
     await mcpHttpHandler(req, res);
@@ -2039,6 +2293,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       publicUrl: origin,
       capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
       endpoints: {
+        sites: `${origin}/api/sites`,
+        site: `${origin}/api/sites/{slug}`,
+        sitePreview: `${origin}/api/sites/{slug}/preview`,
+        sitePublish: `${origin}/api/sites/{slug}/publish`,
+        siteRollback: `${origin}/api/sites/{slug}/rollback`,
         inspection: `${origin}/api/cli/inspect?batchId={batchId}`,
         explanation: `${origin}/api/cli/explain?batchId={batchId}`,
         jevDetection: `${origin}/api/jev/detection?batchId={batchId}`,
@@ -2804,7 +3063,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/jev/detection" && req.method === "GET") {
     const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
-    const b = FISH_OIL_BATCHES[batchId];
+    const b = demoBatchFor(batchId);
     if (!b) {
       sendJson(res, 404, { error: "unknown_batch", batchId, status: "unknown_batch", chainStatus: "unknown_batch" });
       return true;
@@ -2825,10 +3084,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       mode: agentMode(),
       modelAssisted: agentMode() === "model_assisted",
       passed: b.passed,
-      epaDhaPercent: b.epaDha,
-      peroxideValue: b.peroxide,
-      totox: b.totox,
-      coldChainGapHours: b.coldGap,
+      ...(isRiceBatch(batchId)
+        ? { origin: b.origin, pesticideStatus: b.passed ? "within_declared_scope" : "review_required", storageCoverage: b.passed ? "covered" : "missing" }
+        : { epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, totox: b.totox, coldChainGapHours: b.coldGap }),
       evidenceRoot: evidenceHash(`${batchId}:root`),
       contractAddress: BOT_CHAIN_MAINNET.contractAddress,
       status: chainStatus,
@@ -2840,8 +3098,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/cli/inspect" && req.method === "GET") {
-    const batchId = url.searchParams.get("batchId") || BATCH_ID;
-    const demoBatch = FISH_OIL_BATCHES[batchId];
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const demoBatch = demoBatchFor(batchId);
     const primaryTx = BOT_CHAIN_MAINNET.verifiedTransactions[0];
     const verifyTx = BOT_CHAIN_MAINNET.verifiedTransactions[1];
     if (demoBatch && !repository.getBatch(batchId)) {
@@ -2850,7 +3108,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         command: "inspect",
         batchId,
         stages: [
-          { name: "读取批次数据", status: "completed", detail: "demo/synthetic 批次数据" },
+          { name: "读取批次数据", status: "completed", detail: `${isRiceBatch(batchId) ? "大米" : "鱼油"} demo/synthetic 批次数据` },
           { name: "确定性验收", status: "completed", detail: demoBatch.passed ? "accepted" : "rejected" },
           { name: "证据根哈希", status: "completed", detail: evidenceHash(`${batchId}:root`) },
           { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
@@ -2864,7 +3122,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           policy: { id: policy.policyId, version: policy.version },
           evidenceRoot: evidenceHash(`${batchId}:root`),
           evidence: [],
-          assessment: demoBatch.passed ? undefined : { score: 89, checks: {}, reasons: ["部分指标未达验收标准"] },
+          assessment: demoBatch.passed ? undefined : { score: 89, checks: {}, reasons: [isRiceBatch(batchId) ? "产地、检测或仓储运输资料仍有缺口" : "部分指标未达验收标准"] },
           anchor: {
             status: "anchor_pending",
             submitted: false,
@@ -2937,7 +3195,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : BATCH_ID;
     const rawStage = typeof body.stage === "string" ? body.stage : "";
     const stage = LIFECYCLE_STAGE_DEFS.some((item) => item.stage === rawStage) ? rawStage as LifecycleStage : undefined;
-    if (!FISH_OIL_BATCHES[batchId]) {
+    if (!demoBatchFor(batchId)) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
     }
@@ -2954,7 +3212,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
     const mode = body.mode === "cold_chain_gap" || body.mode === "device_offline" ? body.mode : "normal";
-    const demoBatch = FISH_OIL_BATCHES[batchId];
+    const demoBatch = demoBatchFor(batchId);
     if (!batchId || (!repository.getBatch(batchId) && !demoBatch)) {
       sendJson(res, 400, { error: "批次不存在" });
       return true;
@@ -2990,9 +3248,14 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         verification: { status: simulatedStatus, dataMode: inspection.verification.dataClass, evidenceRoot: inspection.verification.evidenceRoot, reasons: simulatedReasons },
       });
     } else {
-      if (demoBatch) {
-        demoBatch.coldGap = mode === "cold_chain_gap" ? 6 : mode === "normal" ? 1.5 : demoBatch.coldGap;
+      // The guard above ensures a demo batch exists when no repository batch is found.
+      // Keep an explicit narrowing here so the synthetic branch remains fail-closed if
+      // that invariant changes in a future refactor.
+      if (!demoBatch) {
+        sendJson(res, 404, { error: "批次不存在" });
+        return true;
       }
+      demoBatch.coldGap = mode === "cold_chain_gap" ? 6 : mode === "normal" ? 1.5 : demoBatch.coldGap;
       const syntheticId = `iot-${batchId}-${suffix}`;
       const syntheticHash = evidenceHash(`${syntheticId}:${JSON.stringify(payload)}`);
       const simulatedStatus = mode === "cold_chain_gap" ? "rejected" : mode === "device_offline" ? "missing_evidence" : demoBatch.passed ? "accepted" : "rejected";
@@ -3026,7 +3289,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (p === "/api/orders" && req.method === "POST") {
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
-    const b = FISH_OIL_BATCHES[batchId];
+    const b = demoBatchFor(batchId);
     if (!b) {
       sendJson(res, 404, { error: "批次不存在" });
       return true;
@@ -3048,6 +3311,65 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  const publicOverviewMatch = p.match(/^\/api\/public\/batches\/([^/]+)\/overview\/?$/);
+  if (publicOverviewMatch && req.method === "GET") {
+    const batchId = decodeURIComponent(publicOverviewMatch[1]).trim().toUpperCase();
+    const demoBatch = demoBatchFor(batchId);
+    const dbBatch = repository.getBatch(batchId);
+    if (!demoBatch && !dbBatch) {
+      sendJson(res, 404, { error: "unknown_batch", batchId });
+      return true;
+    }
+    const tenant = siteStore.get(isRiceBatch(batchId) ? "rice-demo" : "fish-oil-demo")?.config;
+    const inspection = await mcpInspectBatch(batchId, requestTraceId(req));
+    const lifecycle = lifecyclePublicView(batchId);
+    const chainContext = await buildChainQueryContext(batchId);
+    const product = demoBatch
+      ? {
+          productId: isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil",
+          name: demoBatch.name,
+          category: isRiceBatch(batchId) ? "粮食" : "营养食品",
+          origin: demoBatch.origin,
+          productionDate: demoBatch.productionDate,
+          dataMode: "demo/synthetic",
+        }
+      : {
+          productId: dbBatch?.productId,
+          name: repository.getProduct(dbBatch!.productId)?.name ?? "未命名商品",
+          category: repository.getProduct(dbBatch!.productId)?.category ?? "未分类",
+          origin: "已登记生产资料",
+          productionDate: dbBatch?.productionAt?.slice(0, 10),
+          dataMode: dbBatch?.dataMode ?? "demo/synthetic",
+        };
+    const evidence = demoBatch
+      ? evidenceFor(batchId).map((item) => ({ ...item, batchId, dataMode: "demo/synthetic" }))
+      : repository.listEvidence(batchId).map((item) => ({ evidenceId: item.evidenceId, kind: item.kind, issuerId: item.issuerId, sourceKind: item.sourceKind, occurredAt: item.occurredAt, dataMode: item.dataMode, payloadHash: item.payloadHash }));
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.public.batch.overview.v1",
+      tenant: {
+        tenantId: tenant?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
+        slug: tenant?.slug ?? (isRiceBatch(batchId) ? "rice-demo" : "fish-oil-demo"),
+        brand: tenant?.brand ?? null,
+      },
+      product,
+      batch: { batchId, dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"), status: inspection.verification.status },
+      lifecycle,
+      evidence,
+      verification: inspection.verification,
+      chainContext,
+      purchasePolicy: {
+        readOnly: true,
+        walletRequired: true,
+        chainId: BOT_CHAIN_MAINNET.chainId,
+        status: "prepared_pending_checkout",
+        note: "购买准备不等于支付成功；只有外部钱包签名并回读真实 receipt 后才会写入购买记录。",
+      },
+      feedbackSummary: { count: 0, averageRating: null, dataMode: "demo/synthetic", note: "演示站点尚未绑定真实购买反馈。" },
+      dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"),
+    });
+    return true;
+  }
+
   if (p === "/api/agent/chat" && req.method === "POST") {
     const body = await readBody(req);
     const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: unknown }> : [];
@@ -3059,8 +3381,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   const productMatch = p.match(/^\/api\/products\/([^/]+)\/?$/);
   if (productMatch && req.method === "GET") {
-    const batchId = productMatch[1];
-    const b = FISH_OIL_BATCHES[batchId];
+    const batchId = productMatch[1].trim().toUpperCase();
+    const b = demoBatchFor(batchId);
     const dbBatch = repository.getBatch(batchId);
     const dbProduct = dbBatch ? repository.getProduct(dbBatch.productId) : undefined;
     if (!b && !dbBatch) {
@@ -3068,7 +3390,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     const display = b ?? {
-      name: dbProduct?.name ?? "鱼油批次",
+      name: dbProduct?.name ?? "演示批次",
       origin: "数据库已登记，原料来源待核实",
       productionDate: dbBatch?.productionAt.slice(0, 10) ?? "未登记",
       image: "/assets/fish-oil-product.png",
@@ -3077,16 +3399,16 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     sendJson(res, 200, {
       batchId,
       name: dbProduct?.name ?? display.name,
-      category: "鱼油",
+      category: isRiceBatch(batchId) ? "粮食" : "鱼油",
       origin: display.origin,
       productionDate: dbBatch?.productionAt.slice(0, 10) ?? display.productionDate,
       dataSource: dbBatch ? "postgres" : "fixtures",
       dataMode: dbBatch?.dataMode ?? "demo/synthetic",
-      supplyChainTags: ["来自纯净海域", "全程冷链", "多重检测", "区块链存证"],
+      supplyChainTags: isRiceBatch(batchId) ? ["产地可查", "天气与土壤", "农残检测", "批次存证"] : ["来自纯净海域", "全程冷链", "多重检测", "区块链存证"],
       imageUrl: display.image,
       verification: {
         status: batchId === BATCH_ID ? (assessment.status === "accepted" ? "accepted" : "rejected") : (display.passed ? "accepted" : "rejected"),
-        summary: batchId === BATCH_ID ? "基于数据库登记证据和确定性规则" : (display.passed ? "基于演示数据的综合判断" : "部分指标未达验收标准"),
+        summary: batchId === BATCH_ID ? "基于数据库登记证据和确定性规则" : (display.passed ? "基于演示数据的综合判断" : (isRiceBatch(batchId) ? "大米演示资料仍有缺口" : "部分指标未达验收标准")),
         scope: `${batchId} 批次及当前公开的规则 ${policy.version}`,
       },
       productionProcess: productionProcessFor(batchId),
@@ -3097,8 +3419,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   const evidenceLinkMatch = p.match(/^\/api\/products\/([^/]+)\/evidence-link\/?$/);
   if (evidenceLinkMatch && req.method === "GET") {
-    const batchId = evidenceLinkMatch[1];
-    if (!FISH_OIL_BATCHES[batchId]) {
+    const batchId = evidenceLinkMatch[1].trim().toUpperCase();
+    if (!demoBatchFor(batchId)) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
     }
@@ -3108,8 +3430,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   const productionMatch = p.match(/^\/api\/products\/([^/]+)\/production\/?$/);
   if (productionMatch && req.method === "GET") {
-    const batchId = productionMatch[1];
-    if (!FISH_OIL_BATCHES[batchId]) {
+    const batchId = productionMatch[1].trim().toUpperCase();
+    if (!demoBatchFor(batchId)) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
     }
@@ -3119,8 +3441,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   const journeyMatch = p.match(/^\/api\/products\/([^/]+)\/journey\/?$/);
   if (journeyMatch && req.method === "GET") {
-    const batchId = journeyMatch[1];
-    const b = FISH_OIL_BATCHES[batchId];
+    const batchId = journeyMatch[1].trim().toUpperCase();
+    const b = demoBatchFor(batchId);
     if (!b) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
@@ -3132,7 +3454,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   const lifecycleMatch = p.match(/^\/api\/products\/([^/]+)\/lifecycle\/?$/);
   if (lifecycleMatch && req.method === "GET") {
     const batchId = lifecycleMatch[1].trim().toUpperCase();
-    if (!FISH_OIL_BATCHES[batchId]) {
+    if (!demoBatchFor(batchId)) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
     }
@@ -3142,9 +3464,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   const metricMatch = p.match(/^\/api\/products\/([^/]+)\/metrics\/([^/]+)\/?$/);
   if (metricMatch && req.method === "GET") {
-    const batchId = metricMatch[1];
+    const batchId = metricMatch[1].trim().toUpperCase();
     const key = metricMatch[2];
-    const b = FISH_OIL_BATCHES[batchId];
+    const b = demoBatchFor(batchId);
     if (!b) {
       sendJson(res, 404, { error: "batch not found" });
       return true;
@@ -3159,11 +3481,12 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       label: view.label,
       value: view.value,
       unit: view.unit,
-      threshold:
-        key === "epa-dha" ? `≥ ${thresholds.minEpaDhaPercent}%`
-        : key === "peroxide" ? `≤ ${thresholds.maxPeroxideValue}`
-        : key === "cold-chain" ? `≤ ${thresholds.maxLogisticsGapHours} 小时`
-        : "铅/汞/镉/砷 均需达标",
+      threshold: isRiceBatch(batchId)
+        ? key === "pesticide" ? "按公开农残标准核验" : key === "origin" ? "必须绑定产地和批次" : "需要当前批次对应记录"
+        : key === "epa-dha" ? `≥ ${thresholds.minEpaDhaPercent}%`
+          : key === "peroxide" ? `≤ ${thresholds.maxPeroxideValue}`
+          : key === "cold-chain" ? `≤ ${thresholds.maxLogisticsGapHours} 小时`
+          : "铅/汞/镉/砷 均需达标",
       heavyMetals:
         key === "heavy-metal"
           ? (Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>).map((k) => ({
@@ -3175,11 +3498,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           : undefined,
       sources: [
         {
-          name: key === "cold-chain" ? "冷链温度传感器" : "SGS 检测报告",
-          method: key === "cold-chain" ? "每 5 分钟采样" : "第三方检测",
-          reportNo: key === "cold-chain" ? "IOT-FO-2026-001" : "SGS-2026-1015-042",
-          pdf: "ipfs://QmDemo.../report.pdf",
-          time: inspectionEvidence!.occurredAt,
+          name: isRiceBatch(batchId) ? (key === "origin" ? "产地与土壤登记" : key === "weather" ? "田间天气记录" : key === "pesticide" ? "第三方农残报告" : "仓储运输记录") : (key === "cold-chain" ? "冷链温度传感器" : "SGS 检测报告"),
+          method: isRiceBatch(batchId) ? "演示资料字段核验" : (key === "cold-chain" ? "每 5 分钟采样" : "第三方检测"),
+          reportNo: isRiceBatch(batchId) ? `RICE-${batchId}` : (key === "cold-chain" ? "IOT-FO-2026-001" : "SGS-2026-1015-042"),
+          pdf: isRiceBatch(batchId) ? "demo://rice-evidence" : "ipfs://QmDemo.../report.pdf",
+          time: isRiceBatch(batchId) ? `${b.productionDate}T10:20:00Z` : inspectionEvidence!.occurredAt,
           signature: "0x...demo-signature",
         },
       ],
@@ -3189,29 +3512,45 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/verification" && req.method === "GET") {
     const t = policy.thresholds;
-    const batchId = url.searchParams.get("batchId") || BATCH_ID;
-    const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const b = demoBatchFor(batchId) ?? FISH_OIL_BATCHES[BATCH_ID];
+    const rice = isRiceBatch(batchId);
+    const riceMetrics = rice ? metricsFor(batchId) : [];
     const allPassed = b.passed;
     sendJson(res, 200, {
       batchId,
       productName: b.name,
-      policy: { id: policy.policyId, version: policy.version, dataMode: policy.dataMode },
+      policy: { id: rice ? "rice-origin-policy" : policy.policyId, version: policy.version, dataMode: "demo/synthetic" },
       status: allPassed ? "accepted" : "rejected",
-      score: allPassed ? 100 : 89,
-      evidenceHash: assessment.evidenceHash,
-      serviceExecution: { status: allPassed ? "accepted" : "rejected", score: allPassed ? 100 : 75, evidenceHash: assessment.evidenceHash },
+      score: rice ? (allPassed ? 92 : 61) : (allPassed ? 100 : 89),
+      evidenceHash: evidenceHash(`${batchId}:verification`),
+      serviceExecution: { status: allPassed ? "accepted" : "rejected", score: rice ? (allPassed ? 92 : 61) : (allPassed ? 100 : 75), evidenceHash: evidenceHash(`${batchId}:verification`) },
       rules: [
-        { name: "任务匹配", desc: "证据 taskId 与任务一致", passed: true },
+        { name: rice ? "批次关系" : "任务匹配", desc: rice ? "产地、检测和物流资料绑定到同一批次" : "证据 taskId 与任务一致", passed: true },
         { name: "批次匹配", desc: `报告批次与请求批次一致（${batchId}）`, passed: true },
         { name: "时间逻辑", desc: "报告时间 ≥ 生产时间", passed: true },
-        { name: "签名有效", desc: "实验室签名验证通过", passed: true },
-        { name: "物流连续", desc: `冷链 gap ${b.coldGap}h ≤ ${t.maxLogisticsGapHours}h`, passed: b.coldGap <= t.maxLogisticsGapHours },
-        { name: "EPA+DHA", desc: `${b.epaDha}% ≥ ${t.minEpaDhaPercent}%`, passed: b.epaDha >= t.minEpaDhaPercent },
-        { name: "过氧化值", desc: `${b.peroxide} ≤ ${t.maxPeroxideValue}`, passed: b.peroxide <= t.maxPeroxideValue },
-        { name: "TOTOX", desc: `${b.totox} ≤ ${t.maxTotox}`, passed: b.totox <= t.maxTotox },
-        { name: "冷链中断", desc: `${b.coldGap}h ≤ ${t.maxLogisticsGapHours}h`, passed: b.coldGap <= t.maxLogisticsGapHours },
+        { name: rice ? "来源签发" : "签名有效", desc: rice ? "演示来源已登记，密码学签名尚未接入" : "实验室签名验证通过", passed: !rice },
+        ...(rice
+          ? riceMetrics.map((metric) => ({ name: metric.label, desc: `${metric.value} · ${metric.unit}`, passed: metric.status === "pass" }))
+          : [
+              { name: "物流连续", desc: `冷链 gap ${b.coldGap}h ≤ ${t.maxLogisticsGapHours}h`, passed: b.coldGap <= t.maxLogisticsGapHours },
+              { name: "EPA+DHA", desc: `${b.epaDha}% ≥ ${t.minEpaDhaPercent}%`, passed: b.epaDha >= t.minEpaDhaPercent },
+              { name: "过氧化值", desc: `${b.peroxide} ≤ ${t.maxPeroxideValue}`, passed: b.peroxide <= t.maxPeroxideValue },
+              { name: "TOTOX", desc: `${b.totox} ≤ ${t.maxTotox}`, passed: b.totox <= t.maxTotox },
+              { name: "冷链中断", desc: `${b.coldGap}h ≤ ${t.maxLogisticsGapHours}h`, passed: b.coldGap <= t.maxLogisticsGapHours },
+            ]),
       ],
-      evidence: repository.listEvidence(BATCH_ID).map((e) => ({
+      evidence: rice
+        ? evidenceFor(batchId).map((e) => ({
+            evidenceId: `${batchId}-${e.step}`,
+            kind: e.title,
+            issuerId: e.source,
+            sourceKind: "demo",
+            payloadHash: e.hash,
+            status: allPassed ? "submitted" : e.step > 3 ? "missing" : "submitted",
+            occurredAt: e.verifiedAt,
+          }))
+        : repository.listEvidence(BATCH_ID).map((e) => ({
         evidenceId: e.evidenceId,
         kind: e.kind,
         issuerId: e.issuerId,

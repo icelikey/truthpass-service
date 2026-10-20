@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { DesignPreviewGallery } from "./components/DesignPreviewGallery";
 import { RiceCasePage } from "./components/RiceCasePage";
 
@@ -33,7 +33,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
       <nav className="tp-public-nav" aria-label={zh ? "主导航" : "Primary navigation"}>
         <a className={active === "home" ? "active" : ""} href={links.home}>{zh ? "首页" : "Home"}</a>
         <a href={zh ? "/?view=consumer#agent" : "/en?view=consumer#agent"}>{zh ? "商品查询" : "Products"}</a>
-        <a href={zh ? "/cases/rice" : "/en/cases/rice"}>{zh ? "案例：大米" : "Case: rice"}</a>
+        <a href={zh ? "/sites/rice-demo" : "/en/sites/rice-demo"}>{zh ? "案例：大米" : "Case: rice"}</a>
         <a href={links.merchant} className={active === "merchant" ? "active" : ""}>{zh ? "解决方案" : "Solutions"}</a>
         <a className={route.includes("institution") ? "active" : ""} href={links.institution}>{zh ? "机构入口" : "Institutions"}</a>
         <a href={links.developers} className={active === "developers" ? "active" : ""}>{zh ? "开发者" : "Developers"}</a>
@@ -45,7 +45,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
           <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : route.includes("institution") ? "/institution" : "/"}>中文</a>
           <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : route.includes("institution") ? "/en/institution" : "/en"}>English</a>
         </div>
-        <a className="tp-outline-btn" href={`/?view=consumer&auth=1#agent`}>{zh ? "登录" : "Sign in"}</a>
+        <a className="tp-outline-btn" href={`${zh ? "/" : "/en"}?view=consumer&auth=1#agent`}>{zh ? "登录" : "Sign in"}</a>
       </div>
     </header>
   );
@@ -278,20 +278,113 @@ export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-develop
   </main></PageFrame>;
 }
 
+const platformBatchRoutes: Record<string, { zh: string; en: string }> = {
+  "FO-2026-001": { zh: "/sites/fish-oil-demo/agent?batch=FO-2026-001", en: "/en/sites/fish-oil-demo/agent?batch=FO-2026-001" },
+  "RC-2026-001": { zh: "/sites/rice-demo/agent?batch=RC-2026-001", en: "/en/sites/rice-demo/agent?batch=RC-2026-001" },
+};
+
+function PlatformBatchLookup({ zh }: { zh: boolean }) {
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const batch = query.trim().toUpperCase();
+    const route = platformBatchRoutes[batch];
+    if (!route) {
+      setError(zh ? "没有找到这批记录，可以先看下面的演示案例" : "No record found. Start with one of the sample cases below.");
+      return;
+    }
+    window.location.href = zh ? route.zh : route.en;
+  };
+  return (
+    <form className="tp-platform-lookup" onSubmit={submit}>
+      <label htmlFor={zh ? "platform-batch-zh" : "platform-batch-en"}>{zh ? "输入批次号，先看一份商品记录" : "Enter a batch ID and read the record first"}</label>
+      <div className="tp-platform-lookup-row">
+        <span className="tp-platform-search-icon" aria-hidden="true">⌕</span>
+        <input
+          id={zh ? "platform-batch-zh" : "platform-batch-en"}
+          value={query}
+          onChange={(event) => { setQuery(event.target.value.toUpperCase()); setError(""); }}
+          placeholder={zh ? "例如 FO-2026-001 或 RC-2026-001" : "For example FO-2026-001 or RC-2026-001"}
+          autoComplete="off"
+        />
+        <button className="tp-red-btn" type="submit">{zh ? "查看一份商品记录" : "View the product record"} <span aria-hidden="true">→</span></button>
+      </div>
+      <small className={error ? "has-error" : ""}>{error || (zh ? "先看清，再决定是否继续" : "Check the record before you decide")}</small>
+    </form>
+  );
+}
+
+function PlatformCaseCard({ image, eyebrow, title, batch, body, href, zh }: { image: string; eyebrow: string; title: string; batch: string; body: string; href: string; zh: boolean }) {
+  return (
+    <a className="tp-platform-case-card" href={href}>
+      <div className="tp-platform-case-image" style={{ backgroundImage: `url(${image})` }} aria-hidden="true" />
+      <div className="tp-platform-case-copy">
+        <span className="tp-kicker">{eyebrow}</span>
+        <h3>{title}<span aria-hidden="true"> ↗</span></h3>
+        <code>{batch}</code>
+        <p>{body}</p>
+        <span className="tp-platform-case-action">{zh ? "查看一份商品记录" : "View the record"} →</span>
+      </div>
+    </a>
+  );
+}
+
+function PlatformHome({ route }: { route: "zh-home" | "en-home" }) {
+  const zh = route === "zh-home";
+  return (
+    <PageFrame route={route} active="home">
+      <main className="tp-platform-home">
+        <section className="tp-platform-hero">
+          <div className="tp-platform-hero-copy">
+            <p className="tp-kicker">{zh ? "商品记录和验证服务" : "PRODUCT RECORDS AND VERIFICATION"}</p>
+            <span className="tp-demo-ribbon">{zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION"}</span>
+            <h1>{zh ? <>从生产到购买<br /><span>一条路看清</span></> : <>From production to purchase<br /><span>see the whole record</span></>}</h1>
+            <p className="tp-platform-lead">{zh ? "把商品的来路 交到购买的人手里" : "Put the product record in the hands of the person who buys it"}</p>
+            <p className="tp-platform-capability">{zh ? "建设信任能力" : "Build the trust capability"}</p>
+            <PlatformBatchLookup zh={zh} />
+            <div className="tp-platform-actions">
+              <a className="tp-paper-btn" href={zh ? "/merchant" : "/en/merchant"}>{zh ? "为企业建设信任能力" : "Build trust capability for your business"} <span aria-hidden="true">→</span></a>
+              <span>{zh ? "先看记录，再做决定" : "Read first, then decide"}</span>
+            </div>
+          </div>
+          <div className="tp-platform-hero-visual" aria-label={zh ? "生产到购买的商品记录流程" : "Product record from production to purchase"}>
+            <div className="tp-platform-production">
+              <span>{zh ? "生产" : "PRODUCTION"}</span>
+              <b>{zh ? "每一步都有记录" : "Every step is recorded"}</b>
+            </div>
+            <div className="tp-platform-product-still" />
+            <div className="tp-platform-purchase">
+              <span>{zh ? "购买" : "PURCHASE"}</span>
+              <b>{zh ? "打开商品记录" : "Open the product record"}</b>
+            </div>
+          </div>
+        </section>
+        <section className="tp-platform-cases" id="cases" aria-labelledby="platform-cases-title">
+          <div className="tp-platform-section-head"><div><p className="tp-kicker" id="platform-cases-title">{zh ? "先看一件商品" : "START WITH ONE PRODUCT"}</p><h2>{zh ? "生产、检测、运输和售后，按批次摆出来" : "Production, testing, delivery, and aftercare in one batch record"}</h2></div><span className="tp-demo-ribbon">{zh ? "公开演示" : "PUBLIC DEMO"}</span></div>
+          <div className="tp-platform-case-grid">
+            <PlatformCaseCard image="/assets/fish-oil-product.png" eyebrow={zh ? "鱼油案例" : "FISH OIL CASE"} title={zh ? "深海鱼油" : "Deep sea fish oil"} batch="FO-2026-001" body={zh ? "从原料到成品，查看一份鱼油的完整记录" : "Read the record from raw material to finished product"} href={zh ? "/sites/fish-oil-demo" : "/en/sites/fish-oil-demo"} zh={zh} />
+            <PlatformCaseCard image="/design-reference/truthpass-ui-v4/01-platform-home.png" eyebrow={zh ? "大米案例" : "RICE CASE"} title={zh ? "北境稻作" : "Northern rice"} batch="RC-2026-001" body={zh ? "从种植到上架，查看一份大米的完整记录" : "Read the record from growing to delivery"} href={zh ? "/sites/rice-demo" : "/en/sites/rice-demo"} zh={zh} />
+            <PlatformCaseCard image="/design-reference/truthpass-ui-v4/04-merchant-trust.png" eyebrow={zh ? "企业服务" : "FOR BUSINESS"} title={zh ? "建设信任能力" : "Build trust capability"} batch={zh ? "从一件商品开始" : "Start with one product"} body={zh ? "把生产、检测、运输和购买后的反馈连成一条路" : "Connect production, verification, delivery, and aftercare"} href={zh ? "/merchant" : "/en/merchant"} zh={zh} />
+          </div>
+        </section>
+        <section className="tp-platform-flow" id="about" aria-labelledby="platform-flow-title">
+          <div className="tp-platform-section-head"><div><p className="tp-kicker" id="platform-flow-title">{zh ? "这套服务怎么工作" : "HOW IT WORKS"}</p><h2>{zh ? "让生产和购买回到同一份记录" : "Bring production and purchase back to one record"}</h2></div></div>
+          <div className="tp-platform-flow-track">
+            {(zh ? [["01", "资料整理", "照片、视频、报告和口述资料"], ["02", "规则核对", "检查批次、时间、数量和来源"], ["03", "身份确认", "企业和机构钱包确认责任"], ["04", "购买后记录", "购买凭证、反馈和售后继续回到批次"]] : [["01", "Collect", "Photos, videos, reports, and spoken records"], ["02", "Check", "Batch, time, quantity, and source"], ["03", "Confirm", "Business and institution wallets confirm responsibility"], ["04", "Continue", "Purchase proof, feedback, and aftercare return to the batch"]]).map(([number, title, body]) => <article key={number}><span>{number}</span><strong>{title}</strong><p>{body}</p></article>)}
+          </div>
+        </section>
+      </main>
+    </PageFrame>
+  );
+}
+
 function EnglishLandingPage() {
-  return <PageFrame route="en-home" active="home"><main className="tp-landing-main">
-    <section className="tp-landing-hero"><div><p className="tp-kicker">OPEN EVIDENCE · TRUSTPASS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>Check first.<br /><span>Buy next.</span></h1><p className="tp-landing-lead">Production, testing, delivery — show the record.</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/en#evidence">View the record&nbsp; →</a><a className="tp-paper-btn" href="/en/merchant">For business&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>SHOW THE RECORD</span><b>MAKE THE CHOICE</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>Show the record.</h2><p>Production, testing, delivery — each step has a source.</p><a href="/en?view=consumer#agent">View a sample record →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>Ask once. Get the evidence.</h2><p>Your agent can read the same public record through MCP or CLI.</p><a href="/en/developers">Open developer access →</a></article><article><span className="tp-panel-symbol">◉</span><h2>Make one product explainable.</h2><p>Keep the record clear from production to aftercare.</p><a href="/en/merchant">For business →</a></article></section>
-    <section id="about" className="tp-landing-strip"><span>01</span><b>CHECK</b><small>See the record.</small><span>02</span><b>CHOOSE</b><small>Make the call.</small><span>03</span><b>CONTINUE</b><small>Keep help after purchase.</small></section>
-  </main></PageFrame>;
+  return <PlatformHome route="en-home" />;
 }
 
 function ChineseLandingPage() {
-  return <PageFrame route="zh-home" active="home"><main className="tp-landing-main">
-    <section className="tp-landing-hero"><div><p className="tp-kicker">公开证据 · TRUTHPASS</p><span className="tp-demo-ribbon">演示资料 · 不能替代真实商品认证</span><h1>先看清。<br /><span>再下单。</span></h1><p className="tp-landing-lead">生产、检测、运输，一件件摆出来。</p><div className="tp-landing-actions"><a className="tp-red-btn" href="/?view=consumer#agent">查看依据&nbsp; →</a><a className="tp-paper-btn" href="/merchant">我是企业&nbsp; ↗</a></div></div><aside className="tp-landing-seal"><span>有凭有据</span><b>大家看得见</b></aside></section>
-    <section id="evidence" className="tp-landing-panels"><article><span className="tp-panel-symbol">◈</span><h2>有凭有据，大家看得见。</h2><p>生产、检测、运输，一件件摆出来。</p><a href="/?view=consumer#agent">看一份演示资料 →</a></article><article><span className="tp-panel-symbol">⌘</span><h2>你问什么，我查什么。</h2><p>同一份公开资料，人和 Agent 都能看。</p><a href="/developers">进入开发者入口 →</a></article><article><span className="tp-panel-symbol">◉</span><h2>把一件商品，说清楚。</h2><p>每一步有来源，每个缺口有人处理。</p><a href="/merchant">查看企业入口 →</a></article></section>
-    <section id="about" className="tp-landing-strip"><span>01</span><b>看依据</b><small>先把事实看清楚。</small><span>02</span><b>做选择</b><small>缺什么，明白补上。</small><span>03</span><b>留记录</b><small>买完还有事，照样找得到人。</small></section>
-  </main></PageFrame>;
+  return <PlatformHome route="zh-home" />;
 }
 
 function EnglishMerchantPage() {
@@ -305,10 +398,10 @@ function EnglishMerchantPage() {
     ["Review", "Open", "A responsible institution can confirm or challenge"],
   ];
   return <PageFrame route="en-merchant" active="merchant"><main className="tp-merchant-main">
-    <section className="tp-merchant-hero"><div><p className="tp-kicker">FOR BUSINESS · PRODUCT RECORDS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>One product.<br /><span>A complete record.</span></h1><p>Speak, scan, or upload. Your agent turns the material into a batch record you can review before anyone signs.</p><div className="tp-merchant-hero-actions"><a className="tp-red-btn" href="/merchant">Open merchant workspace&nbsp; →</a><a className="tp-paper-btn" href="/en?view=consumer&batch=FO-2026-001#agent">View the sample record</a></div></div><aside className="tp-merchant-promise"><span>WHO OWNS THE NEXT STEP?</span><strong>Every gap<br />has an owner.</strong><small>Agent organizes the record. Your team and the assigned institution confirm it.</small></aside></section>
+    <section className="tp-merchant-hero"><div><p className="tp-kicker">FOR BUSINESS · PRODUCT RECORDS</p><span className="tp-demo-ribbon">DEMO / SYNTHETIC · NOT CERTIFICATION</span><h1>One product.<br /><span>A complete record.</span></h1><p>Speak, scan, or upload. Your agent turns the material into a batch record you can review before anyone signs.</p><div className="tp-merchant-hero-actions"><a className="tp-red-btn" href="/en/merchant">Open merchant workspace&nbsp; →</a><a className="tp-paper-btn" href="/en?view=consumer&batch=FO-2026-001#agent">View the sample record</a></div></div><aside className="tp-merchant-promise"><span>WHO OWNS THE NEXT STEP?</span><strong>Every gap<br />has an owner.</strong><small>Agent organizes the record. Your team and the assigned institution confirm it.</small></aside></section>
     <section className="tp-merchant-lifecycle"><div className="tp-section-head"><div><p className="tp-kicker">LIFECYCLE · FO-2026-001</p><h2>Make the evidence legible.</h2><p className="tp-section-intro">One timeline from production to review. Missing items stay visible until someone handles them.</p></div><span>DEMO / SYNTHETIC</span></div><div className="tp-lifecycle-track">{cards.map(([title, status, detail], index) => <article key={title} className={status === "Recorded" ? "recorded" : status === "Open" ? "review" : "awaiting"}><span className="tp-lifecycle-node">{index + 1}</span><strong>{title}</strong><b>{status}</b><small>{detail}</small></article>)}</div></section>
     <section className="tp-merchant-summary"><article><span>Current product</span><h2>Deep Sea Fish Oil</h2><p>Production and shipment records are present. Testing and cold-chain evidence still need confirmation.</p></article><article><span>Evidence completeness</span><strong>78%</strong><p>2 open gaps are assigned to the next responsible party.</p></article><article><span>Agent report</span><strong>Review first</strong><p>Ask the institution to confirm the testing report before publishing a final claim.</p></article></section>
-    <section className="tp-merchant-next"><div><p className="tp-kicker">NEXT STEP</p><h2>Start with one batch.</h2><p>Connect the business wallet only when you are ready to confirm a record. Read-only preparation stays available without a wallet.</p></div><a className="tp-red-btn" href="/merchant">Continue in workspace →</a></section>
+    <section className="tp-merchant-next"><div><p className="tp-kicker">NEXT STEP</p><h2>Start with one batch.</h2><p>Connect the business wallet only when you are ready to confirm a record. Read-only preparation stays available without a wallet.</p></div><a className="tp-red-btn" href="/en/merchant">Continue in workspace →</a></section>
   </main></PageFrame>;
 }
 
