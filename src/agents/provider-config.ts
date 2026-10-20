@@ -17,6 +17,29 @@ export interface ResolvedAgentProvider {
  * public Agent service when only OPENCODE_* is configured.
  */
 export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): ResolvedAgentProvider {
+  const requestedProvider = env.AGENT_PROVIDER?.trim().toLowerCase();
+  if (requestedProvider === "opencode") {
+    const openCodeKey = env.OPENCODE_API_KEY?.trim();
+    if (openCodeKey) {
+      return {
+        provider: "opencode",
+        apiKey: openCodeKey,
+        baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/openai/v1").replace(/\/+$/, ""),
+        model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
+        configured: true,
+        source: "opencode",
+      };
+    }
+    return {
+      provider: "opencode",
+      apiKey: "",
+      baseUrl: "",
+      model: "deterministic-fallback",
+      configured: false,
+      source: "none",
+    };
+  }
+
   const agentKey = env.AGENT_API_KEY?.trim();
   const agentModel = env.AGENT_MODEL?.trim();
   if (agentKey && agentModel) {
