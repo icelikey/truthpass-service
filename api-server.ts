@@ -27,6 +27,7 @@ import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from ".
 import { answerConsumerQuestion, type ConsumerEvidenceSnapshot } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
 import { createCompatibleAgentInvoker, createDeterministicAgentInvoker } from "./src/agents/compatible-invoker.js";
+import { providerEndpoint, resolveAgentProvider } from "./src/agents/provider-config.js";
 import { runCliInspect } from "./src/integrations/cli-verifier.js";
 import { BOT_CHAIN_MAINNET, inspectBotChain } from "./src/integrations/botchain-config.js";
 import { getBotChainConfig } from "./src/chain-config.js";
@@ -1168,17 +1169,12 @@ type ChatMeta = {
 const CUSTOMER_CHAT_PIPELINE = ["verifier", "jev", "deepseek"] as const;
 
 function publicCustomerProvider(): string {
-  if (!process.env.AGENT_API_KEY?.trim() || !process.env.AGENT_MODEL?.trim()) return "deterministic";
-  const baseUrl = process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com";
-  try {
-    return new URL(baseUrl).hostname.toLowerCase().includes("deepseek") ? "deepseek" : "compatible";
-  } catch {
-    return "compatible";
-  }
+  const provider = resolveAgentProvider();
+  return provider.configured ? provider.provider : "deterministic";
 }
 
 function publicCustomerModel(): string {
-  return process.env.AGENT_MODEL?.trim() || "deterministic-fallback";
+  return resolveAgentProvider().model;
 }
 
 function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
@@ -1316,28 +1312,18 @@ function validConsumerModelText(text: string, contract?: ConsumerModelContract):
 }
 
 async function callCustomerModel(systemPrompt: string, userPrompt: string, sources: string[], contract?: ConsumerModelContract): Promise<ChatReplyResult> {
-  const apiKey = process.env.AGENT_API_KEY?.trim();
-  const model = process.env.AGENT_MODEL?.trim();
-  if (!apiKey || !model) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
-
-  const configuredBase = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
-  const candidates = new Set<string>();
-  if (configuredBase.endsWith("/chat/completions")) candidates.add(configuredBase);
-  else {
-    candidates.add(configuredBase + "/chat/completions");
-    if (/api\.deepseek\.com\/v1$/i.test(configuredBase)) {
-      candidates.add(configuredBase.replace(/\/v1$/i, "") + "/chat/completions");
-    }
-  }
+  const provider = resolveAgentProvider();
+  if (!provider.configured) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
+  const candidates = new Set<string>([providerEndpoint(provider.baseUrl)]);
 
   for (const endpoint of candidates) {
     try {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + provider.apiKey, "Content-Type": "application/json" },
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
-          model,
+          model: provider.model,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -1523,7 +1509,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
 
 
 function agentMode(): "model_assisted" | "deterministic_fallback" {
-  return process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim() ? "model_assisted" : "deterministic_fallback";
+  return resolveAgentProvider().configured ? "model_assisted" : "deterministic_fallback";
 }
 
 
@@ -1809,7 +1795,7 @@ const CHAT_RATE_WINDOW_MS = 60_000;
 const CHAT_RATE_LIMIT = 30;
 
 function customerServiceStatus(): "ready" | "degraded" {
-  return process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim() ? "ready" : "degraded";
+  return resolveAgentProvider().configured ? "ready" : "degraded";
 }
 
 function requestClientIdentifiers(req: IncomingMessage): string[] {
@@ -2268,8 +2254,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       schemaVersion: "truthpass.agent.status.v1",
       status: customerServiceStatus(),
       agentMode: agentMode(),
-      providerConfigured: Boolean(process.env.AGENT_API_KEY?.trim() && process.env.AGENT_MODEL?.trim()),
-      model: process.env.AGENT_MODEL?.trim() ?? null,
+      providerConfigured: resolveAgentProvider().configured,
+      provider: publicCustomerProvider(),
+      model: publicCustomerModel(),
+      providerSource: resolveAgentProvider().source,
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",

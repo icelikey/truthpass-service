@@ -1,5 +1,6 @@
 import type { AgentInvocation, AgentInvoker } from "./runtime.js";
 import type { AgentFinding, AgentInput } from "./contracts.js";
+import { providerEndpoint, resolveAgentProvider } from "./provider-config.js";
 
 export interface CompatibleModelOptions {
   apiKey?: string;
@@ -20,17 +21,20 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
   return async (invocation) => {
     const sanitized = sanitizeInput(invocation.input);
     if (sanitized.sourceIds.size === 0) return emptyOutput(invocation, sanitized.batchId);
-    const apiKey = (options.apiKey ?? process.env.AGENT_API_KEY)?.trim();
-    const model = (options.model ?? process.env.AGENT_MODEL)?.trim();
-    const baseUrl = (options.baseUrl ?? process.env.AGENT_BASE_URL ?? "https://api.deepseek.com").trim();
-    if (!apiKey || !model) throw new Error("Agent 模型未配置：需要 AGENT_API_KEY 和 AGENT_MODEL");
+    const resolved = resolveAgentProvider({
+      ...process.env,
+      ...(options.apiKey !== undefined ? { AGENT_API_KEY: options.apiKey } : {}),
+      ...(options.baseUrl !== undefined ? { AGENT_BASE_URL: options.baseUrl } : {}),
+      ...(options.model !== undefined ? { AGENT_MODEL: options.model } : {}),
+    });
+    if (!resolved.configured) throw new Error("Agent 模型未配置：需要 AGENT_API_KEY 和 AGENT_MODEL，或 OPENCODE_API_KEY");
 
-    const response = await fetchImpl(completionsEndpoint(baseUrl), {
+    const response = await fetchImpl(providerEndpoint(resolved.baseUrl), {
       method: "POST",
-      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+      headers: { Authorization: "Bearer " + resolved.apiKey, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(15_000),
       body: JSON.stringify({
-        model,
+        model: resolved.model,
         messages: [
           { role: "system", content: invocation.systemPrompt + " 输出中的 batchId 必须为 CURRENT_BATCH。" },
           { role: "user", content: JSON.stringify(sanitized.value) },
@@ -52,14 +56,6 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
     }
     return restoreReferences(output, sanitized);
   };
-}
-
-function completionsEndpoint(baseUrl: string): string {
-  let base = baseUrl.trim();
-  while (base.endsWith("/")) base = base.slice(0, -1);
-  if (base.endsWith("/chat/completions")) return base;
-  if (/api\.deepseek\.com\/v1$/i.test(base)) base = base.replace(/\/v1$/i, "");
-  return base + "/chat/completions";
 }
 
 function sanitizeInput(input: AgentInput): SanitizedInput {
