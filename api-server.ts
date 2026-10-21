@@ -27,7 +27,7 @@ import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from ".
 import { answerConsumerQuestion, type ConsumerEvidenceSnapshot } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
 import { createCompatibleAgentInvoker, createDeterministicAgentInvoker } from "./src/agents/compatible-invoker.js";
-import { providerEndpoint, resolveAgentProvider } from "./src/agents/provider-config.js";
+import { providerEndpoint, resolveAgentProvider, type ResolvedAgentProvider } from "./src/agents/provider-config.js";
 import { runCliInspect } from "./src/integrations/cli-verifier.js";
 import { BOT_CHAIN_MAINNET, inspectBotChain } from "./src/integrations/botchain-config.js";
 import { getBotChainConfig } from "./src/chain-config.js";
@@ -1295,6 +1295,8 @@ type ChatReplyResult = {
   /** The rule verifier already ran before the model was asked to explain. */
   verifierStatus?: string;
   verifierReasons?: string[];
+  providerUsed?: string;
+  modelUsed?: string;
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
@@ -1439,8 +1441,8 @@ async function streamChatWithReply(
     dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
     batchId: baseMeta.batchId,
     traceId: baseMeta.traceId,
-    provider: publicCustomerProvider(),
-    model: publicCustomerModel(),
+    provider: result.providerUsed ?? publicCustomerProvider(),
+    model: result.modelUsed ?? publicCustomerModel(),
     modelAssisted: result.status === "model_assisted",
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
@@ -1546,7 +1548,26 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     sources,
     safety: { status: "fallback", citations: [], reasons: ["provider_not_configured"] },
   };
-  const candidates = new Set<string>([providerEndpoint(provider.baseUrl)]);
+  const providers: ResolvedAgentProvider[] = [provider];
+  // OpenCode is the preferred public provider. If its credential is rejected,
+  // use the explicitly configured legacy-compatible Agent provider when one
+  // exists. The UI still reports the provider that actually answered.
+  if (provider.provider === "opencode") {
+    const fallbackKey = process.env.AGENT_API_KEY?.trim();
+    const fallbackModel = process.env.AGENT_MODEL?.trim();
+    if (fallbackKey && fallbackModel) {
+      const fallbackBaseUrl = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
+      const fallbackProvider = fallbackBaseUrl.toLowerCase().includes("deepseek") ? "deepseek" : "compatible";
+      providers.push({
+        provider: fallbackProvider,
+        apiKey: fallbackKey,
+        baseUrl: fallbackBaseUrl,
+        model: fallbackModel,
+        configured: true,
+        source: "agent",
+      });
+    }
+  }
   const safetyContract = {
     batchId: contract?.batchId,
     dataMode: contract?.dataMode ?? "demo/synthetic",
@@ -1573,14 +1594,15 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     consumerSafetyFewShot(safetyContract.locale),
   ].join("\n");
 
-  for (const endpoint of candidates) {
+  for (const candidate of providers) {
+    const endpoint = providerEndpoint(candidate.baseUrl);
     try {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: "Bearer " + provider.apiKey, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + candidate.apiKey, "Content-Type": "application/json" },
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
-          model: provider.model,
+          model: candidate.model,
           messages: [
             { role: "system", content: guardedSystemPrompt },
             { role: "user", content: userPrompt },
@@ -1621,6 +1643,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       return {
         lines: [{ cls: "plain", text: safety.text }],
         status: "model_assisted",
+        providerUsed: candidate.provider,
+        modelUsed: candidate.model,
         dataMode: "demo/synthetic",
         sources,
         evidenceIds: safety.citations.filter((item) => safetyContract.evidenceIds.includes(item)),
