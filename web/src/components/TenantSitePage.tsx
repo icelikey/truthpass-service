@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { EvidencePanel } from "./EvidencePanel";
 import { ProductPanel } from "./ProductPanel";
@@ -8,6 +8,8 @@ import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext"
 import type { VerifyState } from "../types";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
+import { fetchLifecycle } from "../api";
+import type { LifecycleView } from "../types";
 
 type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
@@ -80,6 +82,65 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
   const zh = locale === "zh";
   const [batch, setBatch] = useState(() => currentBatch(site));
   const base = routeFor(site, "home", locale);
+  const [scanMessage, setScanMessage] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scanQr = async (file: File) => {
+    try {
+      const Detector = (window as unknown as { BarcodeDetector?: new (options?: { formats?: string[] }) => { detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+      if (!Detector) throw new Error("当前浏览器不支持二维码识别");
+      const bitmap = await createImageBitmap(file);
+      const results = await new Detector({ formats: ["qr_code"] }).detect(bitmap);
+      const value = results[0]?.rawValue;
+      if (!value) throw new Error("没有识别到二维码");
+      const url = new URL(value, window.location.origin);
+      const scannedBatch = url.searchParams.get("batch")?.trim().toUpperCase();
+      if (!scannedBatch) throw new Error("二维码没有绑定批次号");
+      window.location.href = `${routeFor(site, "agent", locale)}?batch=${encodeURIComponent(scannedBatch)}`;
+    } catch (error) {
+      setScanMessage(error instanceof Error ? error.message : (zh ? "二维码识别失败" : "Could not read the QR code"));
+    }
+  };
+  useEffect(() => {
+    if (!cameraOpen) return;
+    let active = true;
+    let stream: MediaStream | undefined;
+    let frame = 0;
+    const scanCamera = async () => {
+      try {
+        const Detector = (window as unknown as { BarcodeDetector?: new (options?: { formats?: string[] }) => { detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+        if (!Detector || !navigator.mediaDevices?.getUserMedia) throw new Error(zh ? "当前浏览器不支持相机扫码，请上传二维码图片。" : "Camera scanning is unavailable; upload a QR image instead.");
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        if (!active || !videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        const detector = new Detector({ formats: ["qr_code"] });
+        const tick = async () => {
+          if (!active || !videoRef.current) return;
+          try {
+            const result = await detector.detect(videoRef.current);
+            const value = result[0]?.rawValue;
+            if (value) {
+              const url = new URL(value, window.location.origin);
+              const scannedBatch = url.searchParams.get("batch")?.trim().toUpperCase();
+              if (scannedBatch) window.location.href = `${routeFor(site, "agent", locale)}?batch=${encodeURIComponent(scannedBatch)}`;
+            }
+          } catch { /* camera frames can be unavailable while the video initializes */ }
+          frame = window.requestAnimationFrame(() => void tick());
+        };
+        frame = window.requestAnimationFrame(() => void tick());
+      } catch (error) {
+        setScanMessage(error instanceof Error ? error.message : (zh ? "相机扫码失败" : "Camera scan failed"));
+        setCameraOpen(false);
+      }
+    };
+    void scanCamera();
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(frame);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [cameraOpen, locale, site]);
   return (
     <main className="tenant-site-main">
       <section className="tenant-hero">
@@ -99,6 +160,10 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
           <label htmlFor="tenant-batch">{zh ? "批次号" : "Batch ID"}</label>
           <div><input id="tenant-batch" value={batch} onChange={(event) => setBatch(event.target.value.toUpperCase())} /><button className="tp-red-btn" type="submit">{zh ? "查询" : "Inspect"}</button></div>
           <small>{zh ? "Agent 会把能确认的事实、缺口和下一步讲清楚。" : "The Agent explains what is known, missing, and next."}</small>
+          <label className="tenant-qr-upload">{zh ? "上传包装二维码" : "Upload package QR"}<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void scanQr(file); }} /></label>
+          <button type="button" className="tenant-camera-button" onClick={() => { setScanMessage(""); setCameraOpen(true); }}>{zh ? "打开相机扫码" : "Scan with camera"}</button>
+          {scanMessage && <small className="tenant-scan-message" role="status">{scanMessage}</small>}
+          {cameraOpen && <div className="tenant-camera-box"><video ref={videoRef} muted playsInline aria-label={zh ? "二维码相机预览" : "QR camera preview"} /><button type="button" onClick={() => setCameraOpen(false)}>{zh ? "关闭相机" : "Close camera"}</button></div>}
         </form>
       </section>
       <section className="tenant-fact-grid">
@@ -130,11 +195,29 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     provider?: string;
     modelAssisted?: boolean;
   }>();
+  const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
+  const [lifecycleUpdated, setLifecycleUpdated] = useState(false);
   const zh = locale === "zh";
   useEffect(() => {
     const nextBatch = currentBatch(site);
     setBatchId(nextBatch);
   }, [site]);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const next = await fetchLifecycle(batchId);
+        if (!active) return;
+        setLifecycle((previous) => {
+          setLifecycleUpdated(Boolean(previous && previous.contextRevision !== next.contextRevision));
+          return next;
+        });
+      } catch { /* evidence card remains usable when the lifecycle service is unavailable */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { if (site.product.demoMode === "demo/synthetic") void refresh(); }, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [batchId, site.product.demoMode]);
   const requestStatus = agentMeta?.serviceStatus ?? agentMeta?.agentMode;
   const modelActuallyUsed = agentMeta?.modelAssisted === true && requestStatus === "model_assisted";
   const agentRibbon = modelActuallyUsed
@@ -176,6 +259,14 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           <div className="tenant-panel-head"><strong>{zh ? "证据卡" : "Evidence card"}</strong><span>{site.product.demoMode}</span></div>
           <ProductPanel state={verifyState} batchId={batchId} locale={locale} />
           <EvidencePanel state={verifyState} batchId={batchId} locale={locale} />
+          <section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}>
+            <div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div>
+            <div className="tenant-usage-grid">
+              <div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div>
+              <div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div>
+            </div>
+          </section>
+          {lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div><div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}
           <div className="tenant-next-step"><b>{zh ? "下一步" : "Next step"}</b><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "先查看依据，再决定是否继续" : "Review the evidence before continuing")}</span></div>
         </aside>
       </div>
