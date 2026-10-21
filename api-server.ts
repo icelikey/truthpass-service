@@ -1581,6 +1581,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     systemPrompt,
     `安全策略版本：${CONSUMER_PROMPT_POLICY_VERSION}；输出契约版本：${CONSUMER_MODEL_CONTRACT_VERSION}。`,
     "只输出 JSON，不要输出 Markdown 代码围栏。字段必须是 conclusion、evidence、uncertainty、nextAction、citations。citations 必须是当前输入允许的来源。没有依据就明确说不知道，不要猜型号、灯号或动作结果。",
+    "不要新增任何日期、数量、百分比、型号或编号；如果某个数字不在允许值列表中，请改用“不确定”说明，不要自行补全。",
     `当前运行上下文：${JSON.stringify({
       batchId: safetyContract.batchId ?? null,
       evidenceIds: safetyContract.evidenceIds,
@@ -1727,6 +1728,14 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
     : b.passed
       ? `结论：${b.name}（${batchId}）按当前规则可以继续了解。依据：检测、生产和冷链记录已登记；来源：当前批次登记信息。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：打开证据卡核对来源。`
       : `结论：${b.name}（${batchId}）暂时不要急着下单。依据：当前规则仍有未通过项；来源：deterministic_verifier。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：补证或转人工复核。`;
+  const allowedNumbers = [
+    String(b.epaDha), `${b.epaDha}%`,
+    String(b.peroxide), `${b.peroxide}mg`,
+    String(b.totox),
+    String(b.coldGap), `${b.coldGap}小时`, `${b.coldGap}h`,
+    ...b.productionDate.split(/[^0-9]+/).filter(Boolean),
+    ...Object.values(b.heavyMetals).flatMap((value) => [String(value)]),
+  ];
   const modelResult = await callCustomerModel(
     "你是 TruthPass 的商品客服。说人话，严格输出四段短句：“结论：… 依据：… 不确定：… 下一步：…”。依据必须写明来源。只能使用下面当前批次的确定性验证结果和证据卡，禁止跨批次拼接；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。不要把“通过当前规则”说成“商品安全”或“官方认证”。链上内容只能引用 chainContext；没有 transaction 时不得声称交易或 receipt 已确认。",
     JSON.stringify({
@@ -1754,7 +1763,7 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
       },
       evidenceIds,
       allowedCitations: [...new Set([...evidenceIds, "evidence_card", "deterministic_verifier", "product_policy", ...(chainContext ? ["chain_status"] : [])])],
-      allowedNumbers: [String(b.epaDha), String(b.peroxide), String(b.totox), String(b.coldGap)],
+      allowedNumbers,
     },
   );
   const verifierStatus = String(verification.status ?? (b.passed ? "accepted" : "rejected"));
