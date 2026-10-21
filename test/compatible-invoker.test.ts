@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCompatibleAgentInvoker } from "../src/agents/compatible-invoker.js";
+import { providerEndpoint, resolveAgentProvider } from "../src/agents/provider-config.js";
 import { runAgent } from "../src/agents/runtime.js";
 import { fishOilBatch, fishOilEvidence, fishOilProduct } from "../src/data/fixtures.js";
 import { MemoryDataRepository } from "../src/data/repository.js";
@@ -54,6 +55,22 @@ test("third-party compatible provider receives redacted data and citations map b
 
 // 测试专用假凭据（非真实密钥），运行时拼装避免被当作硬编码凭据
 const TEST_API_KEY = ["test", "key"].join("-");
+
+test("explicit OpenCode selection uses the OpenCode secret and compatible endpoint", () => {
+  const provider = resolveAgentProvider({
+    AGENT_PROVIDER: "opencode",
+    AGENT_API_KEY: "legacy-deepseek-key",
+    AGENT_MODEL: "legacy-model",
+    OPENCODE_API_KEY: TEST_API_KEY,
+    OPENCODE_MODEL: "deepseek-v4.1-flash",
+    OPENCODE_BASE_URL: "https://opencode.ai/inference/openai/v1",
+  });
+  assert.equal(provider.provider, "opencode");
+  assert.equal(provider.source, "opencode");
+  assert.equal(provider.apiKey, TEST_API_KEY);
+  assert.equal(provider.model, "deepseek-v4.1-flash");
+  assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/openai/v1/chat/completions");
+});
 
 test("invalid findings are dropped per item instead of failing the whole output", async () => {
   const input = await productionInput();
