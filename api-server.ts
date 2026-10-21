@@ -1640,6 +1640,9 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         console.warn(JSON.stringify(diagnostic));
         continue;
       }
+      // A later fallback provider succeeded; do not keep surfacing an older
+      // rejected-provider diagnostic as if the current request had failed.
+      lastCustomerModelDiagnostic = null;
       return {
         lines: [{ cls: "plain", text: safety.text }],
         status: "model_assisted",
