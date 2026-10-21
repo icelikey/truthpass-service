@@ -100,8 +100,30 @@ export type ChatLineClass =
   | "conclusion"
   | "disclaimer";
 
+/** Public stages emitted by the Agent SSE stream. Keep this vocabulary stable
+ * so the UI can show progress without exposing provider internals. */
+export type AgentStreamStage =
+  | "begin"
+  | "reading_batch"
+  | "verifier_checked"
+  | "jev_routed"
+  | "model_started"
+  | "model_completed"
+  | "answer"
+  | "done";
+
 export interface ChatEvent {
-  kind: "begin" | "meta" | "line" | "done";
+  kind: "begin" | "meta" | "line" | "stage" | "answer" | "done" | AgentStreamStage;
+  stage?: AgentStreamStage;
+  stages?: AgentStreamStage[];
+  validationStatus?: string;
+  validationReasons?: string[];
+  citationStatus?: string;
+  citationReasons?: string[];
+  citationValidation?: { status?: string; valid?: boolean; reasons?: string[] };
+  validation?: { status?: string; reasons?: string[] };
+  detail?: string;
+  status?: "pending" | "active" | "completed" | "fallback" | "unavailable";
   cls?: ChatLineClass;
   text?: string;
   agentMode?: "model_assisted" | "deterministic_fallback";
@@ -153,6 +175,19 @@ export interface RecommendItem {
   reason: string;
   expertise?: string;
   imageUrl?: string;
+  dataMode?: "demo/synthetic" | "external";
+  evidence?: {
+    dataMode?: "demo/synthetic" | "external";
+    verificationStatus?: string;
+    evidenceRefs?: string[];
+    metrics?: { epaDhaPercent?: number; peroxideValue?: number; coldChainGapHours?: number };
+    policy?: { id?: string; version?: string };
+  };
+  verification?: { status?: string; score?: number; summary?: string; reasons?: string[] };
+  coldChain?: { gapHours?: number; status?: string; summary?: string };
+  feedbackSample?: { count?: number; rating?: number; summary?: string; items?: string[] };
+  gaps?: string[];
+  nextStep?: string;
 }
 
 export interface OrderCard {

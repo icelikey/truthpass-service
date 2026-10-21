@@ -206,7 +206,11 @@ export async function postChat(
     for (const part of parts) {
       const line = part.trim();
       if (!line.startsWith("data:")) continue;
-      onEvent(JSON.parse(line.slice(5).trim()) as ChatEvent);
+      const payload = JSON.parse(line.slice(5).trim()) as Partial<ChatEvent>;
+      // Accept both the canonical `{ kind: "stage", stage }` envelope and
+      // direct stage payloads from compatible Agent gateways.
+      if (!payload.kind && payload.stage) payload.kind = "stage";
+      onEvent(payload as ChatEvent);
     }
   }
 }

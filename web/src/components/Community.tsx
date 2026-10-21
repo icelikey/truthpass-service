@@ -6,8 +6,19 @@ import { shortHex } from "../lib/wallet";
 import type { SessionChainTx } from "../types";
 
 export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: (msg: string) => void; onFeedbackSubmitted?: () => void; batchId: string | null }) {
-  const { address, chainId, walletName, txBusy, executeOnChainAction, setWalletModalOpen } = useWallet();
+  const { address, chainId, walletName, txBusy, lastTx, chainStatus, executeOnChainAction, setWalletModalOpen } = useWallet();
   const walletReady = Boolean(address && chainId === 677);
+  const purchaseReceipt = lastTx?.action === "purchase" && lastTx.batchId === batchId
+    ? lastTx
+    : chainStatus?.sessionTransactions?.find((tx) => tx.action === "purchase" && tx.batchId === batchId);
+  const purchaseReceiptReady = Boolean(
+    batchId &&
+      purchaseReceipt &&
+      purchaseReceipt.batchId === batchId &&
+      purchaseReceipt.event === "PurchaseRecorded" &&
+      purchaseReceipt.eventVerified === true &&
+      (purchaseReceipt.receiptStatus === "0x1" || purchaseReceipt.receiptStatus === "1"),
+  );
   const [consent, setConsent] = useState(false);
   const [purchaseConfirmed, setPurchaseConfirmed] = useState(false);
   const [anchorOnChain, setAnchorOnChain] = useState(true);
@@ -25,7 +36,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
 
   const submit = async () => {
-    if (!batchId || !consent || !purchaseConfirmed || submitting) return;
+    if (!batchId || !purchaseReceiptReady || !consent || !purchaseConfirmed || submitting) return;
     setSubmitting(true);
     try {
       const result = await postFeedback(batchId, rating, tags, consent, purchaseConfirmed, comment.trim() || undefined);
@@ -138,13 +149,13 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
               </span>
               <div className="consent-text">
                 <strong>{batchId ? `授权 ${batchId} 的质量反馈` : "暂无可反馈批次"}</strong>
-                <small>{batchId ? "提交前需授权反馈用途，并确认已购买该批次；支持 EVM 钱包同步上链存证" : "请先在左侧完成一次批次验证"}</small>
+                <small>{batchId ? (purchaseReceiptReady ? "真实购买 receipt 已核验，可授权反馈；支持 EVM 钱包同步上链存证" : "请先完成该批次的真实钱包购买，并回读成功 receipt 后再开放反馈") : "请先在左侧完成一次批次验证"}</small>
               </div>
               <label className="switch">
                 <input
                   type="checkbox"
                   checked={consent}
-                  disabled={!batchId}
+                  disabled={!batchId || !purchaseReceiptReady}
                   onChange={(e) => {
                     setConsent(e.target.checked);
                     if (!e.target.checked) setPurchaseConfirmed(false);
@@ -156,8 +167,8 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
             </div>
 
             <label className="purchase-confirmation">
-              <input type="checkbox" checked={purchaseConfirmed} disabled={!batchId || !consent} onChange={(e) => setPurchaseConfirmed(e.target.checked)} />
-              <span>我确认已购买此批次（可选择通过连接钱包写入 BOT Chain Mainnet 合约）</span>
+              <input type="checkbox" checked={purchaseConfirmed} disabled={!batchId || !purchaseReceiptReady || !consent} onChange={(e) => setPurchaseConfirmed(e.target.checked)} />
+              <span>{purchaseReceiptReady ? "我确认已购买此批次（已核验真实 receipt）" : "完成真实购买 receipt 后才能确认反馈对象"}</span>
             </label>
 
             <label className="purchase-confirmation">
@@ -182,7 +193,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
                   key={tag}
                   className={tags.includes(tag) ? "feedback-tag active" : "feedback-tag"}
                   type="button"
-                  disabled={!batchId || !consent}
+                  disabled={!batchId || !purchaseReceiptReady || !consent}
                   onClick={() => toggleTag(tag)}
                 >
                   {tag}
@@ -198,7 +209,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
                     key={n}
                     className={n <= rating ? "star active" : "star"}
                     type="button"
-                    disabled={!batchId || !consent}
+                    disabled={!batchId || !purchaseReceiptReady || !consent}
                     onClick={() => setRating(n)}
                     aria-label={`${n} 星`}
                   >
@@ -211,7 +222,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
             <textarea
               className="feedback-input"
               value={comment}
-              disabled={!batchId || !consent}
+              disabled={!batchId || !purchaseReceiptReady || !consent}
               onChange={(e) => setComment(e.target.value)}
               placeholder="补充你的体验反馈或争议原因（选填），例如：胶囊大小合适、无结块…"
               rows={2}
@@ -220,7 +231,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
             <button
               className="join-btn full"
               type="button"
-              disabled={!batchId || !consent || !purchaseConfirmed || submitting || txBusy || rating === 0 || tags.length === 0}
+              disabled={!batchId || !purchaseReceiptReady || !consent || !purchaseConfirmed || submitting || txBusy || rating === 0 || tags.length === 0}
               onClick={submit}
             >
               <span>{submitting || txBusy ? "提交并请求链上签名中…" : "提交反馈"}</span>
@@ -232,7 +243,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
               <button type="button" disabled={!walletReady || txBusy} onClick={() => handleDirectChainAction("purchase")}>
                 ⛓️ 链上登记购买 (ConsumerGateway.recordPurchase)
               </button>
-              <button type="button" disabled={!walletReady || txBusy} onClick={() => handleDirectChainAction("contribution")}>
+              <button type="button" disabled={!walletReady || !purchaseReceiptReady || txBusy} onClick={() => handleDirectChainAction("contribution")}>
                 🌟 链上铸造积分 (ConsumerGateway.recordContribution)
               </button>
               <button type="button" disabled={!walletReady || txBusy} onClick={() => handleDirectChainAction("dispute")}>
@@ -244,7 +255,9 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
               <div className="wallet-receipt-box">
                 <div>
                   <strong>
-                    ✓ 已记录共建贡献 (+{latestFeedbackReceipt.points} 积分)
+                    {latestFeedbackReceipt.chainTx?.event === "PurchaseRecorded"
+                      ? "✓ 购买 receipt 已核验"
+                      : `✓ 已记录共建贡献 (+${latestFeedbackReceipt.points} 积分)`}
                     {latestFeedbackReceipt.chainTx ? ` · 链上事件 ${latestFeedbackReceipt.chainTx.event}` : ""}
                   </strong>
                   <span>

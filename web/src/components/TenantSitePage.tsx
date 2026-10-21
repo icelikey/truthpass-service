@@ -197,6 +197,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }>();
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
   const [lifecycleUpdated, setLifecycleUpdated] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const zh = locale === "zh";
   useEffect(() => {
     const nextBatch = currentBatch(site);
@@ -233,43 +234,33 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
             : (zh ? "等待真实 Agent 查询" : "Waiting for an Agent query");
   return (
     <main className="tenant-site-main tenant-agent-main">
-      <section className="tenant-section-heading"><div><p className="tp-kicker">{zh ? "商品 Agent · 证据卡" : "PRODUCT AGENT · EVIDENCE"}</p><h1>{zh ? "你问什么，我查什么。" : "Ask once. Get the record."}</h1><p>{zh ? "Verifier 先核验，JEV 再分流，模型只解释已经登记的资料。" : "The Verifier checks first, JEV routes next, and the model explains registered evidence."}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
-      <div className="tenant-agent-grid">
-        <section className="tenant-panel tenant-chat-panel">
-          <div className="tenant-panel-head"><strong>{zh ? "对话" : "Conversation"}</strong><span>{batchId}</span></div>
-          <ChatPanel
-            onStart={() => { setVerifyState("running"); setStage("searching"); }}
-            onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
-            onMeta={setAgentMeta}
-            onBatch={(id) => setBatchId(id)}
-            onPurchasePrepared={() => setStage("purchase_prepared")}
-            onWalletPending={() => setStage("wallet_pending")}
-            onReceiptVerified={() => setStage("receipt_verified")}
-            batchId={batchId}
-            autoQueryBatch={query}
-            autoQueryPrompt={quickPrompt}
-            locale={locale}
-            productLabel={site.product.name}
-          />
-          <div className="tenant-quick-actions">
-            {[zh ? "这批是什么？" : "What is this batch?", zh ? "还缺什么资料？" : "What is missing?", zh ? "链上有记录吗？" : "Is there a chain record?"].map((prompt) => <button type="button" key={prompt} onClick={() => { setQuery(batchId); setQuickPrompt(prompt); }}>{prompt}</button>)}
-          </div>
-        </section>
-        <aside className="tenant-panel tenant-evidence-panel">
-          <div className="tenant-panel-head"><strong>{zh ? "证据卡" : "Evidence card"}</strong><span>{site.product.demoMode}</span></div>
-          <ProductPanel state={verifyState} batchId={batchId} locale={locale} />
-          <EvidencePanel state={verifyState} batchId={batchId} locale={locale} />
-          <section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}>
-            <div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div>
-            <div className="tenant-usage-grid">
-              <div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div>
-              <div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div>
-            </div>
-          </section>
-          {lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div><div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}
-          <div className="tenant-next-step"><b>{zh ? "下一步" : "Next step"}</b><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "先查看依据，再决定是否继续" : "Review the evidence before continuing")}</span></div>
-        </aside>
-      </div>
+      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "商品 Agent" : "PRODUCT AGENT"}</p><h1>{zh ? "你问什么，我查什么。" : "Ask once. Get the record."}</h1><p>{zh ? "所有流程从对话开始。需要时，我会把证据、生命周期、钱包和下一步打开给你。" : "Start with a question. I will open the evidence, lifecycle, wallet step, or next action when you need it."}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-agent-single tenant-panel">
+        <div className="tenant-panel-head"><strong>{zh ? "和商品助手对话" : "Talk to the product Agent"}</strong><span>{batchId}</span></div>
+        <ChatPanel
+          onStart={() => { setVerifyState("running"); setStage("searching"); }}
+          onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
+          onMeta={setAgentMeta}
+          onBatch={(id) => {
+            setBatchId(id);
+            const url = new URL(window.location.href);
+            url.searchParams.set("batch", id);
+            window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+            window.dispatchEvent(new CustomEvent("truthpass:batch-changed", { detail: { batchId: id } }));
+          }}
+          onPurchasePrepared={() => setStage("purchase_prepared")}
+          onWalletPending={() => setStage("wallet_pending")}
+          onReceiptVerified={() => setStage("receipt_verified")}
+          batchId={batchId}
+          autoQueryBatch={query}
+          autoQueryPrompt={quickPrompt}
+          locale={locale}
+          productLabel={site.product.name}
+          minimal
+        />
+        <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起资料" : "Hide record") : (zh ? "打开这批资料" : "Open this record")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "只在你需要时展开详细资料" : "Open details only when needed")}</span></div>
+      </section>
+      {showContext && <section className="tenant-context-drawer"><div className="tenant-context-column"><div className="tenant-panel-head"><strong>{zh ? "证据和当前状态" : "Evidence and status"}</strong><span>{site.product.demoMode}</span></div><ProductPanel state={verifyState} batchId={batchId} locale={locale} /><EvidencePanel state={verifyState} batchId={batchId} locale={locale} /></div><div className="tenant-context-column"><section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}><div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div><div className="tenant-usage-grid"><div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div><div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div></div></section>{lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div><div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}</div></section>}
     </main>
   );
 }

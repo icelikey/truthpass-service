@@ -110,6 +110,17 @@ export function WalletProvider({
     }
   }, [activeBatchId]);
 
+  // Tenant routes update the batch query with replaceState so the page does
+  // not reload. Keep the wallet drawer's target batch in the same URL scope.
+  useEffect(() => {
+    const handleBatchChanged = (event: Event) => {
+      const next = (event as CustomEvent<{ batchId?: unknown }>).detail?.batchId;
+      if (typeof next === "string" && next.trim()) setSelectedBatch(next.trim().toUpperCase());
+    };
+    window.addEventListener("truthpass:batch-changed", handleBatchChanged);
+    return () => window.removeEventListener("truthpass:batch-changed", handleBatchChanged);
+  }, []);
+
   const { data: chainStatus } = useQuery({
     queryKey: ["chain-status"],
     queryFn: fetchChainStatus,

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { postChat } from "../api";
-import type { ChatEvent, ChatLine, OrderCard, RecommendItem } from "../types";
+import type { AgentStreamStage, ChatEvent, ChatLine, OrderCard, RecommendItem } from "../types";
 
 export interface ChatMessage {
   id: string;
@@ -29,7 +29,29 @@ export interface ChatMessage {
     | "contextRevision"
     | "syncedAt"
     | "chainContext"
+    | "stage"
+    | "stages"
   >;
+}
+
+const STREAM_STAGES: AgentStreamStage[] = [
+  "begin",
+  "reading_batch",
+  "verifier_checked",
+  "jev_routed",
+  "model_started",
+  "model_completed",
+  "answer",
+  "done",
+];
+
+function stageFromEvent(event: ChatEvent): AgentStreamStage | undefined {
+  if (event.stage && STREAM_STAGES.includes(event.stage)) return event.stage;
+  if (event.kind === "answer") return "answer";
+  if (event.kind !== "meta" && event.kind !== "line" && STREAM_STAGES.includes(event.kind as AgentStreamStage)) {
+    return event.kind as AgentStreamStage;
+  }
+  return undefined;
 }
 
 let seq = 0;
@@ -71,9 +93,35 @@ export function useChatStream() {
           batchId,
           (event) => {
             if (event.kind === "begin") {
-              patch(agentId, (m) => ({ ...m, lines: [] }));
+              patch(agentId, (m) => ({
+                ...m,
+                lines: [],
+                meta: { ...m.meta, ...event, stage: "begin", stages: ["begin"] },
+              }));
             } else if (event.kind === "meta") {
-              patch(agentId, (m) => ({ ...m, meta: event }));
+              const stage = stageFromEvent(event);
+              patch(agentId, (m) => ({
+                ...m,
+                meta: {
+                  ...m.meta,
+                  ...event,
+                  ...(stage ? { stage, stages: [...new Set([...(m.meta?.stages ?? []), stage])] } : {}),
+                },
+              }));
+            } else if ((event.kind === "stage" || event.kind === "answer" || stageFromEvent(event)) && stageFromEvent(event)) {
+              const stage = stageFromEvent(event)!;
+              patch(agentId, (m) => ({
+                ...m,
+                meta: {
+                  ...m.meta,
+                  ...event,
+                  stage,
+                  stages: [...new Set([...(m.meta?.stages ?? []), stage])],
+                },
+                ...(event.kind === "answer" && event.cls && event.text
+                  ? { lines: [...m.lines, { cls: event.cls, text: event.text }] }
+                  : {}),
+              }));
             } else if (event.kind === "line" && event.cls && event.text) {
               patch(agentId, (m) => {
                 const last = m.lines[m.lines.length - 1];
@@ -83,7 +131,11 @@ export function useChatStream() {
                 return { ...m, lines: [...m.lines, { cls: event.cls!, text: event.text! }] };
               });
             } else if (event.kind === "done") {
-              patch(agentId, (m) => ({ ...m, done: true }));
+              patch(agentId, (m) => ({
+                ...m,
+                done: true,
+                meta: { ...m.meta, ...event, stage: "done", stages: [...new Set<AgentStreamStage>([...(m.meta?.stages ?? []), "done"])] },
+              }));
             }
           },
           controller.signal,

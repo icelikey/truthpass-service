@@ -433,6 +433,25 @@ body {
 .recommend-info span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 .recommend-info p { margin: 3px 0 0; font-size: 11px; color: var(--cyan-2); }
 .recommend-info .recommend-expertise { color: #b9cdd8; }
+.recommend-evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 8px; margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(157,178,191,.16); }
+.recommend-evidence-grid span { min-width: 0; color: #a9bbc5; font-size: 10px; line-height: 1.4; }
+.recommend-evidence-grid b { display: inline-block; margin-right: 4px; color: #e4f2f5; font-weight: 600; }
+.recommend-evidence-grid .recommend-data-mode { grid-column: 1 / -1; color: #f3ca7d; }
+.chat-stage-rail { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; padding: 7px 9px; border: 1px solid rgba(93,213,213,.18); border-radius: 8px; background: rgba(10,35,44,.34); }
+.chat-stage-rail span { display: inline-flex; align-items: center; gap: 4px; color: #9db2bf; font-size: 10px; }
+.chat-stage-rail span.active { color: var(--cyan-2); }
+.chat-stage-rail span.completed { color: #8fe1c5; }
+.chat-stage-rail i { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: rgba(157,178,191,.15); font-style: normal; font-size: 9px; }
+.chat-stage-rail span.active i { background: rgba(93,213,213,.2); }
+.chat-stage-rail span.completed i { background: rgba(90,205,150,.2); }
+.chat-stage-rail.compact { padding: 5px 8px; border-color: rgba(90,205,150,.2); }
+.answer-validation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; margin: 7px 0 2px; padding: 7px 9px; border: 1px solid rgba(220,167,86,.3); border-radius: 8px; background: rgba(66,45,20,.2); color: #d8c49f; font-size: 10px; line-height: 1.4; }
+.answer-validation-summary strong { color: #f3ca7d; font-size: 11px; }
+.answer-validation-summary span { color: #b8c6ca; }
+.answer-validation-summary small { flex-basis: 100%; color: #d49c9c; }
+.answer-validation-summary.passed { border-color: rgba(90,205,150,.28); background: rgba(22,69,52,.2); }
+.answer-validation-summary.passed strong { color: #8fe1c5; }
+.answer-validation-summary.passed span { color: #b9ded0; }
 .recommend-order {
   flex: none; background: var(--cyan); color: #06222a; border: none; border-radius: 999px;
   padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .2s;
@@ -3535,6 +3554,14 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-section-heading h1 { font-size: clamp(42px, 6vw, 72px); }
 .tenant-section-heading > .tp-demo-ribbon { flex: 0 0 auto; margin-top: 12px; }
 .tenant-agent-grid, .tenant-wallet-grid, .tenant-dev-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 16px; margin-top: 24px; }
+.tenant-agent-heading { max-width: 860px; margin-inline: auto; }
+.tenant-agent-single { max-width: 900px; margin: 0 auto; }
+.tenant-agent-single .chat-panel { border: 0; box-shadow: none; background: transparent; }
+.tenant-agent-single .chat-quick-minimal { padding-top: 8px; }
+.tenant-agent-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 0; border-top: 1px solid rgba(200,163,106,.2); }
+.tenant-agent-actions span { color: #9e998e; font-size: 11px; }
+.tenant-context-drawer { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 16px; max-width: 1200px; margin: 16px auto 0; padding: 16px; border: 1px solid rgba(200,163,106,.25); border-radius: 14px; background: rgba(21,21,19,.58); }
+.tenant-context-column { min-width: 0; }
 .tenant-panel { padding: 18px; }
 .tenant-panel-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: #1b1c1a; }
 .tenant-panel-head span { color: #897f70; font: 11px monospace; }
@@ -3587,6 +3614,7 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-lifecycle-mini-item.synced, .tenant-lifecycle-mini-item.verified { border-color: rgba(43,125,95,.42); }
 .tenant-lifecycle-mini-item.awaiting_user, .tenant-lifecycle-mini-item.pending { border-color: rgba(177,138,69,.52); }
 @media (max-width: 720px) { .tenant-usage-grid { grid-template-columns: 1fr; } .tenant-usage-panel, .tenant-lifecycle-strip { padding: 13px; } }
+@media (max-width: 820px) { .tenant-context-drawer { grid-template-columns: 1fr; } .tenant-agent-actions { align-items: flex-start; flex-direction: column; } }
 .tp-platform-visual { display: block; width: min(100%, 300px); margin: 0 auto 14px; border: 1px solid rgba(200,163,106,.35); border-radius: 6px; opacity: .88; }
 .tp-route-missing { min-height: 100vh; display: grid; place-content: center; gap: 12px; padding: 24px; color: #f4efe4; background: #151513; text-align: center; }
 .tp-route-missing a { color: #e2b367; }

@@ -4,7 +4,7 @@ import { createOrder, fetchRecommend, postIotSimulation, type IotSimulationMode 
 import { saveOrderRecord } from "../lib/supabase";
 import { useWallet } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
-import type { ChatLine, OrderCard, RecommendItem } from "../types";
+import type { AgentStreamStage, ChatLine, OrderCard, RecommendItem } from "../types";
 
 const FISH_OIL_BATCHES = [
   { id: "FO-2026-001", name: "深海鱼油软胶囊" },
@@ -117,6 +117,65 @@ function serviceStatusMeta(status?: string): { pill: string; cls: string; sse: s
   }
 }
 
+const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
+  begin: "开始",
+  reading_batch: "读取批次",
+  verifier_checked: "规则核验",
+  jev_routed: "JEV 分流",
+  model_started: "模型解释",
+  model_completed: "解释完成",
+  answer: "组织回答",
+  done: "完成",
+};
+
+function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; history: AgentStreamStage[] } {
+  const raw = message.meta as (ChatMessage["meta"] & { stage?: AgentStreamStage; stages?: AgentStreamStage[] }) | undefined;
+  const history = Array.isArray(raw?.stages) ? raw.stages : raw?.stage ? [raw.stage] : [];
+  return { current: raw?.stage, history };
+}
+
+function answerValidationMeta(message: ChatMessage): {
+  validationStatus?: string;
+  validationReasons: string[];
+  citationStatus?: string;
+  citationReasons: string[];
+} {
+  const raw = message.meta as (ChatMessage["meta"] & {
+    validationStatus?: string;
+    validationReasons?: string[];
+    validation?: { status?: string; reasons?: string[] };
+    citationStatus?: string;
+    citationReasons?: string[];
+    citationValidation?: { status?: string; valid?: boolean; reasons?: string[] };
+  }) | undefined;
+  return {
+    validationStatus: raw?.validationStatus ?? raw?.validation?.status,
+    validationReasons: raw?.validationReasons ?? raw?.validation?.reasons ?? [],
+    citationStatus: raw?.citationStatus ?? (raw?.citationValidation?.valid === true ? "passed" : raw?.citationValidation?.status),
+    citationReasons: raw?.citationReasons ?? raw?.citationValidation?.reasons ?? [],
+  };
+}
+
+function RecommendationEvidence({ item, en }: { item: RecommendItem; en: boolean }) {
+  const evidenceRefs = item.evidence?.evidenceRefs ?? [];
+  const verification = item.verification?.status ?? item.evidence?.verificationStatus ?? "待核验";
+  const coldGap = item.coldChain?.gapHours ?? item.evidence?.metrics?.coldChainGapHours ?? item.coldGap;
+  const coldStatus = item.coldChain?.status ?? (coldGap > 0 ? "有记录" : "未见中断");
+  const gaps = item.gaps ?? [];
+  const feedback = item.feedbackSample;
+  return (
+    <div className="recommend-evidence-grid" aria-label={en ? "Recommendation evidence" : "推荐依据详情"}>
+      <span><b>{en ? "Evidence" : "证据"}</b>{evidenceRefs.length ? evidenceRefs.join(" · ") : (en ? "Registered batch records" : "当前批次登记资料")}</span>
+      <span><b>{en ? "Verification" : "核验"}</b>{verification}{item.verification?.score !== undefined ? ` · ${item.verification.score} 分` : ""}</span>
+      <span><b>{en ? "Cold chain" : "冷链"}</b>{coldStatus} · {coldGap}h gap</span>
+      <span><b>{en ? "Feedback sample" : "反馈样本"}</b>{feedback?.summary ?? (feedback?.count ? `${feedback.count} 条` : (en ? "No sample" : "暂无样本"))}</span>
+      <span><b>{en ? "Gaps" : "缺口"}</b>{gaps.length ? gaps.join("；") : (en ? "None listed" : "当前未列出")}</span>
+      <span><b>{en ? "Next" : "下一步"}</b>{item.nextStep ?? (en ? "Open the evidence card before checkout" : "购买前打开证据卡核对来源")}</span>
+      <span className="recommend-data-mode"><b>dataMode</b>{item.dataMode ?? item.evidence?.dataMode ?? "demo/synthetic"}</span>
+    </div>
+  );
+}
+
 function MessageView({
   message,
   onOrder,
@@ -157,6 +216,11 @@ function MessageView({
     serviceStatus === "deterministic_fallback" ||
     Boolean(message.error);
   const structuredSections = message.done ? parseAgentSections(message.lines, locale) : [];
+  const stream = streamStageMeta(message);
+  const answerValidation = answerValidationMeta(message);
+  const validationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.validationStatus ?? "");
+  const citationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.citationStatus ?? "");
+  const hasValidationMeta = Boolean(answerValidation.validationStatus || answerValidation.citationStatus || answerValidation.validationReasons.length || answerValidation.citationReasons.length);
 
   return (
     <div className="msg agent">
@@ -199,6 +263,30 @@ function MessageView({
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
+      {!message.done && stream.current && (
+        <div className="chat-stage-rail" role="status" aria-live="polite">
+          {(stream.history.length ? stream.history : [stream.current]).map((stage, index) => (
+            <span key={`${stage}-${index}`} className={stage === stream.current ? "active" : "completed"}>
+              <i>{index + 1}</i>{en ? stage.replaceAll("_", " ") : STREAM_STAGE_LABELS[stage]}
+            </span>
+          ))}
+        </div>
+      )}
+      {message.done && stream.current && stream.current !== "done" && (
+        <div className="chat-stage-rail compact" role="status">
+          <span className="completed"><i>✓</i>{en ? "Agent answer complete" : "Agent 回答已完成"}</span>
+        </div>
+      )}
+      {message.done && hasValidationMeta && (
+        <div className={`answer-validation-summary ${validationPassed && citationPassed ? "passed" : "review"}`} role="status">
+          <strong>{validationPassed && citationPassed ? "回答通过格式与引用校验" : "回答需要复核"}</strong>
+          <span>{validationPassed ? "格式校验通过" : `格式校验：${answerValidation.validationStatus ?? "未提供"}`}</span>
+          <span>{citationPassed ? "引用校验通过" : `引用校验：${answerValidation.citationStatus ?? "未提供"}`}</span>
+          {(answerValidation.validationReasons.length > 0 || answerValidation.citationReasons.length > 0) && (
+            <small>{[...answerValidation.validationReasons, ...answerValidation.citationReasons].join("；")}</small>
+          )}
+        </div>
+      )}
       {message.done && statusMeta?.sse === "fallback" && (
         <div className="chat-sse-state fallback" role="status">{en ? "Using an evidence fallback. The content still comes from registered records." : "当前使用基础回答，内容仍来自已登记资料。"}</div>
       )}
@@ -235,6 +323,7 @@ function MessageView({
                   <span>{item.batchId} · {item.origin} · {item.productionDate}</span>
                   <p>{item.reason}</p>
                   {item.expertise && <p className="recommend-expertise">专业提示：{item.expertise}</p>}
+                  <RecommendationEvidence item={item} en={en} />
                 </div>
                 <button type="button" className="recommend-order" aria-label={`为 ${item.batchId} 生成购买准备`} onClick={() => onOrder(item)}>
                   购买准备
@@ -247,7 +336,7 @@ function MessageView({
           <div className="order-card">
             {message.order.imageUrl && <img src={message.order.imageUrl} alt="" />}
             <div className="order-info">
-              <b>购买准备已生成 · {message.order.orderId}</b>
+              <b>{message.order.status === "prepared_pending_checkout" ? "购买准备已生成（待结算）" : "购买记录"} · {message.order.orderId}</b>
               <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
               <div className="order-flow-steps" aria-label="购买进度">
                 <span className="active">1 购买准备</span>
@@ -255,7 +344,7 @@ function MessageView({
                 <span className={message.order.txHash ? "active" : ""}>3 钱包确认</span>
               </div>
               <span className="order-status">
-                状态：{message.order.txHash ? "交易已确认" : "等待商家确认价格和地址"}
+                状态：{message.order.txHash ? "真实 receipt 已确认" : "购买准备中，等待商家确认价格和地址"}
               </span>
               {message.order.txHash ? (
                 <a
@@ -324,6 +413,7 @@ export function ChatPanel({
   autoQueryPrompt,
   locale = "zh",
   productLabel,
+  minimal = false,
 }: {
   onStart: () => void;
   onDone: () => void;
@@ -341,6 +431,8 @@ export function ChatPanel({
   autoQueryPrompt?: string | null;
   locale?: "zh" | "en";
   productLabel?: string;
+  /** Agent-first mode keeps operational controls folded away. */
+  minimal?: boolean;
 }) {
   const { messages, ask, pushUser, pushAgent } = useChatStream();
   const en = locale === "en";
@@ -425,6 +517,10 @@ export function ChatPanel({
   const handleOrder = async (item: RecommendItem) => {
     if (busy) return;
     try {
+      // A recommendation can move the conversation to another batch. Update
+      // the parent first so evidence, wallet, feedback, and the URL all keep
+      // the same scope while the order is prepared.
+      onBatch(item.batchId);
       const order = await createOrder(item.batchId, 1);
       void saveOrderRecord({
         orderId: order.orderId,
@@ -574,8 +670,8 @@ export function ChatPanel({
         ))}
       </div>
 
-      <div className="chat-quick">
-        <div className="quick-group">
+      <div className={`chat-quick ${minimal ? "chat-quick-minimal" : ""}`}>
+        {!minimal && <div className="quick-group">
           <span className="chat-quick-label">{en ? "Batch:" : "批次查询："}</span>
           <div className="batch-select">
             <button
@@ -607,11 +703,11 @@ export function ChatPanel({
               </div>
             )}
           </div>
-        </div>
+        </div>}
         {batchId && (
           <div className="quick-group">
             <span className="chat-quick-label">{en ? "Ask about:" : "你想了解："}</span>
-            {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).map((prompt) => (
+            {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).slice(0, minimal ? 4 : undefined).map((prompt) => (
               <button
                 key={prompt.label}
                 type="button"
@@ -627,7 +723,7 @@ export function ChatPanel({
             </button>
           </div>
         )}
-        {batchId && (
+        {batchId && !minimal && (
           <div className="quick-group">
             <span className="chat-quick-label">{en ? "Sensor simulation:" : "IoT 模拟："}</span>
             <button type="button" aria-label={en ? "Simulate normal temperature" : "模拟正常温度"} onClick={() => simulateIot("normal")} disabled={busy || iotBusy}>{en ? "Normal" : "正常温度"}</button>
@@ -635,7 +731,7 @@ export function ChatPanel({
             <button type="button" aria-label={en ? "Simulate offline device" : "模拟设备离线"} onClick={() => simulateIot("device_offline")} disabled={busy || iotBusy}>{en ? "Offline" : "设备离线"}</button>
           </div>
         )}
-        {sensorRun && (
+        {sensorRun && !minimal && (
           <div className="sensor-transfer-card" aria-live="polite">
             <div className="sensor-transfer-head"><div><span className="chat-quick-label">{en ? "Server sensor replay" : "服务器模拟传感"}</span><strong>{sensorRun.mode === "normal" ? (en ? "Temperature normal" : "温控正常") : sensorRun.mode === "cold_chain_gap" ? (en ? "Cold-chain gap" : "冷链异常") : (en ? "Device offline" : "设备离线")}</strong></div><span className={`sensor-check-pill ${sensorRun.verification?.status === "accepted" ? "pass" : "review"}`}>{sensorRun.verification?.status === "accepted" ? (en ? "Verified" : "校验通过") : (en ? "Needs review" : "进入复核")}</span></div>
             <div className="sensor-transfer-steps">{sensorRun.pipeline.map((step, index) => <span key={step} className={index === sensorRun.pipeline.length - 1 ? "done" : ""}><b>{index + 1}</b>{step}{index < sensorRun.pipeline.length - 1 && <i>→</i>}</span>)}</div>
