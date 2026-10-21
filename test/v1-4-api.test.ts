@@ -159,6 +159,13 @@ test("customer service exposes status and SSE runtime metadata", async () => {
     assert.match(stream, /"modelAssisted":false/);
     assert.match(stream, /"evidenceIds":\[\]/);
     assert.match(stream, /"pipeline":\["verifier","jev","deepseek"\]/);
+    assert.match(stream, /"promptPolicyVersion":"truthpass\.consumer\.v2"/);
+    assert.match(stream, /"modelContractVersion":"truthpass\.consumer\.v2"/);
+    assert.match(stream, /"validationStatus":"fallback"/);
+    assert.match(stream, /"stage":"reading_batch"/);
+    assert.match(stream, /"stage":"verifier_checked"/);
+    assert.match(stream, /"stage":"jev_routed"/);
+    assert.match(stream, /"stage":"model_completed"/);
     assert.match(stream, /"kind":"done"/);
   });
 });

@@ -69,6 +69,24 @@ import { prepareMediaEvidence, type MediaKind } from "./src/enterprise/media-int
 import { reconcileBatch } from "./src/enterprise/reconciliation.js";
 import { createTruthPassMcpHttpHandler } from "./src/mcp/endpoint.js";
 import { handleAgentRegistration } from "./src/web-server.js";
+import {
+  CONSUMER_MODEL_CONTRACT_VERSION,
+  CONSUMER_PROMPT_POLICY_VERSION,
+  consumerSafetyFewShot,
+  validateConsumerModelOutput,
+  type ConsumerSafetyChainContext,
+  type ConsumerSafetyResult,
+} from "./src/agents/consumer-safety.js";
+import {
+  alipayStatus,
+  createAlipayPagePayForm,
+  verifyAlipayNotify,
+  paypalStatus,
+  createPayPalOrder,
+  capturePayPalOrder,
+  verifyPayPalWebhook,
+  type PaymentOrderInput,
+} from "./src/payments/index.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
@@ -109,21 +127,16 @@ const anonymousConsumers = new AnonymousConsumerRegistry();
 
 type PaymentProvider = "alipay" | "paypal";
 function paymentProviderStatus(provider: PaymentProvider) {
-  if (provider === "alipay") {
-    return {
-      provider,
-      configured: Boolean(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PRIVATE_KEY && process.env.ALIPAY_PUBLIC_KEY),
-      mode: "official_gateway",
-      capabilities: ["page_pay", "wap_pay", "rsa2_notify_verify"],
-      secretConfig: ["ALIPAY_APP_ID", "ALIPAY_PRIVATE_KEY", "ALIPAY_PUBLIC_KEY", "ALIPAY_NOTIFY_URL"],
-    };
-  }
+  const status = provider === "alipay" ? alipayStatus() : paypalStatus();
   return {
     provider,
-    configured: Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET),
-    mode: "server_side_orders_v2",
-    capabilities: ["create_order", "capture_order", "webhook_verify"],
-    secretConfig: ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID"],
+    configured: status.configured,
+    mode: status.mode,
+    capabilities: provider === "alipay" ? ["page_pay", "wap_pay", "rsa2_notify_verify"] : ["create_order", "capture_order", "webhook_verify"],
+    missing: status.missing,
+    secretConfig: provider === "alipay"
+      ? ["ALIPAY_APP_ID", "ALIPAY_PRIVATE_KEY", "ALIPAY_PUBLIC_KEY", "ALIPAY_NOTIFY_URL"]
+      : ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID"],
   };
 }
 
@@ -138,6 +151,124 @@ function purchaseQuote(batchId: string) {
     providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")],
     note: "报价不代表已支付；未配置凭据或未收到官方网关回调/核验结果时不会返回成功。",
   };
+}
+
+type PaymentOrderRecord = {
+  orderId: string;
+  provider: PaymentProvider;
+  providerOrderId?: string;
+  tenantId: string;
+  productId: string;
+  batchId: string;
+  amount: string;
+  currency: string;
+  status: "pending" | "paid" | "failed";
+  paymentStatus: "payment_pending" | "payment_verified" | "payment_failed";
+  chainStatus: "not_started" | "anchor_pending" | "mainnet_receipt_verified";
+  createdAt: string;
+  updatedAt: string;
+  rawStatus?: Record<string, unknown>;
+};
+
+const paymentOrders = new Map<string, PaymentOrderRecord>();
+
+function paymentOrderId(provider: PaymentProvider, batchId: string): string {
+  return `TP-${provider.toUpperCase()}-${batchId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function paymentInputFromBody(body: Record<string, unknown>, provider: PaymentProvider, origin: string): { context: Omit<PaymentOrderRecord, "providerOrderId" | "status" | "paymentStatus" | "chainStatus" | "createdAt" | "updatedAt" | "rawStatus">; input: PaymentOrderInput } {
+  const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : BATCH_ID;
+  const demo = demoBatchFor(batchId);
+  const dbBatch = repository.getBatch(batchId);
+  if (!demo && !dbBatch) throw new Error("UNKNOWN_BATCH");
+  const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
+  const productId = demo ? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil") : (dbBatch?.productId ?? "");
+  if (typeof body.tenantId === "string" && body.tenantId.trim() && body.tenantId.trim() !== tenantId) throw new Error("TENANT_SCOPE_MISMATCH");
+  if (typeof body.productId === "string" && body.productId.trim() && body.productId.trim() !== productId) throw new Error("PRODUCT_SCOPE_MISMATCH");
+  const orderId = paymentOrderId(provider, batchId);
+  const configuredAmount = provider === "alipay" ? process.env.TRUTHPASS_PURCHASE_AMOUNT : (process.env.TRUTHPASS_PAYPAL_AMOUNT || process.env.TRUTHPASS_PURCHASE_AMOUNT);
+  const parsedAmount = configuredAmount === undefined ? Number.NaN : Number(configuredAmount);
+  const amount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount.toFixed(2) : "29.90";
+  const currency = provider === "alipay" ? (process.env.TRUTHPASS_PURCHASE_CURRENCY || "CNY") : (process.env.TRUTHPASS_PAYPAL_CURRENCY || "USD");
+  const subject = typeof body.subject === "string" && body.subject.trim() ? body.subject.trim().slice(0, 120) : `TruthPass ${productId} ${batchId}`;
+  const input: PaymentOrderInput = {
+    orderId,
+    batchId,
+    productId,
+    amount,
+    currency,
+    subject,
+    returnUrl: typeof body.returnUrl === "string" && body.returnUrl.startsWith("http") ? body.returnUrl : `${origin}/?payment=return&batch=${encodeURIComponent(batchId)}`,
+    cancelUrl: typeof body.cancelUrl === "string" && body.cancelUrl.startsWith("http") ? body.cancelUrl : `${origin}/?payment=cancel&batch=${encodeURIComponent(batchId)}`,
+    notifyUrl: typeof body.notifyUrl === "string" && body.notifyUrl.startsWith("http") ? body.notifyUrl : `${origin}/api/payments/alipay/notify`,
+  };
+  return { context: { orderId, provider, tenantId, productId, batchId, amount, currency }, input };
+}
+
+async function persistPaymentOrder(record: PaymentOrderRecord): Promise<void> {
+  if (!persistenceEnabled()) return;
+  try {
+    await getDatabasePool().query(
+      `insert into truthpass_payment_orders (order_id, tenant_id, product_id, batch_id, provider, provider_order_id, amount, currency, status, purchase_id, tx_hash, receipt_status, raw_status, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,now())
+       on conflict (order_id) do update set provider_order_id=excluded.provider_order_id, status=excluded.status, purchase_id=excluded.purchase_id, tx_hash=excluded.tx_hash, receipt_status=excluded.receipt_status, raw_status=excluded.raw_status, updated_at=now()`,
+      [record.orderId, record.tenantId, record.productId, record.batchId, record.provider, record.providerOrderId ?? null, record.amount, record.currency, record.status, null, null, null, JSON.stringify({ paymentStatus: record.paymentStatus, chainStatus: record.chainStatus, ...(record.rawStatus ?? {}) })],
+    );
+  } catch (error) {
+    console.error("支付订单持久化失败:", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function loadPersistedPaymentOrders(filter?: { batchId?: string; orderId?: string }): Promise<PaymentOrderRecord[]> {
+  const inMemory = [...paymentOrders.values()].filter((item) =>
+    (!filter?.batchId || item.batchId === filter.batchId) && (!filter?.orderId || item.orderId === filter.orderId),
+  );
+  if (!persistenceEnabled()) return inMemory;
+  try {
+    const clauses: string[] = [];
+    const values: string[] = [];
+    if (filter?.batchId) { values.push(filter.batchId); clauses.push(`batch_id = $${values.length}`); }
+    if (filter?.orderId) { values.push(filter.orderId); clauses.push(`order_id = $${values.length}`); }
+    const result = await getDatabasePool().query(
+      `select order_id, tenant_id, product_id, batch_id, provider, provider_order_id, amount, currency, status, raw_status, created_at, updated_at
+         from truthpass_payment_orders${clauses.length ? ` where ${clauses.join(" and ")}` : ""}
+        order by created_at desc`,
+      values,
+    );
+    const persisted = result.rows.map((row) => {
+      const raw = row.raw_status && typeof row.raw_status === "object" ? row.raw_status as Record<string, unknown> : {};
+      const status = String(row.status) as PaymentOrderRecord["status"];
+      const paymentStatus = raw.paymentStatus === "payment_verified" || status === "paid"
+        ? "payment_verified"
+        : raw.paymentStatus === "payment_failed" || status === "failed"
+          ? "payment_failed"
+          : "payment_pending";
+      const chainStatus = raw.chainStatus === "mainnet_receipt_verified" ? "mainnet_receipt_verified" : "not_started";
+      return {
+        orderId: String(row.order_id),
+        provider: String(row.provider) as PaymentProvider,
+        providerOrderId: row.provider_order_id ? String(row.provider_order_id) : undefined,
+        tenantId: String(row.tenant_id),
+        productId: String(row.product_id),
+        batchId: String(row.batch_id),
+        amount: String(row.amount),
+        currency: String(row.currency),
+        status: ["pending", "paid", "failed"].includes(status) ? status : "pending",
+        paymentStatus,
+        chainStatus,
+        createdAt: new Date(String(row.created_at)).toISOString(),
+        updatedAt: new Date(String(row.updated_at)).toISOString(),
+        rawStatus: raw,
+      } satisfies PaymentOrderRecord;
+    });
+    const merged = new Map<string, PaymentOrderRecord>();
+    for (const item of persisted) merged.set(item.orderId, item);
+    for (const item of inMemory) merged.set(item.orderId, item);
+    return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (error) {
+    console.error("支付订单读取失败:", error instanceof Error ? error.message : String(error));
+    return inMemory;
+  }
 }
 
 // ---------- 加载 .env（SMTP 等本地配置，不提交仓库） ----------
@@ -997,6 +1128,10 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
     if (raw.length > 16_384) throw new Error("请求体过大");
   }
   if (!raw) return {};
+  const contentType = typeof req.headers["content-type"] === "string" ? req.headers["content-type"] : "";
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    return Object.fromEntries(new URLSearchParams(raw).entries());
+  }
   return JSON.parse(raw);
 }
 
@@ -1159,6 +1294,7 @@ type ChatReplyResult = {
   sources?: string[];
   evidenceIds?: string[];
   chainContext?: ChainQueryContext;
+  safety?: Pick<ConsumerSafetyResult, "status" | "reasons" | "citations">;
 };
 
 type ChainQueryContext = {
@@ -1197,6 +1333,11 @@ type ChatMeta = {
   syncedAt?: string;
   sources?: string[];
   chainContext?: ChainQueryContext;
+  promptPolicyVersion?: string;
+  modelContractVersion?: string;
+  validationStatus?: ConsumerSafetyResult["status"];
+  validationReasons?: string[];
+  citedEvidenceIds?: string[];
 };
 
 const CUSTOMER_CHAT_PIPELINE = ["verifier", "jev", "deepseek"] as const;
@@ -1249,7 +1390,41 @@ async function streamChatWithReply(
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (event: unknown) => res.write("data: " + JSON.stringify(event) + "\n\n");
   send({ kind: "begin", intent });
-  const result = await reply;
+  const replyPromise = reply;
+  send({ kind: "stage", stage: "reading_batch", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  const result = await replyPromise;
+  send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "verifier_checked", status: result.status === "provider_unavailable" ? "fallback" : "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "jev_routed", status: "completed", detail: "route_to_rule", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "model_started", status: result.status === "model_assisted" ? "completed" : "fallback", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "model_completed", status: result.status === "model_assisted" ? "completed" : "fallback", detail: result.safety?.reasons?.join(",") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  if (baseMeta.batchId) {
+    const auditRun = {
+      schemaVersion: "truthpass.agent.audit.v2",
+      runId: baseMeta.traceId,
+      traceId: baseMeta.traceId,
+      batchId: baseMeta.batchId,
+      tenantId: isRiceBatch(baseMeta.batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo",
+      agentId: "truthpass.consumer-agent",
+      agentVersion: "truthpass-consumer-v2",
+      modelVersion: publicCustomerModel(),
+      promptPolicyVersion: CONSUMER_PROMPT_POLICY_VERSION,
+      modelContractVersion: CONSUMER_MODEL_CONTRACT_VERSION,
+      validationStatus: result.safety?.status ?? (result.status === "model_assisted" ? "accepted" : "fallback"),
+      validationReasons: result.safety?.reasons ?? [],
+      inputEvidenceIds: result.evidenceIds ?? [],
+      citedEvidenceIds: result.safety?.citations ?? [],
+      chainContext: baseMeta.chainContext ?? result.chainContext ?? null,
+      verificationStatus: result.status === "model_assisted" ? "model_assisted" : "deterministic_fallback",
+      createdAt: new Date().toISOString(),
+    };
+    agentAuditRuns.set(baseMeta.traceId, auditRun);
+    try {
+      await persistAgentAuditRun(baseMeta.traceId, String(auditRun.tenantId), auditRun);
+    } catch (error) {
+      console.error("消费者 Agent 审计持久化失败:", error instanceof Error ? error.message : String(error));
+    }
+  }
   console.info(JSON.stringify({ event: "customer_service_response", intent, traceId: baseMeta.traceId, batchId: baseMeta.batchId, serviceStatus: result.status, dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic" }));
   send({
     kind: "meta",
@@ -1268,6 +1443,11 @@ async function streamChatWithReply(
       jev: { decision: "route_to_rule", confidence: 0.94 },
       deepseek: { status: result.status === "model_assisted" ? "completed" : result.status === "deterministic_fallback" ? "fallback" : "unavailable" },
     },
+    promptPolicyVersion: CONSUMER_PROMPT_POLICY_VERSION,
+    modelContractVersion: CONSUMER_MODEL_CONTRACT_VERSION,
+    validationStatus: result.safety?.status ?? (result.status === "model_assisted" ? "accepted" : "fallback"),
+    validationReasons: result.safety?.reasons ?? [],
+    citedEvidenceIds: result.safety?.citations ?? [],
     ...(baseMeta.contextMode ? { contextMode: baseMeta.contextMode } : {}),
     ...(baseMeta.contextSource ? { contextSource: baseMeta.contextSource } : {}),
     ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
@@ -1290,6 +1470,12 @@ type ConsumerModelContract = {
   batchId?: string;
   dataMode: "demo/synthetic" | "external";
   chainContext?: ChainQueryContext;
+  verifier?: { status: string; reasons?: string[] };
+  jev?: { decision: string; confidence?: number };
+  evidenceIds?: string[];
+  allowedCitations?: string[];
+  allowedNumbers?: string[];
+  locale?: "zh" | "en";
 };
 
 function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContract): string | null {
@@ -1346,8 +1532,39 @@ function validConsumerModelText(text: string, contract?: ConsumerModelContract):
 
 async function callCustomerModel(systemPrompt: string, userPrompt: string, sources: string[], contract?: ConsumerModelContract): Promise<ChatReplyResult> {
   const provider = resolveAgentProvider();
-  if (!provider.configured) return { lines: [], status: "deterministic_fallback", dataMode: "demo/synthetic", sources };
+  if (!provider.configured) return {
+    lines: [],
+    status: "deterministic_fallback",
+    dataMode: "demo/synthetic",
+    sources,
+    safety: { status: "fallback", citations: [], reasons: ["provider_not_configured"] },
+  };
   const candidates = new Set<string>([providerEndpoint(provider.baseUrl)]);
+  const safetyContract = {
+    batchId: contract?.batchId,
+    dataMode: contract?.dataMode ?? "demo/synthetic",
+    evidenceIds: contract?.evidenceIds ?? [],
+    allowedCitations: contract?.allowedCitations ?? [...new Set([...sources, "product_policy", "chain_status", "customer_policy"])],
+    allowedNumbers: contract?.allowedNumbers ?? [],
+    chainContext: contract?.chainContext as ConsumerSafetyChainContext | undefined,
+    locale: contract?.locale ?? "zh",
+  };
+  const guardedSystemPrompt = [
+    systemPrompt,
+    `安全策略版本：${CONSUMER_PROMPT_POLICY_VERSION}；输出契约版本：${CONSUMER_MODEL_CONTRACT_VERSION}。`,
+    "只输出 JSON，不要输出 Markdown 代码围栏。字段必须是 conclusion、evidence、uncertainty、nextAction、citations。citations 必须是当前输入允许的来源。没有依据就明确说不知道，不要猜型号、灯号或动作结果。",
+    `当前运行上下文：${JSON.stringify({
+      batchId: safetyContract.batchId ?? null,
+      evidenceIds: safetyContract.evidenceIds,
+      verifier: contract?.verifier ?? null,
+      jev: contract?.jev ?? null,
+      chainContext: safetyContract.chainContext ?? null,
+      dataMode: safetyContract.dataMode,
+      allowedSources: safetyContract.allowedCitations,
+    })}`,
+    `允许引用：${JSON.stringify(safetyContract.allowedCitations)}。`,
+    consumerSafetyFewShot(safetyContract.locale),
+  ].join("\n");
 
   for (const endpoint of candidates) {
     try {
@@ -1358,7 +1575,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         body: JSON.stringify({
           model: provider.model,
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: guardedSystemPrompt },
             { role: "user", content: userPrompt },
           ],
           temperature: 0.2,
@@ -1374,8 +1591,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
-      const normalized = typeof content === "string" ? normalizeConsumerModelText(content, contract) : null;
-      if (!normalized) {
+      const safety = typeof content === "string" ? validateConsumerModelOutput(content, safetyContract) : { status: "rejected" as const, citations: [], reasons: ["model_content_missing"] };
+      if (safety.status !== "accepted" || !safety.text) {
         const text = typeof content === "string" ? content.trim() : "";
         const diagnostic = {
           event: "customer_service_provider_invalid_response",
@@ -1388,12 +1605,20 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
           hasUncertainty: /不确定：/.test(text),
           hasNextAction: /下一步：/.test(text),
           containsForbiddenClaim: hasUnsupportedDemoClaim(text),
+          validationReasons: safety.reasons,
         } as const;
         lastCustomerModelDiagnostic = diagnostic;
         console.warn(JSON.stringify(diagnostic));
         continue;
       }
-      return { lines: [{ cls: "plain", text: normalized }], status: "model_assisted", dataMode: "demo/synthetic", sources };
+      return {
+        lines: [{ cls: "plain", text: safety.text }],
+        status: "model_assisted",
+        dataMode: "demo/synthetic",
+        sources,
+        evidenceIds: safety.citations.filter((item) => safetyContract.evidenceIds.includes(item)),
+        safety: { status: "accepted", citations: safety.citations, reasons: [] },
+      };
     } catch (error) {
       const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString() } as const;
       lastCustomerModelDiagnostic = diagnostic;
@@ -1402,7 +1627,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     }
   }
 
-  return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources };
+  return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources, safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] } };
 }
 
 function isChainStatusQuestion(question: string): boolean {
@@ -1444,7 +1669,7 @@ async function freeChatReply(question: string, chainContext?: ChainQueryContext)
     `你是 TruthPass 商品客服。说人话，用四段短句回答，且必须严格按“结论：… 依据：… 不确定：… 下一步：…”顺序输出。依据必须写明来源（例如商品说明、售后政策、公开证据或链状态）；只引用当前输入，禁止跨批次拼接。语气直接、克制，不堆术语，不制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。${chainPrompt}`,
     chainContext ? JSON.stringify({ question, chainContext, dataMode: "demo/synthetic" }) : question,
     ["customer_policy", ...(chainContext ? ["chain_status"] : [])],
-    { dataMode: "demo/synthetic", chainContext },
+    { dataMode: "demo/synthetic", chainContext, allowedCitations: ["customer_policy", ...(chainContext ? ["chain_status"] : [])] },
   );
 }
 
@@ -1481,7 +1706,22 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
       question,
     }),
     ["evidence_card", "deterministic_verifier"],
-    { batchId, dataMode: "demo/synthetic", chainContext },
+    {
+      batchId,
+      dataMode: "demo/synthetic",
+      chainContext,
+      verifier: {
+        status: String(verification.status ?? (b.passed ? "accepted" : "rejected")),
+        reasons: Array.isArray(assessment.reasons) ? assessment.reasons.filter((item): item is string => typeof item === "string") : [],
+      },
+      jev: {
+        decision: verification.status === "accepted" ? "route_to_rule" : "request_more_evidence",
+        confidence: 0.94,
+      },
+      evidenceIds,
+      allowedCitations: [...new Set([...evidenceIds, "evidence_card", "deterministic_verifier", "product_policy", ...(chainContext ? ["chain_status"] : [])])],
+      allowedNumbers: [String(b.epaDha), String(b.peroxide), String(b.totox), String(b.coldGap)],
+    },
   );
   if (modelResult.lines.length) return { ...modelResult, evidenceIds, ...(chainContext ? { chainContext } : {}) };
   const chainFallback = chainContext
@@ -1508,6 +1748,7 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
       status: "deterministic_fallback",
       dataMode: "demo/synthetic",
       sources: ["customer_fallback"],
+      safety: { status: "fallback", citations: ["customer_fallback"], reasons: ["batch_id_required"] },
     };
     const reply = freeChatReply(question, chainContext).then((result) => result.lines.length ? { ...result, ...(chainContext ? { chainContext } : {}) } : fallback);
     await streamChatWithReply(res, "consumer_query", [], reply, { batchId: null, traceId });
@@ -2336,7 +2577,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit"],
+      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
       endpoints: {
         sites: `${origin}/api/sites`,
         site: `${origin}/api/sites/{slug}`,
@@ -2357,6 +2598,14 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         mcp: `${origin}/mcp`,
         walletBindingChallenge: `${origin}/api/wallet/bind/challenge?address={address}&tenantId={tenantId}&role={role}`,
         walletBinding: `${origin}/api/wallet/bind`,
+        paymentStatus: `${origin}/api/payments/status`,
+        purchaseQuote: `${origin}/api/public/batches/{batchId}/purchase-quote`,
+        purchaseStatus: `${origin}/api/public/batches/{batchId}/purchase-status`,
+        alipayCreate: `${origin}/api/payments/alipay/create`,
+        alipayNotify: `${origin}/api/payments/alipay/notify`,
+        paypalCreateOrder: `${origin}/api/payments/paypal/create-order`,
+        paypalCapture: `${origin}/api/payments/paypal/capture`,
+        paypalWebhook: `${origin}/api/payments/paypal/webhook`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
         enterpriseMediaPresign: `${origin}/api/tenants/{tenantId}/media/presign`,
         enterpriseMediaUpload: `${origin}/api/tenants/{tenantId}/media/upload/{uploadId}`,
@@ -3365,21 +3614,124 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/payments/status" && req.method === "GET") {
-    sendJson(res, 200, { schemaVersion: "truthpass.payment.status.v1", providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")] });
+    const orderId = (url.searchParams.get("orderId") || "").trim();
+    const order = orderId ? (await loadPersistedPaymentOrders({ orderId }))[0] : undefined;
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.payment.status.v1",
+      providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")],
+      ...(order ? { order } : {}),
+      paymentAndChainAreSeparate: true,
+      note: "payment_verified 只表示官方网关支付已核验；链上购买仍需外部钱包签名和真实 receipt。",
+    });
     return true;
   }
 
   const paymentAction = p.match(/^\/api\/payments\/(alipay|paypal)\/(create|create-order|capture|notify|webhook)$/);
-  if (paymentAction && (req.method === "POST" || req.method === "GET")) {
+  if (paymentAction && req.method === "POST") {
     const provider = paymentAction[1] as PaymentProvider;
     const action = paymentAction[2];
     const status = paymentProviderStatus(provider);
     if (!status.configured) {
-      sendJson(res, 503, { error: "provider_unconfigured", status: "provider_unconfigured", provider, action, requiredEnv: status.secretConfig });
+      sendJson(res, 503, { error: "provider_unconfigured", status: "provider_unconfigured", provider, action, requiredEnv: status.secretConfig, missing: status.missing });
       return true;
     }
-    // 真实网关调用和回调验签必须在部署环境完成；此适配层拒绝生成伪造订单或成功回执。
-    sendJson(res, 501, { error: "payment_gateway_adapter_requires_deployment_credentials", status: "adapter_not_ready", provider, action, configured: true, capabilities: status.capabilities });
+    try {
+      const body = await readBody(req);
+      const origin = `${url.protocol}//${url.host}`;
+
+      if (provider === "alipay" && action === "create") {
+        const { context, input } = paymentInputFromBody(body, provider, origin);
+        const order = createAlipayPagePayForm(input);
+        const now = new Date().toISOString();
+        const record: PaymentOrderRecord = { ...context, providerOrderId: order.providerOrderId, status: "pending", paymentStatus: "payment_pending", chainStatus: "not_started", createdAt: now, updatedAt: now };
+        paymentOrders.set(record.orderId, record);
+        await persistPaymentOrder(record);
+        sendJson(res, 201, { schemaVersion: "truthpass.payment.order.v1", provider, orderId: record.orderId, providerOrderId: record.providerOrderId, tenantId: record.tenantId, productId: record.productId, batchId: record.batchId, amount: record.amount, currency: record.currency, status: record.paymentStatus, chainStatus: record.chainStatus, formHtml: order.formHtml, note: "请提交表单到支付宝官方网关；支付成功以异步通知验签为准。" });
+        return true;
+      }
+
+      if (provider === "alipay" && action === "notify") {
+        const result = verifyAlipayNotify(Object.fromEntries(Object.entries(body).map(([key, value]) => [key, String(value)])));
+        if (!result.ok || !result.orderId) {
+          sendJson(res, 400, { status: "payment_failed", provider, reason: result.reason ?? "notify_verification_failed" });
+          return true;
+        }
+        const record = paymentOrders.get(result.orderId);
+        if (!record || record.provider !== "alipay") {
+          sendJson(res, 404, { status: "payment_unbound", provider, orderId: result.orderId });
+          return true;
+        }
+        if (result.amount && result.amount !== record.amount) {
+          sendJson(res, 422, { status: "payment_amount_mismatch", provider, orderId: record.orderId, expectedAmount: record.amount, receivedAmount: result.amount });
+          return true;
+        }
+        record.status = "paid";
+        record.paymentStatus = "payment_verified";
+        record.updatedAt = new Date().toISOString();
+        record.rawStatus = { tradeStatus: result.status, amount: result.amount };
+        await persistPaymentOrder(record);
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+        res.end("success");
+        return true;
+      }
+
+      if (provider === "paypal" && action === "create-order") {
+        const { context, input } = paymentInputFromBody(body, provider, origin);
+        const order = await createPayPalOrder(input);
+        const now = new Date().toISOString();
+        const record: PaymentOrderRecord = { ...context, providerOrderId: order.providerOrderId, status: "pending", paymentStatus: "payment_pending", chainStatus: "not_started", createdAt: now, updatedAt: now };
+        paymentOrders.set(record.orderId, record);
+        await persistPaymentOrder(record);
+        sendJson(res, 201, { schemaVersion: "truthpass.payment.order.v1", provider, orderId: record.orderId, providerOrderId: record.providerOrderId, tenantId: record.tenantId, productId: record.productId, batchId: record.batchId, amount: record.amount, currency: record.currency, status: record.paymentStatus, chainStatus: record.chainStatus, approvalUrl: order.approvalUrl, note: "用户在 PayPal 官方页面批准后，再调用 capture；capture 完成前不产生购买凭证。" });
+        return true;
+      }
+
+      if (provider === "paypal" && action === "capture") {
+        const providerOrderId = typeof body.providerOrderId === "string" ? body.providerOrderId.trim() : "";
+        const record = [...paymentOrders.values()].find((item) => item.provider === "paypal" && item.providerOrderId === providerOrderId);
+        if (!record || !providerOrderId) { sendJson(res, 404, { status: "payment_unbound", provider, providerOrderId }); return true; }
+        if (typeof body.orderId === "string" && body.orderId.trim() !== record.orderId) { sendJson(res, 422, { status: "order_scope_mismatch", provider, orderId: body.orderId }); return true; }
+        const captured = await capturePayPalOrder(providerOrderId);
+        const capturedStatus = typeof captured.status === "string" ? captured.status : "";
+        const verified = capturedStatus === "COMPLETED";
+        record.status = verified ? "paid" : "failed";
+        record.paymentStatus = verified ? "payment_verified" : "payment_failed";
+        record.updatedAt = new Date().toISOString();
+        record.rawStatus = { status: capturedStatus, providerOrderId };
+        await persistPaymentOrder(record);
+        sendJson(res, verified ? 200 : 409, { schemaVersion: "truthpass.payment.capture.v1", provider, orderId: record.orderId, providerOrderId, status: record.paymentStatus, chainStatus: record.chainStatus, rawStatus: captured });
+        return true;
+      }
+
+      if (provider === "paypal" && action === "webhook") {
+        const event = body as Record<string, unknown>;
+        const headers = req.headers;
+        const header = (name: string) => typeof headers[name] === "string" ? headers[name] as string : "";
+        const verified = await verifyPayPalWebhook({ transmissionId: header("paypal-transmission-id"), transmissionTime: header("paypal-transmission-time"), certUrl: header("paypal-cert-url"), authAlgo: header("paypal-auth-algo"), transmissionSig: header("paypal-transmission-sig"), webhookId: process.env.PAYPAL_WEBHOOK_ID?.trim() ?? "", webhookEvent: event });
+        if (!verified) { sendJson(res, 400, { status: "payment_failed", provider, reason: "webhook_signature_invalid" }); return true; }
+        const resource = (event.resource && typeof event.resource === "object") ? event.resource as Record<string, unknown> : {};
+        const related = resource.supplementary_data && typeof resource.supplementary_data === "object" ? resource.supplementary_data as Record<string, unknown> : {};
+        const relatedIds = related.related_ids && typeof related.related_ids === "object" ? related.related_ids as Record<string, unknown> : {};
+        const providerOrderId = typeof relatedIds.order_id === "string" ? relatedIds.order_id : (typeof resource.order_id === "string" ? resource.order_id : "");
+        const record = [...paymentOrders.values()].find((item) => item.provider === "paypal" && item.providerOrderId === providerOrderId);
+        if (!record) { sendJson(res, 404, { status: "payment_unbound", provider, providerOrderId }); return true; }
+        const eventType = typeof event.event_type === "string" ? event.event_type : "";
+        const completed = eventType === "PAYMENT.CAPTURE.COMPLETED" || eventType === "CHECKOUT.ORDER.COMPLETED";
+        record.status = completed ? "paid" : "pending";
+        record.paymentStatus = completed ? "payment_verified" : "payment_pending";
+        record.updatedAt = new Date().toISOString();
+        record.rawStatus = { eventType, resourceId: resource.id };
+        await persistPaymentOrder(record);
+        sendJson(res, 200, { provider, orderId: record.orderId, providerOrderId, status: record.paymentStatus, chainStatus: record.chainStatus, verified: true });
+        return true;
+      }
+
+      sendJson(res, 400, { status: "unsupported_payment_action", provider, action });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode = message === "UNKNOWN_BATCH" ? 404 : message.includes("SCOPE_MISMATCH") ? 403 : 502;
+      sendJson(res, statusCode, { status: "payment_adapter_error", provider, action, error: message });
+    }
     return true;
   }
 
@@ -3442,6 +3794,45 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       feedbackSummary: await feedbackSummaryFor(batchId),
       dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"),
     });
+    return true;
+  }
+
+  const purchaseQuoteMatch = p.match(/^\/api\/public\/batches\/([^/]+)\/purchase-quote\/?$/);
+  if (purchaseQuoteMatch && req.method === "GET") {
+    const batchId = decodeURIComponent(purchaseQuoteMatch[1]).trim().toUpperCase();
+    const demo = demoBatchFor(batchId);
+    const dbBatch = repository.getBatch(batchId);
+    if (!demo && !dbBatch) { sendJson(res, 404, { error: "unknown_batch", batchId }); return true; }
+    const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
+    const productId = demo ? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil") : (dbBatch?.productId ?? "");
+    const base = purchaseQuote(batchId);
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.purchase.quote.v1",
+      quoteId: sha256Hex32(`purchase-quote:${tenantId}:${productId}:${batchId}:${base.amount}:${base.currency}`).slice(0, 18),
+      tenantId,
+      productId,
+      batchId,
+      amount: base.amount,
+      currency: base.currency,
+      providers: base.providers,
+      expiresAt,
+      status: "quote_ready",
+      paymentStatus: "payment_pending",
+      chainStatus: "not_started",
+      note: "支付平台回调与链上购买 receipt 分开核验；任何一个环节未验证都不会显示购买成功。",
+      dataMode: demo ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"),
+    });
+    return true;
+  }
+
+  const purchaseStatusMatch = p.match(/^\/api\/public\/batches\/([^/]+)\/purchase-status\/?$/);
+  if (purchaseStatusMatch && req.method === "GET") {
+    const batchId = decodeURIComponent(purchaseStatusMatch[1]).trim().toUpperCase();
+    if (!demoBatchFor(batchId) && !repository.getBatch(batchId)) { sendJson(res, 404, { error: "unknown_batch", batchId }); return true; }
+    const payment = await loadPersistedPaymentOrders({ batchId });
+    const chain = sessionChainTxs.filter((item) => item.batchId === batchId && item.action === "purchase").map((item) => ({ txHash: item.txHash, status: item.receiptStatus === "0x1" || item.receiptStatus === "1" ? "mainnet_receipt_verified" : "review_required", eventVerified: item.eventVerified, createdAt: item.createdAt, explorerUrl: item.explorerUrl }));
+    sendJson(res, 200, { schemaVersion: "truthpass.purchase.status.v1", batchId, payments: payment, chain, purchaseConfirmed: chain.some((item) => item.status === "mainnet_receipt_verified"), dataMode: "demo/synthetic" });
     return true;
   }
 
