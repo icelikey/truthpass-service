@@ -3635,3 +3635,46 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
   .tenant-batch-card > div { align-items: stretch; flex-direction: column; }
   .tenant-site-footer { align-items: flex-start; flex-direction: column; }
 }
+
+/* Agent-first runtime trace. The rows are fed by real SSE/API events and
+   remain visible after a run so a visitor can verify what was actually read. */
+.agent-data-flow-rail { margin-top: 16px; padding: 16px; border: 1px solid rgba(200,163,106,.35); border-radius: 14px; color: #1b1c1a; background: rgba(244,239,228,.88); }
+.agent-data-flow-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.agent-data-flow-head h2 { margin: 8px 0 5px; color: #1b1c1a; font: 500 24px/1.12 Georgia, serif; }
+.agent-data-flow-head p { max-width: 590px; margin: 0; color: #736b5e; font-size: 12px; line-height: 1.5; }
+.agent-data-flow-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
+.agent-data-flow-actions button { border: 1px solid rgba(96,78,47,.32); border-radius: 999px; padding: 7px 10px; color: #625b4e; background: transparent; font-size: 11px; cursor: pointer; }
+.agent-data-flow-actions button:hover { border-color: #b83a2d; color: #8e2d23; background: rgba(184,58,45,.08); }
+.agent-flow-chip { display: inline-flex; align-items: center; min-height: 26px; padding: 5px 8px; border-radius: 999px; color: #625b4e; background: rgba(21,21,19,.08); font-size: 10px; }
+.agent-flow-chip code { color: #8e2d23; font-size: 10px; }
+.agent-data-flow-summary { display: flex; flex-wrap: wrap; gap: 9px 18px; margin-top: 13px; padding: 10px 0; border-top: 1px solid rgba(96,78,47,.14); border-bottom: 1px solid rgba(96,78,47,.14); color: #736b5e; font-size: 11px; }
+.agent-data-flow-summary b, .agent-data-flow-summary code { color: #1b1c1a; font-weight: 600; }
+.agent-data-flow-summary code { overflow-wrap: anywhere; font-size: 10px; }
+.agent-data-flow-log { max-height: 330px; overflow-y: auto; margin-top: 11px; padding: 3px 7px 3px 2px; scrollbar-width: thin; scrollbar-color: rgba(184,58,45,.38) transparent; }
+.agent-data-flow-empty { padding: 29px 15px; border: 1px dashed rgba(96,78,47,.28); border-radius: 9px; color: #736b5e; font-size: 12px; line-height: 1.5; text-align: center; }
+.agent-flow-event { position: relative; display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 10px; padding: 10px 0 10px 2px; }
+.agent-flow-event:not(:last-child)::before { content: ""; position: absolute; top: 24px; bottom: -10px; left: 8px; width: 1px; background: rgba(96,78,47,.18); }
+.agent-flow-dot { position: relative; z-index: 1; width: 11px; height: 11px; margin-top: 4px; border: 2px solid #b18a45; border-radius: 50%; background: #f4efe4; }
+.agent-flow-event.completed .agent-flow-dot { border-color: #2b7d5f; background: #dfead3; }
+.agent-flow-event.active .agent-flow-dot { border-color: #b83a2d; box-shadow: 0 0 0 4px rgba(184,58,45,.1); }
+.agent-flow-event.unavailable .agent-flow-dot, .agent-flow-event.fallback .agent-flow-dot { border-color: #b56a3b; background: #f1d8c8; }
+.agent-flow-event-body { min-width: 0; padding: 8px 10px; border: 1px solid rgba(96,78,47,.15); border-radius: 9px; background: rgba(255,255,255,.46); }
+.agent-flow-event-topline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.agent-flow-event-topline strong { color: #1b1c1a; font-size: 12px; }
+.agent-flow-event-topline time { margin-left: auto; color: #8c8375; font: 10px/1 monospace; }
+.agent-flow-source { color: #8e2d23; font-size: 10px; }
+.agent-flow-status { padding: 3px 6px; border-radius: 999px; color: #736b5e; background: rgba(21,21,19,.08); font-size: 9px; }
+.agent-flow-status.completed { color: #286449; background: #dfead3; }
+.agent-flow-status.active { color: #8e2d23; background: #f2d7d1; }
+.agent-flow-status.fallback, .agent-flow-status.unavailable { color: #8a4b32; background: #f1d8c8; }
+.agent-flow-event-body p { margin: 5px 0 0; color: #625b4e; font-size: 11px; line-height: 1.45; }
+.agent-flow-event-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 7px; color: #8c8375; font-size: 9px; }
+.agent-flow-event-meta code { color: #665f53; overflow-wrap: anywhere; }
+.agent-flow-data-mode { color: #8e2d23; }
+.agent-data-flow-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px; margin-top: 10px; color: #8c8375; font-size: 10px; line-height: 1.4; }
+@media (max-width: 680px) {
+  .agent-data-flow-head { flex-direction: column; }
+  .agent-data-flow-actions { justify-content: flex-start; }
+  .agent-flow-event-topline time { width: 100%; margin-left: 0; }
+  .agent-data-flow-log { max-height: 300px; }
+}

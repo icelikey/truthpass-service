@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
+import { AgentDataFlowRail, type AgentFlowEvent, type AgentFlowStatus } from "./AgentDataFlowRail";
 import { EvidencePanel } from "./EvidencePanel";
 import { ProductPanel } from "./ProductPanel";
 import { MerchantApp } from "./MerchantApp";
 import { InstitutionReviewPanel } from "./InstitutionReviewPanel";
 import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext";
-import type { VerifyState } from "../types";
+import type { ChatEvent, VerifyState, LifecycleView, PublicBatchOverview } from "../types";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
-import { fetchLifecycle } from "../api";
-import type { LifecycleView } from "../types";
+import { fetchBatchOverview, fetchChainStatus, fetchLifecycle } from "../api";
 
 type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
@@ -178,6 +178,26 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
   );
 }
 
+const AGENT_FLOW_STAGE_LABELS: Record<string, { zh: string; en: string }> = {
+  begin: { zh: "Agent 开始运行", en: "Agent run started" },
+  reading_batch: { zh: "读取当前批次", en: "Reading this batch" },
+  verifier_checked: { zh: "Verifier 完成规则核验", en: "Verifier checked rules" },
+  jev_routed: { zh: "JEV 完成分流", en: "JEV routed next step" },
+  model_started: { zh: "模型开始整理解释", en: "Model started explanation" },
+  model_completed: { zh: "模型解释完成", en: "Model explanation completed" },
+  answer: { zh: "回答已生成", en: "Answer generated" },
+  done: { zh: "Agent 运行结束", en: "Agent run finished" },
+};
+
+function flowStatus(event: ChatEvent): AgentFlowStatus {
+  if (event.status === "fallback") return "fallback";
+  if (event.status === "unavailable") return "unavailable";
+  if (event.status === "active") return "active";
+  if (event.status === "completed") return "completed";
+  if (event.kind === "done" || event.stage === "done") return "completed";
+  return "info";
+}
+
 function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "en" }) {
   const initialBatch = currentBatch(site);
   const [batchId, setBatchId] = useState(initialBatch);
@@ -194,31 +214,144 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     model?: string;
     provider?: string;
     modelAssisted?: boolean;
+    dataMode?: string;
+    traceId?: string;
+    evidenceIds?: string[];
+    chainContext?: ChatEvent["chainContext"];
   }>();
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
+  const [overview, setOverview] = useState<PublicBatchOverview | null>(null);
+  const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
   const [lifecycleUpdated, setLifecycleUpdated] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  const lifecycleRevisionRef = useRef<number | undefined>(undefined);
+  const flowSeqRef = useRef(0);
   const zh = locale === "zh";
+  const appendFlowEvent = useCallback((event: Omit<AgentFlowEvent, "id" | "at">) => {
+    flowSeqRef.current += 1;
+    const item: AgentFlowEvent = {
+      ...event,
+      id: `flow-${Date.now()}-${flowSeqRef.current}`,
+      at: new Date().toISOString(),
+    };
+    setFlowEvents((previous) => {
+      const duplicateActive = item.status === "active" && previous.some((candidate) => candidate.status === "active"
+        && candidate.source === item.source && candidate.label === item.label && candidate.batchId === item.batchId);
+      return duplicateActive ? previous : [...previous.slice(-99), item];
+    });
+  }, []);
   useEffect(() => {
     const nextBatch = currentBatch(site);
     setBatchId(nextBatch);
   }, [site]);
   useEffect(() => {
     let active = true;
+    setOverview(null);
+    appendFlowEvent({
+      source: "批次总览 API",
+      label: zh ? "请求批次总览" : "Requesting batch overview",
+      detail: zh ? `正在读取 ${batchId} 的商品、证据、核验和购买状态。` : `Reading product, evidence, verification, and purchase state for ${batchId}.`,
+      status: "active",
+      batchId,
+    });
+    void fetchBatchOverview(batchId).then((next) => {
+      if (!active) return;
+      setOverview(next);
+      appendFlowEvent({
+        source: "批次总览 API",
+        label: zh ? "批次总览已读取" : "Batch overview loaded",
+        detail: zh
+          ? `${next.product?.name ?? "商品"} · 核验 ${next.verification?.status ?? next.batch?.status ?? "待核验"} · ${next.evidence?.length ?? 0} 条证据。`
+          : `${next.product?.name ?? "Product"} · verification ${next.verification?.status ?? next.batch?.status ?? "pending"} · ${next.evidence?.length ?? 0} evidence records.`,
+        status: "completed",
+        batchId: next.batch?.batchId ?? batchId,
+        evidenceCount: next.evidence?.length ?? 0,
+        dataMode: next.dataMode ?? next.batch?.dataMode ?? "demo/synthetic",
+      });
+    }).catch((error: unknown) => {
+      if (!active) return;
+      appendFlowEvent({
+        source: "批次总览 API",
+        label: zh ? "批次总览读取失败" : "Batch overview failed",
+        detail: error instanceof Error ? error.message : (zh ? "接口未返回批次总览。" : "The overview API did not return a batch."),
+        status: "unavailable",
+        batchId,
+      });
+    });
+    return () => { active = false; };
+  }, [appendFlowEvent, batchId, zh]);
+
+  useEffect(() => {
+    let active = true;
+    appendFlowEvent({
+      source: "链状态 API",
+      label: zh ? "读取链状态" : "Reading chain status",
+      detail: zh ? `正在确认 Chain ${site.wallet.chainId} 的 RPC 和当前批次锚定状态。` : `Checking RPC and anchor state for Chain ${site.wallet.chainId}.`,
+      status: "active",
+      batchId,
+    });
+    void fetchChainStatus().then((chain) => {
+      if (!active) return;
+      const live = chain.liveRpc.reachable ? (zh ? "RPC 可达" : "RPC reachable") : (zh ? "RPC 不可达" : "RPC unavailable");
+      appendFlowEvent({
+        source: "链状态 API",
+        label: zh ? "链状态已返回" : "Chain status returned",
+        detail: `${chain.chainName} (${chain.chainId}) · ${live} · ${chain.sessionTransactions.length} ${zh ? "条会话交易" : "session transactions"}.`,
+        status: chain.liveRpc.reachable ? "completed" : "unavailable",
+        batchId,
+        dataMode: site.product.demoMode,
+      });
+    }).catch((error: unknown) => {
+      if (!active) return;
+      appendFlowEvent({
+        source: "链状态 API",
+        label: zh ? "链状态读取失败" : "Chain status failed",
+        detail: error instanceof Error ? error.message : (zh ? "链状态接口未返回。" : "The chain status API did not respond."),
+        status: "unavailable",
+        batchId,
+      });
+    });
+    return () => { active = false; };
+  }, [appendFlowEvent, batchId, site.product.demoMode, site.wallet.chainId, zh]);
+
+  useEffect(() => {
+    let active = true;
+    lifecycleRevisionRef.current = undefined;
     const refresh = async () => {
       try {
         const next = await fetchLifecycle(batchId);
         if (!active) return;
-        setLifecycle((previous) => {
-          setLifecycleUpdated(Boolean(previous && previous.contextRevision !== next.contextRevision));
-          return next;
+        const firstRead = lifecycleRevisionRef.current === undefined;
+        const changed = !firstRead && lifecycleRevisionRef.current !== next.contextRevision;
+        lifecycleRevisionRef.current = next.contextRevision;
+        setLifecycleUpdated(changed);
+        setLifecycle(next);
+        if (changed || firstRead) {
+          appendFlowEvent({
+            source: "生命周期 API",
+            label: changed ? (zh ? "生命周期资料刚刚更新" : "Lifecycle data updated") : (zh ? "生命周期已读取" : "Lifecycle loaded"),
+            detail: `${zh ? "上下文版本" : "Context revision"} v${next.contextRevision} · ${next.events.length} ${zh ? "个阶段" : "stages"} · ${next.nextAction === "complete" ? (zh ? "流程完成" : "complete") : `${zh ? "下一步" : "next"} ${next.nextAction}`}.`,
+            status: "completed",
+            batchId,
+            dataMode: next.dataMode,
+          });
+        }
+      } catch (error: unknown) {
+        if (!active) return;
+        appendFlowEvent({
+          source: "生命周期 API",
+          label: zh ? "生命周期读取失败" : "Lifecycle read failed",
+          detail: error instanceof Error ? error.message : (zh ? "生命周期接口未返回。" : "The lifecycle API did not respond."),
+          status: "unavailable",
+          batchId,
+          dataMode: site.product.demoMode,
         });
-      } catch { /* evidence card remains usable when the lifecycle service is unavailable */ }
+      }
     };
     void refresh();
     const timer = window.setInterval(() => { if (site.product.demoMode === "demo/synthetic") void refresh(); }, 10000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [batchId, site.product.demoMode]);
+  }, [appendFlowEvent, batchId, site.product.demoMode, zh]);
   const requestStatus = agentMeta?.serviceStatus ?? agentMeta?.agentMode;
   const modelActuallyUsed = agentMeta?.modelAssisted === true && requestStatus === "model_assisted";
   const agentRibbon = modelActuallyUsed
@@ -232,6 +365,31 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           : agentMeta
             ? (zh ? "基础回答 · DeepSeek 未参与" : "Evidence fallback · DeepSeek not used")
             : (zh ? "等待真实 Agent 查询" : "Waiting for an Agent query");
+  const handleFlowEvent = useCallback((event: ChatEvent) => {
+    const stage = event.stage ?? (AGENT_FLOW_STAGE_LABELS[event.kind] ? event.kind : undefined);
+    if (!stage && event.kind !== "meta") return;
+    const label = stage
+      ? (AGENT_FLOW_STAGE_LABELS[stage]?.[locale] ?? stage)
+      : (locale === "zh" ? "运行摘要已返回" : "Run metadata returned");
+    const detail = event.detail
+      ?? (event.pipelineDetail
+        ? `Verifier ${event.pipelineDetail.verifier.status} · JEV ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "模型" : "model"} ${event.pipelineDetail.deepseek.status}`
+        : undefined)
+      ?? event.text
+      ?? (event.kind === "meta"
+        ? (locale === "zh" ? "Verifier、JEV、模型和引用状态已写入运行摘要。" : "Verifier, JEV, model, and citation state were returned.")
+        : "");
+    appendFlowEvent({
+      source: "Agent SSE",
+      label,
+      detail,
+      status: flowStatus(event),
+      batchId: event.batchId ?? batchId,
+      traceId: event.traceId,
+      evidenceCount: event.evidenceIds?.length,
+      dataMode: event.dataMode ?? site.product.demoMode,
+    });
+  }, [appendFlowEvent, batchId, locale, site.product.demoMode]);
   return (
     <main className="tenant-site-main tenant-agent-main">
       <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "商品 Agent" : "PRODUCT AGENT"}</p><h1>{zh ? "你问什么，我查什么。" : "Ask once. Get the record."}</h1><p>{zh ? "所有流程从对话开始。需要时，我会把证据、生命周期、钱包和下一步打开给你。" : "Start with a question. I will open the evidence, lifecycle, wallet step, or next action when you need it."}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
@@ -241,8 +399,13 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
           onMeta={setAgentMeta}
+          onFlowEvent={handleFlowEvent}
           onBatch={(id) => {
             setBatchId(id);
+            if (id !== batchId) {
+              setFlowEvents([]);
+              lifecycleRevisionRef.current = undefined;
+            }
             const url = new URL(window.location.href);
             url.searchParams.set("batch", id);
             window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -257,6 +420,14 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           locale={locale}
           productLabel={site.product.name}
           minimal
+        />
+        <AgentDataFlowRail
+          events={flowEvents}
+          batchId={batchId}
+          dataMode={overview?.dataMode ?? lifecycle?.dataMode ?? site.product.demoMode}
+          traceId={agentMeta?.traceId}
+          locale={locale}
+          onClear={() => setFlowEvents([])}
         />
         <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起资料" : "Hide record") : (zh ? "打开这批资料" : "Open this record")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "只在你需要时展开详细资料" : "Open details only when needed")}</span></div>
       </section>

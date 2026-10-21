@@ -330,6 +330,23 @@ export interface LifecycleView {
   walletRoles: Array<{ stage: LifecycleStage; label: string; role: string; action: WalletActionKind; requiredRole?: string }>;
 }
 
+/** Public, read-only overview used to keep the consumer UI on one batch scope. */
+export interface PublicBatchOverview {
+  schemaVersion?: string;
+  tenant?: { tenantId?: string; slug?: string; brand?: { name?: string } | null };
+  product?: { productId?: string; name?: string; category?: string; dataMode?: "demo/synthetic" | "external" };
+  batch?: { batchId?: string; dataMode?: "demo/synthetic" | "external"; status?: string };
+  lifecycle?: LifecycleView;
+  evidence?: Array<{ evidenceId?: string; kind?: string; sourceKind?: string; dataMode?: string }>;
+  verification?: { status?: string; reasons?: string[] };
+  chainContext?: ChatEvent["chainContext"];
+  purchaseQuote?: { status?: string; amount?: string; currency?: string; chainId?: number };
+  tenantId?: string;
+  productId?: string;
+  feedbackSummary?: { count?: number; averageRating?: number; sampleMode?: string };
+  dataMode?: "demo/synthetic" | "external";
+}
+
 export interface WalletPrepareResponse {
   ok: boolean;
   action: WalletActionKind;

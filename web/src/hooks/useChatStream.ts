@@ -74,7 +74,7 @@ export function useChatStream() {
   }, []);
 
   const ask = useCallback(
-    async (question: string, batchId: string | null = null) => {
+    async (question: string, batchId: string | null = null, onEvent?: (event: ChatEvent) => void) => {
       const text = question.trim();
       if (!text) return;
 
@@ -92,6 +92,7 @@ export function useChatStream() {
           text,
           batchId,
           (event) => {
+            onEvent?.(event);
             if (event.kind === "begin") {
               patch(agentId, (m) => ({
                 ...m,
@@ -108,7 +109,7 @@ export function useChatStream() {
                   ...(stage ? { stage, stages: [...new Set([...(m.meta?.stages ?? []), stage])] } : {}),
                 },
               }));
-            } else if ((event.kind === "stage" || event.kind === "answer" || stageFromEvent(event)) && stageFromEvent(event)) {
+            } else if (event.kind !== "done" && (event.kind === "stage" || event.kind === "answer" || stageFromEvent(event)) && stageFromEvent(event)) {
               const stage = stageFromEvent(event)!;
               patch(agentId, (m) => ({
                 ...m,

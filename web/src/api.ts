@@ -15,6 +15,7 @@ import type {
   ChainContractMeta,
   LifecycleStage,
   LifecycleView,
+  PublicBatchOverview,
 } from "./types";
 import { merchantRequestHeaders } from "./merchant/merchantApi";
 
@@ -30,6 +31,8 @@ export const fetchProduct = (batchId: string) => getJson<ProductBatch>(`/api/pro
 export const fetchEvidenceLink = (batchId: string) => getJson<EvidenceStep[]>(`/api/products/${batchId}/evidence-link`);
 export const fetchJourney = (batchId: string) => getJson<Journey>(`/api/products/${batchId}/journey`);
 export const fetchLifecycle = (batchId: string) => getJson<LifecycleView>(`/api/products/${batchId}/lifecycle`);
+export const fetchBatchOverview = (batchId: string) =>
+  getJson<PublicBatchOverview>(`/api/public/batches/${encodeURIComponent(batchId)}/overview`);
 export async function simulateLifecycleStage(batchId: string, stage: LifecycleStage): Promise<LifecycleView> {
   const res = await fetch("/api/simulator/lifecycle", {
     method: "POST",

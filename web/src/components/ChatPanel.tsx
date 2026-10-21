@@ -4,7 +4,7 @@ import { createOrder, fetchRecommend, postIotSimulation, type IotSimulationMode 
 import { saveOrderRecord } from "../lib/supabase";
 import { useWallet } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
-import type { AgentStreamStage, ChatLine, OrderCard, RecommendItem } from "../types";
+import type { AgentStreamStage, ChatEvent, ChatLine, OrderCard, RecommendItem } from "../types";
 
 const FISH_OIL_BATCHES = [
   { id: "FO-2026-001", name: "深海鱼油软胶囊" },
@@ -221,6 +221,7 @@ function MessageView({
   const validationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.validationStatus ?? "");
   const citationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.citationStatus ?? "");
   const hasValidationMeta = Boolean(answerValidation.validationStatus || answerValidation.citationStatus || answerValidation.validationReasons.length || answerValidation.citationReasons.length);
+  const deterministicFallback = serviceStatus === "deterministic_fallback" && message.done && !message.error;
 
   return (
     <div className="msg agent">
@@ -278,10 +279,10 @@ function MessageView({
         </div>
       )}
       {message.done && hasValidationMeta && (
-        <div className={`answer-validation-summary ${validationPassed && citationPassed ? "passed" : "review"}`} role="status">
-          <strong>{validationPassed && citationPassed ? "回答通过格式与引用校验" : "回答需要复核"}</strong>
-          <span>{validationPassed ? "格式校验通过" : `格式校验：${answerValidation.validationStatus ?? "未提供"}`}</span>
-          <span>{citationPassed ? "引用校验通过" : `引用校验：${answerValidation.citationStatus ?? "未提供"}`}</span>
+        <div className={`answer-validation-summary ${deterministicFallback || (validationPassed && citationPassed) ? "passed" : "review"}`} role="status">
+          <strong>{deterministicFallback ? "已安全回退到基础回答" : validationPassed && citationPassed ? "回答通过格式与引用校验" : "回答需要复核"}</strong>
+          <span>{deterministicFallback ? "未发布未经校验的模型原文" : validationPassed ? "格式校验通过" : `格式校验：${answerValidation.validationStatus ?? "未提供"}`}</span>
+          <span>{deterministicFallback ? "内容来自当前批次登记资料" : citationPassed ? "引用校验通过" : `引用校验：${answerValidation.citationStatus ?? "未提供"}`}</span>
           {(answerValidation.validationReasons.length > 0 || answerValidation.citationReasons.length > 0) && (
             <small>{[...answerValidation.validationReasons, ...answerValidation.citationReasons].join("；")}</small>
           )}
@@ -402,6 +403,7 @@ export function ChatPanel({
   onStart,
   onDone,
   onMeta,
+  onFlowEvent,
   onBatch,
   onPurchasePrepared,
   onWalletPending,
@@ -418,6 +420,7 @@ export function ChatPanel({
   onStart: () => void;
   onDone: () => void;
   onMeta?: (meta: ChatMessage["meta"]) => void;
+  onFlowEvent?: (event: ChatEvent) => void;
   onBatch: (id: string) => void;
   onPurchasePrepared?: () => void;
   onWalletPending?: () => void;
@@ -480,10 +483,10 @@ export function ChatPanel({
     if (bid) {
       onStart();
       onBatch(bid);
-      await ask(question, bid);
+      await ask(question, bid, onFlowEvent);
       onDone();
     } else {
-      await ask(question, "");
+      await ask(question, "", onFlowEvent);
     }
   };
 
@@ -581,7 +584,7 @@ export function ChatPanel({
     try {
       const result = await postIotSimulation(target, mode);
       setSensorRun({ mode, evidenceId: result.evidenceId, payloadHash: result.payloadHash, message: result.message, pipeline: result.pipeline ?? ["设备发送", "服务端接收", "批次关联", "确定性校验"], verification: result.verification });
-      await ask(`已上传 IoT 模拟数据：${mode}`, target);
+      await ask(`已上传 IoT 模拟数据：${mode}`, target, onFlowEvent);
     } catch (error) {
       console.error("IoT 模拟上传失败", error);
     } finally {
