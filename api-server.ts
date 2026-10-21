@@ -107,6 +107,39 @@ let lastCustomerModelDiagnostic: { endpointHost: string; status?: number; errorT
 const publicPolicyRegistry = createDefaultProductPolicyRegistry();
 const anonymousConsumers = new AnonymousConsumerRegistry();
 
+type PaymentProvider = "alipay" | "paypal";
+function paymentProviderStatus(provider: PaymentProvider) {
+  if (provider === "alipay") {
+    return {
+      provider,
+      configured: Boolean(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PRIVATE_KEY && process.env.ALIPAY_PUBLIC_KEY),
+      mode: "official_gateway",
+      capabilities: ["page_pay", "wap_pay", "rsa2_notify_verify"],
+      secretConfig: ["ALIPAY_APP_ID", "ALIPAY_PRIVATE_KEY", "ALIPAY_PUBLIC_KEY", "ALIPAY_NOTIFY_URL"],
+    };
+  }
+  return {
+    provider,
+    configured: Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET),
+    mode: "server_side_orders_v2",
+    capabilities: ["create_order", "capture_order", "webhook_verify"],
+    secretConfig: ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID"],
+  };
+}
+
+function purchaseQuote(batchId: string) {
+  const amount = Number(process.env.TRUTHPASS_PURCHASE_AMOUNT || "29.90");
+  return {
+    batchId,
+    amount: Number.isFinite(amount) && amount > 0 ? amount.toFixed(2) : "29.90",
+    currency: process.env.TRUTHPASS_PURCHASE_CURRENCY || "CNY",
+    status: "quote_only",
+    paymentRequired: true,
+    providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")],
+    note: "报价不代表已支付；未配置凭据或未收到官方网关回调/核验结果时不会返回成功。",
+  };
+}
+
 // ---------- 加载 .env（SMTP 等本地配置，不提交仓库） ----------
 async function loadEnv(): Promise<void> {
   try {
@@ -2157,6 +2190,30 @@ const mcpHttpHandler = createTruthPassMcpHttpHandler({
 });
 
 // ---------- 路由 ----------
+async function feedbackSummaryFor(batchId: string) {
+  const memory = consumers.listFeedback(batchId);
+  let rows: Array<{ rating: number; data_mode?: string; created_at?: string }> = [];
+  if (persistenceEnabled()) {
+    try {
+      const result = await getDatabasePool().query(
+        "select rating, created_at from consumer_feedbacks where batch_id = $1 order by created_at desc limit 500",
+        [batchId],
+      );
+      rows = result.rows as Array<{ rating: number; created_at?: string }>;
+    } catch (error) {
+      console.error("反馈汇总读取失败:", error instanceof Error ? error.message : String(error));
+    }
+  }
+  const ratings = [...memory.map((item) => item.rating), ...rows.map((item) => Number(item.rating)).filter(Number.isFinite)];
+  return {
+    count: ratings.length,
+    averageRating: ratings.length ? Number((ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(2)) : null,
+    dataMode: rows.length ? "external" : "demo/synthetic",
+    verifiedPurchaseOnly: true,
+    note: ratings.length ? "仅统计已绑定购买记录的反馈。" : "当前没有已核验购买反馈。",
+  };
+}
+
 export async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const p = url.pathname;
 
@@ -3269,6 +3326,14 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         coldGap: item.coldGap,
         reason: `EPA+DHA ${item.epaDha}%、过氧化值 ${item.peroxide} meq/kg、冷链中断 ${item.coldGap} 小时，综合表现优秀`,
         expertise: "EPA+DHA 是鱼油的核心 Omega-3 成分，含量 ≥70% 属于高浓度配方；过氧化值越低说明油脂越新鲜；冷链中断越短，活性成分保存越好。",
+        evidence: {
+          dataMode: "demo/synthetic",
+          verificationStatus: item.passed ? "accepted" : "rejected",
+          evidenceRefs: [`${item.batchId}:inspection`, `${item.batchId}:cold-chain`, `${item.batchId}:quality`],
+          metrics: { epaDhaPercent: item.epaDha, peroxideValue: item.peroxide, coldChainGapHours: item.coldGap },
+          policy: { id: policy.policyId, version: policy.version },
+        },
+        purchaseQuote: purchaseQuote(item.batchId),
       }));
     sendJson(res, 200, items);
     return true;
@@ -3296,6 +3361,25 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       nextAction: "send_to_checkout_adapter",
       dataMode: "demo/synthetic",
     });
+    return true;
+  }
+
+  if (p === "/api/payments/status" && req.method === "GET") {
+    sendJson(res, 200, { schemaVersion: "truthpass.payment.status.v1", providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")] });
+    return true;
+  }
+
+  const paymentAction = p.match(/^\/api\/payments\/(alipay|paypal)\/(create|create-order|capture|notify|webhook)$/);
+  if (paymentAction && (req.method === "POST" || req.method === "GET")) {
+    const provider = paymentAction[1] as PaymentProvider;
+    const action = paymentAction[2];
+    const status = paymentProviderStatus(provider);
+    if (!status.configured) {
+      sendJson(res, 503, { error: "provider_unconfigured", status: "provider_unconfigured", provider, action, requiredEnv: status.secretConfig });
+      return true;
+    }
+    // 真实网关调用和回调验签必须在部署环境完成；此适配层拒绝生成伪造订单或成功回执。
+    sendJson(res, 501, { error: "payment_gateway_adapter_requires_deployment_credentials", status: "adapter_not_ready", provider, action, configured: true, capabilities: status.capabilities });
     return true;
   }
 
@@ -3352,7 +3436,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         status: "prepared_pending_checkout",
         note: "购买准备不等于支付成功；只有外部钱包签名并回读真实 receipt 后才会写入购买记录。",
       },
-      feedbackSummary: { count: 0, averageRating: null, dataMode: "demo/synthetic", note: "演示站点尚未绑定真实购买反馈。" },
+      purchaseQuote: purchaseQuote(batchId),
+      tenantId: tenant?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
+      productId: product.productId,
+      feedbackSummary: await feedbackSummaryFor(batchId),
       dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"),
     });
     return true;
@@ -3580,6 +3667,35 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  const feedbackSummaryMatch = p.match(/^\/api\/feedback\/summary\/?$/);
+  if (feedbackSummaryMatch && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    if (!demoBatchFor(batchId) && !repository.getBatch(batchId)) {
+      sendJson(res, 404, { error: "批次不存在", batchId });
+      return true;
+    }
+    sendJson(res, 200, { batchId, ...(await feedbackSummaryFor(batchId)), schemaVersion: "truthpass.feedback.summary.v1" });
+    return true;
+  }
+
+  if (p === "/api/production/improvement-report" && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const inspection = await mcpInspectBatch(batchId, requestTraceId(req));
+    const unresolved = inspection.verification.status !== "accepted" ? inspection.verification.reasons : [];
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.production.improvement-report.v1",
+      batchId,
+      readOnly: true,
+      dataMode: inspection.verification.dataClass,
+      generatedAt: new Date().toISOString(),
+      findings: unresolved.map((reason, index) => ({ id: `finding-${index + 1}`, severity: "medium", reason, status: "open" })),
+      recommendations: unresolved.length ? ["补齐缺失证据并重新运行确定性验收", "由授权生产或检测方提交可核验原始记录"] : ["保持当前采集频率并持续回读链上 receipt"],
+      evidenceRoot: inspection.verification.evidenceRoot,
+      disclaimer: "该报告是只读改进建议，不改变验收结论、不代表生产已完成整改。",
+    });
+    return true;
+  }
+
   if (p === "/api/feedback" && req.method === "POST") {
     const body = await readBody(req);
     const batchId = typeof body.batchId === "string" ? body.batchId : "";
@@ -3588,8 +3704,15 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const allowedCategories = ["包装完好", "无明显腥味", "批次可查", "口感不错", "日期新鲜", "物流快速", "保存方便"];
     const categories = Array.isArray(body.categories) ? body.categories.filter((value): value is string => typeof value === "string") : [];
     const comment = typeof body.comment === "string" ? body.comment.trim() : "";
+    const demoMode = body.dataMode === "demo/synthetic" || body.demoMode === true;
+    const purchaseId = typeof body.purchaseId === "string" ? body.purchaseId.trim() : "";
+    const txHash = typeof body.txHash === "string" ? body.txHash.trim() : "";
     if (body.consent !== true || body.purchaseConfirmed !== true) {
       sendJson(res, 400, { error: "提交反馈需要明确授权并确认已购买该批次" });
+      return true;
+    }
+    if (!demoMode && (!purchaseId || !/^0x[0-9a-fA-F]{64}$/.test(txHash))) {
+      sendJson(res, 400, { error: "生产反馈必须提供已核验 purchaseId 和 txHash；如为演示请显式标记 dataMode=demo/synthetic", status: "verified_purchase_required" });
       return true;
     }
     if (!b && !repository.getBatch(batchId)) {
@@ -3608,6 +3731,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       sendJson(res, 400, { error: "补充反馈最多 1000 字符" });
       return true;
     }
+    const verifiedPurchase = !demoMode && sessionChainTxs.some((item) => item.txHash.toLowerCase() === txHash.toLowerCase() && item.batchId === batchId && item.action === "purchase" && item.eventVerified && (item.receiptStatus === "0x1" || item.receiptStatus === "1"));
+    if (!demoMode && !verifiedPurchase) {
+      sendJson(res, 422, { error: "txHash 未在本服务中通过 PurchaseRecorded receipt 核验", status: "purchase_receipt_unverified", txHash, explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}` });
+      return true;
+    }
     const consentRecord = await consumers.grantConsent({
       consumerId,
       batchId,
@@ -3617,14 +3745,16 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const freshPurchase = await consumers.recordPurchase({
       consumerId,
       batchId,
-      purchaseProofHash: createHash("sha256").update("purchase-assertion:" + batchId + ":" + Date.now() + ":" + Math.random()).digest("hex"),
+      purchaseProofHash: demoMode
+        ? createHash("sha256").update("demo-purchase-proof:" + batchId + ":" + Date.now() + ":" + Math.random()).digest("hex")
+        : txHash,
       createdAt: new Date().toISOString(),
     });
     const feedback = await consumers.recordFeedback({
       purchaseId: freshPurchase.purchaseId,
       rating,
       categories,
-      evidence: { source: "demo/synthetic", purchaseConfirmedByConsumer: true, comment },
+      evidence: { source: demoMode ? "demo/synthetic" : "verified_purchase_receipt", purchaseConfirmedByConsumer: true, txHash: demoMode ? undefined : txHash, comment },
     });
     const persisted = persistenceEnabled() && Boolean(repository.getBatch(batchId));
     if (persisted) {
@@ -3658,7 +3788,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
             `证据哈希：${feedback.evidenceHash}`,
             `反馈编号：${feedback.feedbackId}`,
             "",
-            "用户已勾选授权并确认购买；该购买声明未作外部核验。",
+            demoMode ? "演示反馈：购买声明未作外部核验。" : `生产反馈：已核验 purchaseId=${freshPurchase.purchaseId}，txHash=${txHash}`,
           ].join("\n"),
         });
       } catch (error) {
@@ -3670,8 +3800,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       persisted,
       feedbackId: feedback.feedbackId,
       purchaseId: freshPurchase.purchaseId,
+      verifiedPurchaseId: demoMode ? undefined : purchaseId,
       contributionPoints: feedback.contributionPoints,
       evidenceHash: feedback.evidenceHash,
+      dataMode: demoMode ? "demo/synthetic" : "external",
       chain: {
         chainId: BOT_CHAIN_MAINNET.chainId,
         consumerGatewayAddress: BOT_CHAIN_MAINNET.contracts.consumerGateway.address,
