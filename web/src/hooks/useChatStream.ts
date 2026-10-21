@@ -18,6 +18,7 @@ export interface ChatMessage {
     | "provider"
     | "model"
     | "modelAssisted"
+    | "fallbackApplied"
     | "evidenceIds"
     | "pipeline"
     | "pipelineDetail"

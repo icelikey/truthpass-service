@@ -1290,6 +1290,11 @@ type ChatServiceStatus = "model_assisted" | "deterministic_fallback" | "provider
 type ChatReplyResult = {
   lines: Array<{ cls: string; text: string }>;
   status: ChatServiceStatus;
+  /** The deterministic answer was emitted after a model/provider failure. */
+  fallbackApplied?: boolean;
+  /** The rule verifier already ran before the model was asked to explain. */
+  verifierStatus?: string;
+  verifierReasons?: string[];
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
@@ -1320,6 +1325,7 @@ type ChatMeta = {
   /** Public model identifier only; never expose credentials or prompt text. */
   model?: string;
   modelAssisted?: boolean;
+  fallbackApplied?: boolean;
   evidenceIds?: string[];
   pipeline?: string[];
   pipelineDetail?: {
@@ -1394,7 +1400,7 @@ async function streamChatWithReply(
   send({ kind: "stage", stage: "reading_batch", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
   const result = await replyPromise;
   send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
-  send({ kind: "stage", stage: "verifier_checked", status: result.status === "provider_unavailable" ? "fallback" : "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "verifier_checked", status: result.verifierStatus === "not_run" ? "fallback" : "completed", detail: result.verifierStatus ?? "checked", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
   send({ kind: "stage", stage: "jev_routed", status: "completed", detail: "route_to_rule", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
   send({ kind: "stage", stage: "model_started", status: result.status === "model_assisted" ? "completed" : "fallback", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
   send({ kind: "stage", stage: "model_completed", status: result.status === "model_assisted" ? "completed" : "fallback", detail: result.safety?.reasons?.join(",") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId });
@@ -1439,7 +1445,7 @@ async function streamChatWithReply(
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
     pipelineDetail: {
-      verifier: { status: result.status === "provider_unavailable" ? "not_run" : "checked" },
+      verifier: { status: result.verifierStatus ?? "checked", reasons: result.verifierReasons },
       jev: { decision: "route_to_rule", confidence: 0.94 },
       deepseek: { status: result.status === "model_assisted" ? "completed" : result.status === "deterministic_fallback" ? "fallback" : "unavailable" },
     },
@@ -1448,6 +1454,7 @@ async function streamChatWithReply(
     validationStatus: result.safety?.status ?? (result.status === "model_assisted" ? "accepted" : "fallback"),
     validationReasons: result.safety?.reasons ?? [],
     citedEvidenceIds: result.safety?.citations ?? [],
+    fallbackApplied: result.fallbackApplied === true,
     ...(baseMeta.contextMode ? { contextMode: baseMeta.contextMode } : {}),
     ...(baseMeta.contextSource ? { contextSource: baseMeta.contextSource } : {}),
     ...(baseMeta.contextRevision !== undefined ? { contextRevision: baseMeta.contextRevision } : {}),
@@ -1723,11 +1730,41 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
       allowedNumbers: [String(b.epaDha), String(b.peroxide), String(b.totox), String(b.coldGap)],
     },
   );
-  if (modelResult.lines.length) return { ...modelResult, evidenceIds, ...(chainContext ? { chainContext } : {}) };
+  const verifierStatus = String(verification.status ?? (b.passed ? "accepted" : "rejected"));
+  const verifierReasons = Array.isArray(assessment.reasons)
+    ? assessment.reasons.filter((item): item is string => typeof item === "string")
+    : [];
+  if (modelResult.lines.length) {
+    return {
+      ...modelResult,
+      evidenceIds,
+      verifierStatus,
+      verifierReasons,
+      ...(chainContext ? { chainContext } : {}),
+    };
+  }
+  const fallbackCitations = [
+    "evidence_card",
+    "deterministic_verifier",
+    ...(chainContext ? ["chain_status"] : []),
+  ];
   const chainFallback = chainContext
     ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：来源为 chain_status（Chain ${chainContext.chainId} · ${chainContext.chainName}）${chainContext.transaction ? `，本次会话交易为 ${chainContext.transaction.event}` : "，没有本次会话交易 receipt"}。不确定：链节点可读取不等于批次已锚定；当前 dataMode 为 demo/synthetic。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
     : fallbackText;
-  return { ...modelResult, lines: [{ cls: "conclusion", text: chainFallback }], evidenceIds, ...(chainContext ? { chainContext } : {}) };
+  return {
+    ...modelResult,
+    lines: [{ cls: "conclusion", text: chainFallback }],
+    fallbackApplied: true,
+    evidenceIds,
+    verifierStatus,
+    verifierReasons,
+    safety: {
+      status: "fallback",
+      citations: fallbackCitations,
+      reasons: modelResult.safety?.reasons ?? ["model_output_rejected_or_unavailable"],
+    },
+    ...(chainContext ? { chainContext } : {}),
+  };
 }
 
 async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse): Promise<void> {

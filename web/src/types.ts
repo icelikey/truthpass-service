@@ -134,6 +134,7 @@ export interface ChatEvent {
   provider?: string;
   model?: string;
   modelAssisted?: boolean;
+  fallbackApplied?: boolean;
   evidenceIds?: string[];
   pipeline?: string[];
   pipelineDetail?: {

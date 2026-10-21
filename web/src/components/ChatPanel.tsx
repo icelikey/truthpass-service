@@ -221,7 +221,7 @@ function MessageView({
   const validationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.validationStatus ?? "");
   const citationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.citationStatus ?? "");
   const hasValidationMeta = Boolean(answerValidation.validationStatus || answerValidation.citationStatus || answerValidation.validationReasons.length || answerValidation.citationReasons.length);
-  const deterministicFallback = serviceStatus === "deterministic_fallback" && message.done && !message.error;
+  const deterministicFallback = (serviceStatus === "deterministic_fallback" || message.meta?.fallbackApplied === true) && message.done && !message.error;
 
   return (
     <div className="msg agent">
