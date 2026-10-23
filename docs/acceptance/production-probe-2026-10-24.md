@@ -61,3 +61,14 @@ GET /api/agent/status:
 ## 链和数据边界
 
 当前线上公开批次仍为 `demo/synthetic`，链状态为 `anchor_pending`。本探针没有执行钱包签名、广播、付款或任何写入操作；不能把线上模型可用等同于真实商品认证或真实购买完成。
+
+## 本次发布状态
+
+代码已推送到：
+
+```text
+origin/codex/frontend-grok-v1.5.0
+HEAD 11588d0
+```
+
+本次没有执行 Vercel Production 部署：本地 `vercel` CLI 未配置登录凭据，环境中也没有 `VERCEL_TOKEN`；因此不能把 Git push 当成线上部署。下一次部署需要在有权限的环境执行 `vercel --prod` 或等价的 Vercel 集成部署，然后重新跑上述探针。
