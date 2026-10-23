@@ -19,6 +19,7 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
       purchaseReceipt.eventVerified === true &&
       (purchaseReceipt.receiptStatus === "0x1" || purchaseReceipt.receiptStatus === "1"),
   );
+  const verifiedPurchaseId = purchaseReceipt?.ids?.purchaseId;
   const [consent, setConsent] = useState(false);
   const [purchaseConfirmed, setPurchaseConfirmed] = useState(false);
   const [anchorOnChain, setAnchorOnChain] = useState(true);
@@ -39,7 +40,8 @@ export function Community({ onToast, onFeedbackSubmitted, batchId }: { onToast: 
     if (!batchId || !purchaseReceiptReady || !consent || !purchaseConfirmed || submitting) return;
     setSubmitting(true);
     try {
-      const result = await postFeedback(batchId, rating, tags, consent, purchaseConfirmed, comment.trim() || undefined);
+      if (!verifiedPurchaseId || !purchaseReceipt?.txHash) throw new Error("缺少已核验购买凭证");
+      const result = await postFeedback(batchId, rating, tags, consent, purchaseConfirmed, comment.trim() || undefined, verifiedPurchaseId, purchaseReceipt.txHash);
       let chainTx: SessionChainTx | undefined;
 
       if (anchorOnChain && address) {

@@ -32,6 +32,8 @@ export interface ChatMessage {
     | "chainContext"
     | "stage"
     | "stages"
+    | "stageStatuses"
+    | "stageDetails"
   >;
 }
 
@@ -75,7 +77,7 @@ export function useChatStream() {
   }, []);
 
   const ask = useCallback(
-    async (question: string, batchId: string | null = null, onEvent?: (event: ChatEvent) => void) => {
+    async (question: string, batchId: string | null = null, onEvent?: (event: ChatEvent) => void, locale: "zh" | "en" = "zh") => {
       const text = question.trim();
       if (!text) return;
 
@@ -98,7 +100,7 @@ export function useChatStream() {
               patch(agentId, (m) => ({
                 ...m,
                 lines: [],
-                meta: { ...m.meta, ...event, stage: "begin", stages: ["begin"] },
+                meta: { ...m.meta, ...event, stage: "begin", stages: ["begin"], stageStatuses: { ...(m.meta?.stageStatuses ?? {}), begin: "completed" } },
               }));
             } else if (event.kind === "meta") {
               const stage = stageFromEvent(event);
@@ -108,6 +110,7 @@ export function useChatStream() {
                   ...m.meta,
                   ...event,
                   ...(stage ? { stage, stages: [...new Set([...(m.meta?.stages ?? []), stage])] } : {}),
+                  ...(stage ? { stageStatuses: { ...(m.meta?.stageStatuses ?? {}), [stage]: event.status ?? "completed" }, stageDetails: event.detail ? { ...(m.meta?.stageDetails ?? {}), [stage]: event.detail } : m.meta?.stageDetails } : {}),
                 },
               }));
             } else if (event.kind !== "done" && (event.kind === "stage" || event.kind === "answer" || stageFromEvent(event)) && stageFromEvent(event)) {
@@ -119,6 +122,8 @@ export function useChatStream() {
                   ...event,
                   stage,
                   stages: [...new Set([...(m.meta?.stages ?? []), stage])],
+                  stageStatuses: { ...(m.meta?.stageStatuses ?? {}), [stage]: event.status ?? "completed" },
+                  stageDetails: event.detail ? { ...(m.meta?.stageDetails ?? {}), [stage]: event.detail } : m.meta?.stageDetails,
                 },
                 ...(event.kind === "answer" && event.cls && event.text
                   ? { lines: [...m.lines, { cls: event.cls, text: event.text }] }
@@ -136,11 +141,12 @@ export function useChatStream() {
               patch(agentId, (m) => ({
                 ...m,
                 done: true,
-                meta: { ...m.meta, ...event, stage: "done", stages: [...new Set<AgentStreamStage>([...(m.meta?.stages ?? []), "done"])] },
+                meta: { ...m.meta, ...event, stage: "done", stages: [...new Set<AgentStreamStage>([...(m.meta?.stages ?? []), "done"])], stageStatuses: { ...(m.meta?.stageStatuses ?? {}), done: "completed" } },
               }));
             }
           },
           controller.signal,
+          locale,
         );
       } catch {
         if (!controller.signal.aborted) {

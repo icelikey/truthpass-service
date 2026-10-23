@@ -22,7 +22,21 @@ import { ConsumerParticipationRegistry } from "./src/consumer.js";
 import { TruthPassTools } from "./src/tools/truthpass-tools.js";
 import { TrustedIssuerKeyRegistry, type TrustedIssuerPublicKey } from "./src/security/evidence-signatures.js";
 import { resolveStaticFilePath } from "./src/static-path.js";
-import { createPostgresReplayGuard, getDatabasePool, persistConsumerRun, persistenceEnabled } from "./src/data/persistence.js";
+import {
+  createPostgresReplayGuard,
+  getDatabasePool,
+  loadPersistedChainTransactions,
+  loadPersistedFeedbackDraft,
+  loadPersistedLifecycleState,
+  markFeedbackDraftConsumed,
+  persistFeedbackDraft,
+  persistChainTransaction,
+  persistConsumerRun,
+  persistLifecycleState,
+  loadPersistedTenantSites,
+  persistTenantSite,
+  persistenceEnabled,
+} from "./src/data/persistence.js";
 import { loadExecutionEvidenceFromPostgres, loadRepositoryFromPostgres } from "./src/data/postgres-reader.js";
 import { answerConsumerQuestion, type ConsumerEvidenceSnapshot } from "./src/agents/consumer-assistant.js";
 import { renderConsumerFacts, runAgentCollaboration } from "./src/agents/collaboration.js";
@@ -38,6 +52,7 @@ import {
   buildRecordContributionTransaction,
   buildRaiseDisputeTransaction,
   buildConsumerGatewayPurchaseTransaction,
+  buildPaidConsumerGatewayPurchaseTransaction,
   buildConsumerGatewayContributionTransaction,
   buildConsumerGatewayDisputeTransaction,
   buildAuditEscrowOpenChallengeTransaction,
@@ -142,6 +157,7 @@ function paymentProviderStatus(provider: PaymentProvider) {
 
 function purchaseQuote(batchId: string) {
   const amount = Number(process.env.TRUTHPASS_PURCHASE_AMOUNT || "29.90");
+  const paidGateway = configuredPaidConsumerGateway();
   return {
     batchId,
     amount: Number.isFinite(amount) && amount > 0 ? amount.toFixed(2) : "29.90",
@@ -149,9 +165,41 @@ function purchaseQuote(batchId: string) {
     status: "quote_only",
     paymentRequired: true,
     providers: [paymentProviderStatus("alipay"), paymentProviderStatus("paypal")],
+    chainPayment: paidGateway
+      ? { enabled: true, chainId: BOT_CHAIN_MAINNET.chainId, gatewayAddress: paidGateway.address, amountWei: paidGateway.priceWei, amountBot: "0.001", status: "quote_ready" }
+      : { enabled: false, chainId: BOT_CHAIN_MAINNET.chainId, gatewayAddress: null, amountWei: "0", amountBot: "0", status: "not_configured" },
     note: "报价不代表已支付；未配置凭据或未收到官方网关回调/核验结果时不会返回成功。",
   };
 }
+
+function configuredPaidConsumerGateway(): { address: string; priceWei: string } | undefined {
+  const address = process.env.TRUTHPASS_PAID_CONSUMER_GATEWAY_ADDRESS?.trim() ?? "";
+  const priceWei = (process.env.TRUTHPASS_PURCHASE_PRICE_WEI?.trim() || "1000000000000000");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address) || !/^\d+$/.test(priceWei) || BigInt(priceWei) <= 0n) return undefined;
+  return { address, priceWei };
+}
+
+type RecommendationRecord = {
+  batchId: string;
+  tenantId: string;
+  productId: string;
+  recommendationStatus: "recommend_with_scope" | "review_before_recommendation" | "do_not_recommend";
+  verificationStatus: string;
+  productionEvidence: ReturnType<typeof productionProcessFor>;
+  inspectionEvidence: Array<Record<string, unknown>>;
+  coldChainEvidence: Array<Record<string, unknown>>;
+  feedbackSummary: Record<string, unknown>;
+  missingItems: string[];
+  conflicts: string[];
+  /** Ordered deterministic gate reasons, with concrete parameters first. */
+  gateReasons: string[];
+  evidenceIds: string[];
+  reason: string;
+  nextAction: string;
+  traceId: string;
+  dataMode: "demo/synthetic" | "external";
+  item: Record<string, unknown>;
+};
 
 type PaymentOrderRecord = {
   orderId: string;
@@ -171,6 +219,47 @@ type PaymentOrderRecord = {
 };
 
 const paymentOrders = new Map<string, PaymentOrderRecord>();
+
+class PaymentPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super("PAYMENT_PERSISTENCE_FAILED");
+    this.name = "PaymentPersistenceError";
+    this.cause = cause;
+  }
+}
+
+let paymentSchemaReady: Promise<void> | undefined;
+
+async function ensurePaymentOrderSchema(): Promise<void> {
+  paymentSchemaReady ??= getDatabasePool().query(`
+    create table if not exists truthpass_payment_orders (
+      order_id text primary key,
+      tenant_id text not null default 'demo',
+      product_id text not null default '',
+      batch_id text not null,
+      provider text not null check (provider in ('alipay','paypal')),
+      provider_order_id text,
+      amount numeric(18,2) not null,
+      currency text not null,
+      status text not null check (status in ('quote_only','pending','paid','failed','refunded')) default 'quote_only',
+      purchase_id text,
+      tx_hash text,
+      receipt_status text,
+      raw_status jsonb,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create unique index if not exists truthpass_payment_provider_order_idx
+      on truthpass_payment_orders (provider, provider_order_id)
+      where provider_order_id is not null;
+    create index if not exists truthpass_payment_orders_batch_idx
+      on truthpass_payment_orders (batch_id, created_at desc);
+  `).then(() => undefined).catch((error) => {
+    paymentSchemaReady = undefined;
+    throw error;
+  });
+  await paymentSchemaReady;
+}
 
 function paymentOrderId(provider: PaymentProvider, batchId: string): string {
   return `TP-${provider.toUpperCase()}-${batchId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -208,6 +297,7 @@ function paymentInputFromBody(body: Record<string, unknown>, provider: PaymentPr
 async function persistPaymentOrder(record: PaymentOrderRecord): Promise<void> {
   if (!persistenceEnabled()) return;
   try {
+    await ensurePaymentOrderSchema();
     await getDatabasePool().query(
       `insert into truthpass_payment_orders (order_id, tenant_id, product_id, batch_id, provider, provider_order_id, amount, currency, status, purchase_id, tx_hash, receipt_status, raw_status, updated_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,now())
@@ -216,19 +306,23 @@ async function persistPaymentOrder(record: PaymentOrderRecord): Promise<void> {
     );
   } catch (error) {
     console.error("支付订单持久化失败:", error instanceof Error ? error.message : String(error));
+    throw new PaymentPersistenceError(error);
   }
 }
 
-async function loadPersistedPaymentOrders(filter?: { batchId?: string; orderId?: string }): Promise<PaymentOrderRecord[]> {
+async function loadPersistedPaymentOrders(filter?: { batchId?: string; orderId?: string; provider?: PaymentProvider; providerOrderId?: string; required?: boolean }): Promise<PaymentOrderRecord[]> {
   const inMemory = [...paymentOrders.values()].filter((item) =>
     (!filter?.batchId || item.batchId === filter.batchId) && (!filter?.orderId || item.orderId === filter.orderId),
   );
   if (!persistenceEnabled()) return inMemory;
   try {
+    await ensurePaymentOrderSchema();
     const clauses: string[] = [];
     const values: string[] = [];
     if (filter?.batchId) { values.push(filter.batchId); clauses.push(`batch_id = $${values.length}`); }
     if (filter?.orderId) { values.push(filter.orderId); clauses.push(`order_id = $${values.length}`); }
+    if (filter?.provider) { values.push(filter.provider); clauses.push(`provider = $${values.length}`); }
+    if (filter?.providerOrderId) { values.push(filter.providerOrderId); clauses.push(`provider_order_id = $${values.length}`); }
     const result = await getDatabasePool().query(
       `select order_id, tenant_id, product_id, batch_id, provider, provider_order_id, amount, currency, status, raw_status, created_at, updated_at
          from truthpass_payment_orders${clauses.length ? ` where ${clauses.join(" and ")}` : ""}
@@ -261,14 +355,32 @@ async function loadPersistedPaymentOrders(filter?: { batchId?: string; orderId?:
         rawStatus: raw,
       } satisfies PaymentOrderRecord;
     });
+    if (filter?.required) return persisted.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const merged = new Map<string, PaymentOrderRecord>();
     for (const item of persisted) merged.set(item.orderId, item);
     for (const item of inMemory) merged.set(item.orderId, item);
     return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch (error) {
     console.error("支付订单读取失败:", error instanceof Error ? error.message : String(error));
+    if (filter?.required) throw new PaymentPersistenceError(error);
     return inMemory;
   }
+}
+
+async function findPaymentOrderByProviderOrderId(provider: PaymentProvider, providerOrderId: string): Promise<PaymentOrderRecord | undefined> {
+  const normalized = providerOrderId.trim();
+  if (!normalized) return undefined;
+  const inMemory = [...paymentOrders.values()].find((item) => item.provider === provider && item.providerOrderId === normalized);
+  if (!persistenceEnabled()) return inMemory;
+  // The provider callback may arrive after a process restart. A callback is
+  // not allowed to be bound from the in-memory map alone when persistence is
+  // configured.
+  const persisted = await loadPersistedPaymentOrders({ provider, providerOrderId: normalized, required: true });
+  // Database is authoritative whenever persistence is configured. The local
+  // map is only a fallback for an explicitly memory-backed demo.
+  const record = persisted[0] ?? inMemory;
+  if (record) paymentOrders.set(record.orderId, record);
+  return record;
 }
 
 // ---------- 加载 .env（SMTP 等本地配置，不提交仓库） ----------
@@ -425,6 +537,32 @@ const LIFECYCLE_STAGE_DEFS: Array<Omit<LifecycleEvent, "status" | "updatedAt"> &
 
 const lifecycleSimulation = new Map<string, { revision: number; syncedAt: string; events: LifecycleEvent[] }>();
 
+// Restore demo lifecycle revisions before serving requests.  The lifecycle
+// view remains explicitly demo/synthetic; persistence only prevents a process
+// restart from erasing the visible revision and stage updates.
+const lifecycleHydration = (async () => {
+  if (!persistenceEnabled()) return;
+  const batchIds = [...new Set([...Object.keys(FISH_OIL_BATCHES), ...Object.keys(RICE_BATCHES)])];
+  for (const batchId of batchIds) {
+    try {
+      const persisted = await loadPersistedLifecycleState(batchId);
+      if (persisted && !lifecycleSimulation.has(batchId)) {
+        lifecycleSimulation.set(batchId, {
+          revision: persisted.revision,
+          syncedAt: persisted.syncedAt,
+          events: persisted.events as LifecycleEvent[],
+        });
+      }
+    } catch (error) {
+      // A database outage must not turn a read-only demo into a false claim of
+      // persistence.  The route continues with the in-memory fixture and the
+      // caller can inspect the service health/persistence diagnostics.
+      console.error("生命周期状态恢复失败:", error instanceof Error ? error.message : String(error));
+      break;
+    }
+  }
+})();
+
 function lifecycleStateFor(batchId: string) {
   const current = lifecycleSimulation.get(batchId);
   if (current) return current;
@@ -467,6 +605,17 @@ function simulateLifecycleStage(batchId: string, stage: LifecycleStage) {
   return lifecyclePublicView(batchId);
 }
 
+async function persistCurrentLifecycleState(batchId: string): Promise<void> {
+  if (!persistenceEnabled()) return;
+  const state = lifecycleStateFor(batchId);
+  await persistLifecycleState({
+    batchId,
+    revision: state.revision,
+    syncedAt: state.syncedAt,
+    events: state.events,
+  });
+}
+
 function heavyMetalStatus(metals: HeavyMetals): "pass" | "fail" {
   const keys = Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>;
   return keys.some((k) => metals[k] > HEAVY_METAL_LIMITS[k]) ? "fail" : "pass";
@@ -475,7 +624,122 @@ function heavyMetalStatus(metals: HeavyMetals): "pass" | "fail" {
 function heavyMetalValue(metals: HeavyMetals): string {
   const keys = Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>;
   const over = keys.filter((k) => metals[k] > HEAVY_METAL_LIMITS[k]).map((k) => HEAVY_METAL_LABELS[k]);
-  return over.length ? `${over.join("、")}超标` : "4 项均达标";
+  return over.length ? `${over.join("、")}高于当前限值` : "4 项均在当前限值内";
+}
+
+function demoParameterDetail(batch: DemoBatch): string {
+  if (batch.epaDha === 0) return "产地、检测和仓储运输资料仍需按该商品的专用字段补齐";
+  const parameters = [
+    `EPA+DHA ${batch.epaDha}%（规则范围 ≥70%）`,
+    `过氧化值 ${batch.peroxide} meq/kg（规则范围 ≤5）`,
+    `TOTOX ${batch.totox}（规则范围 ≤20）`,
+    `冷链异常 ${batch.coldGap} 小时（规则范围 ≤6 小时）`,
+    `重金属 Pb/Hg/Cd/As ${batch.heavyMetals.pb}/${batch.heavyMetals.hg}/${batch.heavyMetals.cd}/${batch.heavyMetals.as} mg/kg（限值 0.5/0.1/0.1/1.0）`,
+  ];
+  const differences = [
+    batch.epaDha < 70 ? "EPA+DHA 低于当前规则范围" : "",
+    batch.peroxide > 5 ? "过氧化值高于当前规则范围" : "",
+    batch.totox > 20 ? "TOTOX 高于当前规则范围" : "",
+    batch.coldGap > 6 ? "冷链异常时长高于当前规则范围" : "",
+    heavyMetalStatus(batch.heavyMetals) === "fail" ? "至少一项重金属高于当前限值" : "",
+  ].filter(Boolean);
+  return `登记参数：${parameters.join("；")}。${differences.length ? `需要复核的差异：${differences.join("；")}。` : "当前登记参数落在公开演示规则范围内。"}`;
+}
+
+function demoParameterDetailForLocale(batch: DemoBatch, locale: "zh" | "en"): string {
+  if (locale !== "en") return demoParameterDetail(batch);
+  if (batch.epaDha === 0) return "Origin, inspection, storage, and transport records still need the product-specific fields.";
+  const parameters = [
+    `EPA+DHA ${batch.epaDha}% (rule range >= 70%)`,
+    `Peroxide value ${batch.peroxide} meq/kg (rule range <= 5)`,
+    `TOTOX ${batch.totox} (rule range <= 20)`,
+    `Cold-chain gap ${batch.coldGap} hours (rule range <= 6 hours)`,
+    `Heavy metals Pb/Hg/Cd/As ${batch.heavyMetals.pb}/${batch.heavyMetals.hg}/${batch.heavyMetals.cd}/${batch.heavyMetals.as} mg/kg (limits 0.5/0.1/0.1/1.0)`,
+  ];
+  const differences = [
+    batch.epaDha < 70 ? "EPA+DHA is outside the current rule range" : "",
+    batch.peroxide > 5 ? "peroxide value is outside the current rule range" : "",
+    batch.totox > 20 ? "TOTOX is outside the current rule range" : "",
+    batch.coldGap > 6 ? "cold-chain gap is outside the current rule range" : "",
+    heavyMetalStatus(batch.heavyMetals) === "fail" ? "at least one heavy-metal value is above the current limit" : "",
+  ].filter(Boolean);
+  return `Registered parameters: ${parameters.join("; ")}.${differences.length ? ` Differences requiring review: ${differences.join("; ")}.` : " The registered parameters are within the public demo rule range."}`;
+}
+
+function publicFactForLocale(value: string, locale: "zh" | "en"): string {
+  if (locale !== "en") return value;
+  const stageNames: Record<string, string> = {
+    "原料验收": "raw-material intake",
+    "浓缩": "concentration",
+    "脱臭": "deodorization",
+    "灌装": "filling",
+    "包装": "packaging",
+    "仓储": "storage",
+    "天气或农残补充资料": "weather or pesticide records",
+    "仓储运输覆盖": "storage and shipment coverage",
+  };
+  const missingStage = value.match(/^生产阶段“([^”]+)”资料未覆盖$/);
+  if (missingStage) return `Production stage "${stageNames[missingStage[1]] ?? "the listed stage"}" is not covered.`;
+  if (stageNames[value]) return stageNames[value];
+  const translations: Array<[RegExp, string]> = [
+    [/生产记录由生产方提交，目前属于厂商自报信息。/g, "The production record was submitted by the producer and is currently self-reported."],
+    [/第三方检测来自第三方机构，签名尚未核验。/g, "The third-party test record is linked, but its signature has not been verified."],
+    [/第三方检测来自第三方机构，签名已核验。/g, "The third-party test record is linked and its signature is verified."],
+    [/冷链资料来自平台设备同步。/g, "The cold-chain record comes from a platform device sync."],
+    [/当前批次登记信息/g, "the current batch record"],
+  ];
+  let translated = value;
+  for (const [pattern, replacement] of translations) translated = translated.replace(pattern, replacement);
+  // Do not expose untranslated internal Chinese fact text in an English answer.
+  return /[\u3400-\u9fff]/.test(translated) ? "A registered fact from the current batch evidence card." : translated;
+}
+
+function parameterDetailsFor(batchId: string) {
+  if (isRiceBatch(batchId)) {
+    const rice = RICE_BATCHES[batchId];
+    if (!rice) return [];
+    return [
+      { key: "origin", label: "产地与土壤", observed: rice.passed ? 1 : undefined, unit: "记录集", rule: "需绑定产地、批次和责任方", status: rice.passed ? "within_range" : "missing" },
+      { key: "weather", label: "天气记录", observed: rice.passed ? 1 : undefined, unit: "覆盖状态", rule: "需覆盖播种至收获时间段", status: rice.passed ? "within_range" : "missing" },
+      { key: "pesticide", label: "农残检测", observed: rice.passed ? 1 : undefined, unit: "检测结果集", rule: "按登记的检测方法和限值核对", status: rice.passed ? "within_range" : "outside_range" },
+      { key: "logistics", label: "仓储运输", observed: rice.passed ? 1 : undefined, unit: "记录集", rule: "需绑定仓储、出货、运输记录", status: rice.passed ? "within_range" : "missing" },
+    ];
+  }
+  const b = FISH_OIL_BATCHES[batchId];
+  if (!b) {
+    const dbBatch = repository.getBatch(batchId);
+    const inspection = [...repository.listEvidence(batchId)].reverse().find((item) => item.kind === "inspection")?.payload ?? {};
+    const observed = (key: string) => numberValue((inspection as Record<string, unknown>)[key]);
+    const epa = observed("epaDhaPercent");
+    const peroxide = observed("peroxideValue");
+    const totox = observed("totox");
+    const cold = observed("coldChainGapHours") ?? observed("maxGapHours");
+    if (!dbBatch) return [];
+    return [
+      { key: "epa-dha", label: "EPA+DHA", observed: epa, unit: "%", rule: `≥ ${policy.thresholds.minEpaDhaPercent}%`, status: epa === undefined ? "missing" : epa >= policy.thresholds.minEpaDhaPercent ? "within_range" : "outside_range" },
+      { key: "peroxide", label: "过氧化值", observed: peroxide, unit: "meq/kg", rule: `≤ ${policy.thresholds.maxPeroxideValue} meq/kg`, status: peroxide === undefined ? "missing" : peroxide <= policy.thresholds.maxPeroxideValue ? "within_range" : "outside_range" },
+      { key: "totox", label: "TOTOX", observed: totox, unit: "指数", rule: `≤ ${policy.thresholds.maxTotox}`, status: totox === undefined ? "missing" : totox <= policy.thresholds.maxTotox ? "within_range" : "outside_range" },
+      { key: "cold-chain", label: "冷链异常时长", observed: cold, unit: "小时", rule: `≤ ${policy.thresholds.maxLogisticsGapHours} 小时`, status: cold === undefined ? "missing" : cold <= policy.thresholds.maxLogisticsGapHours ? "within_range" : "outside_range" },
+    ];
+  }
+  const rows = [
+    { key: "epa-dha", label: "EPA+DHA", observed: b.epaDha, unit: "%", rule: "≥ 70%", status: b.epaDha >= 70 ? "within_range" : "outside_range", difference: b.epaDha - 70 },
+    { key: "peroxide", label: "过氧化值", observed: b.peroxide, unit: "meq/kg", rule: "≤ 5 meq/kg", status: b.peroxide <= 5 ? "within_range" : "outside_range", difference: 5 - b.peroxide },
+    { key: "totox", label: "TOTOX", observed: b.totox, unit: "指数", rule: "≤ 20", status: b.totox <= 20 ? "within_range" : "outside_range", difference: 20 - b.totox },
+    { key: "cold-chain", label: "冷链异常时长", observed: b.coldGap, unit: "小时", rule: "≤ 6 小时", status: b.coldGap <= 6 ? "within_range" : "outside_range", difference: 6 - b.coldGap },
+  ];
+  for (const key of Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>) {
+    rows.push({
+      key: `heavy-metal-${key}`,
+      label: HEAVY_METAL_LABELS[key],
+      observed: b.heavyMetals[key],
+      unit: "mg/kg",
+      rule: `≤ ${HEAVY_METAL_LIMITS[key]} mg/kg`,
+      status: b.heavyMetals[key] <= HEAVY_METAL_LIMITS[key] ? "within_range" : "outside_range",
+      difference: HEAVY_METAL_LIMITS[key] - b.heavyMetals[key],
+    });
+  }
+  return rows;
 }
 
 function metricsFor(batchId: string) {
@@ -488,28 +752,28 @@ function metricsFor(batchId: string) {
     const peroxide = numberValue(inspection.peroxideValue);
     const coldGap = numberValue(inspection.coldChainGapHours) ?? numberValue(coldChain.maxGapHours);
     return [
-      { key: "epa-dha", icon: "fish", label: "EPA+DHA", value: epa === undefined ? "未登记" : String(epa) + "%", unit: "检测结果（占总脂肪酸）", bar: epa === undefined ? 0 : Math.min(100, epa), status: epa === undefined ? "missing" : epa >= 70 ? "pass" : "fail" },
-      { key: "peroxide", icon: "warning", label: "过氧化值", value: peroxide === undefined ? "未登记" : String(peroxide), unit: "meq/kg", bar: peroxide === undefined ? 0 : Math.min(100, Math.round((peroxide / 5) * 100)), status: peroxide === undefined ? "missing" : peroxide <= 5 ? "pass" : "fail" },
-      { key: "cold-chain", icon: "snowflake", label: "冷链", value: coldGap === undefined ? "未登记" : String(coldGap) + "小时", unit: "全程温度异常时长", bar: coldGap === undefined ? 0 : Math.min(100, Math.round((coldGap / 6) * 100)), status: coldGap === undefined ? "missing" : coldGap <= 6 ? "pass" : "fail" },
-      { key: "heavy-metal", icon: "alert", label: "重金属报告", value: "当前批次未登记", unit: "铅 / 汞 / 镉 / 砷", bar: 0, status: "missing" },
+      { key: "epa-dha", icon: "fish", label: "EPA+DHA", value: epa === undefined ? "未登记" : String(epa) + "%", unit: "检测结果（占总脂肪酸）", rule: "≥ 70%", bar: epa === undefined ? 0 : Math.min(100, epa), status: epa === undefined ? "missing" : epa >= 70 ? "pass" : "fail" },
+      { key: "peroxide", icon: "warning", label: "过氧化值", value: peroxide === undefined ? "未登记" : String(peroxide), unit: "meq/kg", rule: "≤ 5 meq/kg", bar: peroxide === undefined ? 0 : Math.min(100, Math.round((peroxide / 5) * 100)), status: peroxide === undefined ? "missing" : peroxide <= 5 ? "pass" : "fail" },
+      { key: "cold-chain", icon: "snowflake", label: "冷链", value: coldGap === undefined ? "未登记" : String(coldGap) + "小时", unit: "全程温度异常时长", rule: "≤ 6 小时", bar: coldGap === undefined ? 0 : Math.min(100, Math.round((coldGap / 6) * 100)), status: coldGap === undefined ? "missing" : coldGap <= 6 ? "pass" : "fail" },
+      { key: "heavy-metal", icon: "alert", label: "重金属报告", value: "当前批次未登记", unit: "铅 / 汞 / 镉 / 砷", rule: "Pb ≤ 0.5 · Hg ≤ 0.1 · Cd ≤ 0.1 · As ≤ 1.0 mg/kg", bar: 0, status: "missing" },
     ];
   }
   if (isRiceBatch(batchId)) {
     const rice = RICE_BATCHES[batchId] ?? RICE_BATCHES["RC-2026-001"];
     return [
-      { key: "origin", icon: "sensor", label: "产地与土壤", value: rice.passed ? "已登记" : "待补资料", unit: "产地、土壤和种植记录", bar: rice.passed ? 92 : 56, status: rice.passed ? "pass" : "missing" },
-      { key: "weather", icon: "fish", label: "天气记录", value: rice.passed ? "已关联" : "部分缺失", unit: "播种至收获的气候记录", bar: rice.passed ? 88 : 45, status: rice.passed ? "pass" : "missing" },
-      { key: "pesticide", icon: "warning", label: "农残检测", value: rice.passed ? "达当前范围" : "待复核", unit: "第三方检测指标", bar: rice.passed ? 86 : 62, status: rice.passed ? "pass" : "fail" },
-      { key: "logistics", icon: "snowflake", label: "仓储运输", value: rice.passed ? "已覆盖" : "有缺口", unit: "仓储、出货与运输记录", bar: rice.passed ? 80 : 48, status: rice.passed ? "pass" : "missing" },
+      { key: "origin", icon: "sensor", label: "产地与土壤", value: rice.passed ? "已登记" : "待补资料", unit: "产地、土壤和种植记录", rule: "需绑定产地、批次和责任方", bar: rice.passed ? 92 : 56, status: rice.passed ? "pass" : "missing" },
+      { key: "weather", icon: "fish", label: "天气记录", value: rice.passed ? "已关联" : "部分缺失", unit: "播种至收获的气候记录", rule: "需覆盖播种至收获时间段", bar: rice.passed ? 88 : 45, status: rice.passed ? "pass" : "missing" },
+      { key: "pesticide", icon: "warning", label: "农残检测", value: rice.passed ? "在当前范围内" : "待复核", unit: "第三方检测指标", rule: "按登记的检测方法和限值核对", bar: rice.passed ? 86 : 62, status: rice.passed ? "pass" : "fail" },
+      { key: "logistics", icon: "snowflake", label: "仓储运输", value: rice.passed ? "已覆盖" : "有缺口", unit: "仓储、出货与运输记录", rule: "需绑定仓储、出货、运输记录", bar: rice.passed ? 80 : 48, status: rice.passed ? "pass" : "missing" },
     ];
   }
   const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
   const hm = heavyMetalStatus(b.heavyMetals);
   return [
-    { key: "epa-dha", icon: "fish", label: "EPA+DHA", value: `${b.epaDha}%`, unit: "检测结果（占总脂肪酸）", bar: Math.min(100, b.epaDha), status: b.epaDha >= 70 ? "pass" : "fail" },
-    { key: "peroxide", icon: "warning", label: "过氧化值", value: `${b.peroxide}`, unit: "meq/kg", bar: Math.min(100, Math.round((b.peroxide / 5) * 100)), status: b.peroxide <= 5 ? "pass" : "fail" },
-    { key: "cold-chain", icon: "snowflake", label: "冷链", value: `${b.coldGap}小时`, unit: "全程温度异常时长", bar: Math.min(100, Math.round((b.coldGap / 6) * 100)), status: b.coldGap <= 6 ? "pass" : "fail" },
-    { key: "heavy-metal", icon: "alert", label: "重金属报告", value: heavyMetalValue(b.heavyMetals), unit: "铅 / 汞 / 镉 / 砷", bar: hm === "pass" ? 15 : 85, status: hm },
+    { key: "epa-dha", icon: "fish", label: "EPA+DHA", value: `${b.epaDha}%`, unit: "检测结果（占总脂肪酸）", rule: "≥ 70%", bar: Math.min(100, b.epaDha), status: b.epaDha >= 70 ? "pass" : "fail" },
+    { key: "peroxide", icon: "warning", label: "过氧化值", value: `${b.peroxide}`, unit: "meq/kg", rule: "≤ 5 meq/kg", bar: Math.min(100, Math.round((b.peroxide / 5) * 100)), status: b.peroxide <= 5 ? "pass" : "fail" },
+    { key: "cold-chain", icon: "snowflake", label: "冷链", value: `${b.coldGap}小时`, unit: "全程温度异常时长", rule: "≤ 6 小时", bar: Math.min(100, Math.round((b.coldGap / 6) * 100)), status: b.coldGap <= 6 ? "pass" : "fail" },
+    { key: "heavy-metal", icon: "alert", label: "重金属报告", value: heavyMetalValue(b.heavyMetals), unit: "铅 / 汞 / 镉 / 砷", rule: "Pb ≤ 0.5 · Hg ≤ 0.1 · Cd ≤ 0.1 · As ≤ 1.0 mg/kg", bar: hm === "pass" ? 15 : 85, status: hm },
   ];
 }
 
@@ -552,28 +816,42 @@ function evidenceFor(batchId: string) {
       { step: 3, icon: "jev", title: "JEV 判别", source: "JEV 决策门 · route_to_rule · 0.94", description: "识别缺失字段和冲突，决定继续解释、补资料或转人工复核。", hash: evidenceHash(`${batchId}:jev`), verifiedAt: `${stamp}13:40:00Z` },
       { step: 4, icon: "rule", title: "规则验收", source: "rice-origin-policy@v1", description: "按批次、时间、样品和检测报告关系执行确定性检查。", hash: evidenceHash(`${batchId}:rule`), verifiedAt: `${stamp}14:00:00Z` },
       { step: 5, icon: "chain", title: "链上摘要计划", source: "BOT Chain Mainnet (677) · anchor_pending", description: "原始报告留在链下，批次证据根等待外部钱包签名后锚定。", hash: evidenceHash(`${batchId}:root`), verifiedAt: `${stamp}14:05:00Z` },
-    ];
+    ].map((item) => ({ ...item, evidenceId: `${batchId}:evidence:${item.step}` }));
   }
-  const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
+  const b = FISH_OIL_BATCHES[batchId];
+  if (!b) return [];
   const stamp = `${b.productionDate}T`;
-  const verifiedEvidenceTx = BOT_CHAIN_MAINNET.verifiedTransactions[0];
+  const historicalReplay = BOT_CHAIN_MAINNET.verifiedTransactions.find((item) => item.batchId === batchId);
+  const chainEvidence = historicalReplay
+    ? {
+        step: 5,
+        icon: "chain",
+        title: "历史回放记录",
+        source: "BOT Chain Mainnet (677) · replay_verified",
+        description: "这是部署阶段保存的历史回放凭证，只证明该摘要在回放中被验证；不表示当前批次已经有实时 receipt。",
+        hash: historicalReplay.txHash,
+        verifiedAt: `${stamp}14:05:00Z`,
+        explorerUrl: historicalReplay.explorerUrl,
+        contractAddress: historicalReplay.contractAddress,
+        status: "replay_verified",
+      }
+    : {
+        step: 5,
+        icon: "chain",
+        title: "链上摘要计划",
+        source: "BOT Chain Mainnet (677) · anchor_pending",
+        description: "当前批次还没有通过服务端核验的真实 receipt。原始资料留在链下，证据根等待外部钱包签名后再锚定。",
+        hash: evidenceHash(`${batchId}:root`),
+        verifiedAt: `${stamp}14:05:00Z`,
+        status: "anchor_pending",
+      };
   return [
     { step: 1, icon: "sensor", title: "设备采集", source: "船舱传感器 · 温度 / 湿度 / 定位", description: "船上与加工环节的传感器数据，记录捕捞、加工、温度等关键信息。", hash: evidenceHash(`${batchId}:sensor`), verifiedAt: `${stamp}08:30:00Z` },
     { step: 2, icon: "agent", title: "Agent 关联", source: "TruthPass Agent · 多源数据关联", description: "TruthPass Agent 将多源数据关联，形成可验证的证据包。", hash: evidenceHash(`${batchId}:agent`), verifiedAt: `${stamp}12:00:00Z` },
     { step: 3, icon: "jev", title: "JEV 判别", source: "JEV 决策门 · route_to_rule · 0.94", description: "用固定类型输出识别证据缺口、冲突和下一步路由。", hash: evidenceHash(`${batchId}:jev`), verifiedAt: `${stamp}13:40:00Z` },
     { step: 4, icon: "rule", title: "规则验收", source: `规则引擎 ${policy.policyId}@${policy.version}`, description: "按食品安全与质量规则进行自动化验收，生成结论与置信范围。", hash: evidenceHash(`${batchId}:rule`), verifiedAt: `${stamp}14:00:00Z` },
-    {
-      step: 5,
-      icon: "chain",
-      title: "BOT Chain 主网锚定",
-      source: `BOT Chain Mainnet (677) · ${BOT_CHAIN_MAINNET.contractAddress.slice(0, 10)}…`,
-      description: "关键证据根哈希与规则验收结论已锚定至 BOT Chain 主网（Chain ID 677），支持区块浏览器实时查验。",
-      hash: verifiedEvidenceTx.txHash,
-      verifiedAt: `${stamp}14:05:00Z`,
-      explorerUrl: verifiedEvidenceTx.explorerUrl,
-      contractAddress: BOT_CHAIN_MAINNET.contractAddress,
-    },
-  ];
+    chainEvidence,
+  ].map((item) => ({ ...item, evidenceId: `${batchId}:evidence:${item.step}` }));
 }
 
 function productionProcessFor(batchId: string) {
@@ -605,6 +883,137 @@ function productionProcessFor(batchId: string) {
   }
   const b = FISH_OIL_BATCHES[batchId];
   return { ...productionSummary, originRegion: b?.origin };
+}
+
+/**
+ * Shared deterministic gate for fixture batches. The parameter gate and the
+ * production coverage gate are both required before a fixture can be treated
+ * as accepted. This keeps the public overview, CLI, MCP, and Agent on the
+ * same status vocabulary instead of allowing one surface to overstate a
+ * partially documented batch.
+ */
+function demoVerificationGate(batchId: string, item: DemoBatch) {
+  const details = parameterDetailsFor(batchId);
+  const productionEvidence = productionProcessFor(batchId);
+  // Keep parameter-level facts first in the public reason list. Consumers
+  // need to see the observed value and rule range before the higher-level
+  // production coverage gaps; a generic stage gap must not hide a concrete
+  // measurement such as EPA+DHA 55%.
+  const parameterReasons = details.flatMap((detail) => {
+    if (detail.status === "missing") return [`${detail.label} 未登记实测值`];
+    if (detail.status !== "outside_range") return [];
+    const observed = detail.observed === undefined ? "未登记" : `${detail.observed}${detail.unit}`;
+    const difference = "difference" in detail && typeof detail.difference === "number" ? `，差值 ${detail.difference}${detail.unit}` : "";
+    return [`${detail.label} 实测 ${observed}（规则范围 ${detail.rule}${difference}）`];
+  });
+  const productionReasons = productionEvidence.missingStages.map((stage) => `生产阶段“${stage}”资料未覆盖`);
+  const missingItems = [
+    ...details.filter((detail) => detail.status === "missing").map((detail) => `${detail.label} 未登记实测值`),
+    ...productionReasons,
+  ];
+  const conflicts = details
+    .filter((detail) => detail.status === "outside_range")
+    .map((detail) => `${detail.label} 实测值与当前规则范围存在差异`);
+  const status = conflicts.length > 0
+    ? "rejected" as const
+    : missingItems.length > 0
+      ? "missing_evidence" as const
+      : item.passed
+        ? "accepted" as const
+        : "rejected" as const;
+  return { status, details, productionEvidence, missingItems, conflicts, reasons: [...parameterReasons, ...productionReasons] };
+}
+
+async function buildRecommendationContract(batchId: string, traceId: string): Promise<RecommendationRecord> {
+  const item = isRiceBatch(batchId) ? RICE_BATCHES[batchId] : FISH_OIL_BATCHES[batchId];
+  if (!item) throw new Error("BATCH_NOT_FOUND");
+  const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
+  const productId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil";
+  const gate = demoVerificationGate(batchId, item);
+  const { details, productionEvidence, missingItems, conflicts } = gate;
+  // Parameter rules and production coverage are separate gates. A batch can
+  // have in-range inspection values while still lacking key manufacturing,
+  // packaging, or storage evidence. Never present that partial record as a
+  // recommendation until both gates are satisfied.
+  const verificationStatus = conflicts.length > 0
+    ? "rejected"
+    : missingItems.length > 0
+      ? "review"
+      : item.passed
+        ? "accepted"
+        : "review";
+  const recommendationStatus = conflicts.length > 0
+    ? "do_not_recommend"
+    : missingItems.length > 0
+      ? "review_before_recommendation"
+      : item.passed
+        ? "recommend_with_scope"
+        : "do_not_recommend";
+  const evidence = evidenceFor(batchId).map((entry) => ({
+    evidenceId: entry.evidenceId,
+    kind: entry.title,
+    source: entry.source,
+    dataMode: "demo/synthetic",
+    status: "registered",
+  }));
+  const inspectionEvidence = evidence.filter((entry) => /检测|规则|quality|inspection/i.test(`${entry.kind} ${entry.source}`));
+  const coldChainEvidence = evidence.filter((entry) => /冷链|温度|sensor|chain/i.test(`${entry.kind} ${entry.source}`));
+  const evidenceIds = evidence.map((entry) => entry.evidenceId).filter((entry): entry is string => typeof entry === "string");
+  const feedbackSummary = await feedbackSummaryFor(batchId);
+  const reason = conflicts.length > 0
+    ? `${demoParameterDetail(item)}当前存在超出规则范围的参数，不能据此推荐。`
+    : missingItems.length > 0
+      ? `${demoParameterDetail(item)}参数检查本身不等于生产链完整；当前仍缺少${missingItems.join("、")}。`
+      : item.passed
+        ? `${demoParameterDetail(item)}当前登记参数落在演示规则范围内。推荐只表示当前登记参数与规则的比较结果，不表示安全、疗效或真实认证。`
+        : `${demoParameterDetail(item)}当前资料还不能支持推荐。`;
+  const nextAction = conflicts.length > 0 || missingItems.length > 0
+    ? "由生产方或检测机构补齐缺失资料或复核异常参数，再重新运行确定性核验。"
+    : item.passed
+      ? "查看参数和来源，再由外部钱包确认购买。"
+      : "由生产方或检测机构补齐资料，再重新运行确定性核验。";
+  const itemPayload = {
+    batchId,
+    name: item.name,
+    origin: item.origin,
+    productionDate: item.productionDate,
+    imageUrl: item.image,
+    dataMode: "demo/synthetic" as const,
+    epaDha: item.epaDha,
+    peroxide: item.peroxide,
+    coldGap: item.coldGap,
+    recommendationStatus,
+    reason,
+    nextAction,
+    productionEvidence,
+    parameterDetails: details,
+    missingItems,
+    conflicts,
+    gateReasons: gate.reasons,
+    evidenceIds,
+    feedbackSummary,
+    traceId,
+  };
+  return {
+    batchId,
+    tenantId,
+    productId,
+    recommendationStatus,
+    verificationStatus,
+    productionEvidence,
+    inspectionEvidence,
+    coldChainEvidence,
+    feedbackSummary,
+    missingItems,
+    conflicts,
+    gateReasons: gate.reasons,
+    evidenceIds,
+    reason,
+    nextAction,
+    traceId,
+    dataMode: "demo/synthetic",
+    item: itemPayload,
+  };
 }
 
 // ---------- 服务注册（评委观察台用，三个候选服务） ----------
@@ -689,11 +1098,30 @@ export interface SessionChainTransaction {
   mode?: string;
   receiptStatus?: string;
   eventVerified?: boolean;
+  paymentValueWei?: string;
+  ids?: Record<string, string>;
   explorerUrl: string;
   createdAt: string;
 }
 
 const sessionChainTxs: SessionChainTransaction[] = [];
+
+// Receipts are durable facts once the RPC verifier has accepted them. Restore
+// the service-side index on startup so purchase/feedback checks do not depend
+// on the lifetime of a single Node process.
+const chainTxHydration = (async () => {
+  if (!persistenceEnabled()) return;
+  try {
+    const persisted = await loadPersistedChainTransactions();
+    for (const item of persisted) {
+      if (!sessionChainTxs.some((current) => current.txHash.toLowerCase() === item.txHash.toLowerCase())) {
+        sessionChainTxs.push(item as SessionChainTransaction);
+      }
+    }
+  } catch (error) {
+    console.error("链上交易索引恢复失败:", error instanceof Error ? error.message : String(error));
+  }
+})();
 
 // 运行时第一次探测完成前不把回放凭证冒充为实时 RPC 状态。
 let cachedRpcReachable = false;
@@ -888,6 +1316,34 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
     const batchCommitment = bytes32OrHash(body.batchCommitment, "batchCommitment", `batch:${batchId}`);
     const purchaseProofHash = bytes32OrHash(body.purchaseProofHash, "purchaseProofHash", `purchase-proof:${wallet}:${batchId}:${clientNonce}`);
     const consentHash = bytes32OrHash(body.consentHash, "consentHash", `consent:${wallet}:${batchId}`);
+    const paidGateway = configuredPaidConsumerGateway();
+    if (paidGateway) {
+      const transaction = buildPaidConsumerGatewayPurchaseTransaction({
+        purchaseId,
+        batchCommitment,
+        purchaseProofHash,
+        consentHash,
+        gatewayAddress: paidGateway.address,
+        priceWei: paidGateway.priceWei,
+      }, config);
+      return {
+        schemaVersion: "truthpass.wallet.transaction.v1",
+        action,
+        eventName: "PurchaseRecorded",
+        batchId,
+        network: "bot-mainnet",
+        chainId,
+        contractAddress: paidGateway.address,
+        anchorAddress: contractAddress,
+        explorerUrl,
+        signer: wallet,
+        requiredRole: "CONSUMER_SELF_SERVICE",
+        gateway: true,
+        payment: { asset: "BOT", amountWei: paidGateway.priceWei, amountBot: "0.001", merchantGateway: paidGateway.address },
+        ids: { purchaseId, batchCommitment, purchaseProofHash, consentHash },
+        transaction,
+      };
+    }
     if (gatewayAddress) {
       const transaction = buildConsumerGatewayPurchaseTransaction({
         purchaseId,
@@ -909,6 +1365,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
         signer: wallet,
         requiredRole: "CONSUMER_SELF_SERVICE",
         gateway: true,
+        payment: { asset: "BOT", amountWei: "0", amountBot: "0", merchantGateway: gatewayAddress, status: "record_only_gateway" },
         ids: { purchaseId, batchCommitment, purchaseProofHash, consentHash },
         transaction,
       };
@@ -946,14 +1403,15 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
     const evidenceHashVal = bytes32OrHash(body.evidenceHash, "evidenceHash", `feedback-evidence:${wallet}:${batchId}:${clientNonce}`);
     const contributionHash = bytes32OrHash(body.contributionHash, "contributionHash", `feedback:${wallet}:${batchId}:${clientNonce}`);
     const score = Number.isInteger(body.score) ? Math.max(0, Math.min(100, Number(body.score))) : 92;
-    if (gatewayAddress) {
+    const contributionGatewayAddress = configuredPaidConsumerGateway()?.address ?? gatewayAddress;
+    if (contributionGatewayAddress) {
       const transaction = buildConsumerGatewayContributionTransaction({
         contributionId,
         purchaseId,
         evidenceHash: evidenceHashVal,
         contributionHash,
         score,
-        gatewayAddress,
+        gatewayAddress: contributionGatewayAddress,
       }, config);
       return {
         schemaVersion: "truthpass.wallet.transaction.v1",
@@ -962,7 +1420,7 @@ function prepareWalletTransaction(body: Record<string, unknown>) {
         batchId,
         network: "bot-mainnet",
         chainId,
-        contractAddress: gatewayAddress,
+        contractAddress: contributionGatewayAddress,
         anchorAddress: contractAddress,
         explorerUrl,
         signer: wallet,
@@ -1147,6 +1605,7 @@ type RpcTransaction = {
   from?: string;
   to?: string | null;
   chainId?: string;
+  value?: string;
   nonce?: string;
 };
 
@@ -1201,6 +1660,11 @@ function receiptBlockNumber(receipt: RpcReceipt): number | undefined {
     : undefined;
 }
 
+function parseRpcQuantity(value: string | undefined): bigint | undefined {
+  if (typeof value !== "string" || !/^0x[0-9a-f]+$/i.test(value)) return undefined;
+  try { return BigInt(value); } catch { return undefined; }
+}
+
 function expectedReceiptEventCheck(
   receipt: RpcReceipt,
   event: string,
@@ -1217,15 +1681,20 @@ function expectedReceiptEventCheck(
   const challengeId = id("challengeId") || id("disputeId");
   if (event === "PurchaseRecorded") {
     const purchaseId = id("purchaseId");
-    if (!receiptHasEvent(receipt, `0x${keccakTopic("ConsumerPurchaseSubmitted(bytes32,bytes32,address,bool)")}`, BOT_CHAIN_MAINNET.consumerGatewayAddress, purchaseId ? [purchaseId] : [])) {
+    if (!receiptHasEvent(receipt, `0x${keccakTopic("ConsumerPurchaseSubmitted(bytes32,bytes32,address,bool)")}`, targetAddress, purchaseId ? [purchaseId] : [])) {
       return { ok: false, reason: "缺少 ConsumerPurchaseSubmitted 事件" };
+    }
+    const paidGateway = configuredPaidConsumerGateway();
+    if (paidGateway && paidGateway.address.toLowerCase() === targetAddress.toLowerCase()
+      && !receiptHasEvent(receipt, `0x${keccakTopic("PaymentReceived(bytes32,address,address,uint256,uint256)")}`, targetAddress, purchaseId ? [purchaseId] : [])) {
+      return { ok: false, reason: "缺少 Paid Gateway PaymentReceived 事件" };
     }
     if (!receiptHasEvent(receipt, PURCHASE_RECORDED_TOPIC, BOT_CHAIN_MAINNET.contractAddress, purchaseId ? [purchaseId] : [])) {
       return { ok: false, reason: "缺少 Anchor PurchaseRecorded 事件" };
     }
   } else if (event === "ContributionRecorded") {
     const contributionId = id("contributionId");
-    if (!receiptHasEvent(receipt, `0x${keccakTopic("ConsumerContributionSubmitted(bytes32,bytes32,address,bool)")}`, BOT_CHAIN_MAINNET.consumerGatewayAddress, contributionId ? [contributionId] : [])) {
+    if (!receiptHasEvent(receipt, `0x${keccakTopic("ConsumerContributionSubmitted(bytes32,bytes32,address,bool)")}`, targetAddress, contributionId ? [contributionId] : [])) {
       return { ok: false, reason: "缺少 ConsumerContributionSubmitted 事件" };
     }
     if (!receiptHasEvent(receipt, CONTRIBUTION_RECORDED_TOPIC, BOT_CHAIN_MAINNET.contractAddress, contributionId ? [contributionId] : [])) {
@@ -1361,9 +1830,22 @@ function publicCustomerModel(): string {
 
 function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
-  res.write("data: " + JSON.stringify({ kind: "begin", intent }) + "\n\n");
+  const batchId = meta?.batchId ?? null;
+  const traceId = meta?.traceId ?? null;
+  const dataMode = meta?.dataMode ?? "demo/synthetic";
+  const evidenceIds = meta?.evidenceIds ?? [];
+  const send = (event: unknown) => res.write("data: " + JSON.stringify(event) + "\n\n");
+  send({ kind: "begin", intent, batchId, traceId, dataMode, evidenceIds });
+  // Keep the compatibility stream on the same public stage contract as the
+  // model-backed path. This branch is used for unknown batches and must never
+  // look like an unstructured answer or silently lose its trace context.
+  send({ kind: "stage", stage: "reading_batch", status: "completed", traceId, batchId, evidenceIds, dataMode });
+  send({ kind: "stage", stage: "verifier_checked", status: "fallback", detail: "not_run", traceId, batchId, evidenceIds, dataMode });
+  send({ kind: "stage", stage: "jev_routed", status: "fallback", detail: "request_more_evidence", traceId, batchId, evidenceIds, dataMode });
+  send({ kind: "stage", stage: "model_started", status: "fallback", traceId, batchId, evidenceIds, dataMode });
+  send({ kind: "stage", stage: "model_completed", status: "fallback", detail: "deterministic_fallback", traceId, batchId, evidenceIds, dataMode });
   if (meta) {
-    res.write("data: " + JSON.stringify({
+    send({
       kind: "meta",
       ...meta,
       provider: meta.provider ?? publicCustomerProvider(),
@@ -1371,18 +1853,28 @@ function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: st
       modelAssisted: meta.modelAssisted ?? meta.serviceStatus === "model_assisted",
       evidenceIds: meta.evidenceIds ?? [],
       pipeline: meta.pipeline ?? [...CUSTOMER_CHAT_PIPELINE],
-    }) + "\n\n");
+      pipelineDetail: meta.pipelineDetail ?? {
+        verifier: { status: "not_run", reasons: ["batch_not_found"] },
+        jev: { decision: "request_more_evidence", confidence: 1 },
+        deepseek: { status: "fallback" },
+      },
+      promptPolicyVersion: meta.promptPolicyVersion ?? CONSUMER_PROMPT_POLICY_VERSION,
+      modelContractVersion: meta.modelContractVersion ?? CONSUMER_MODEL_CONTRACT_VERSION,
+      validationStatus: meta.validationStatus ?? "fallback",
+      validationReasons: meta.validationReasons ?? ["batch_not_found"],
+      fallbackApplied: meta.fallbackApplied ?? true,
+    });
   }
   let i = 0;
   const next = () => {
     if (res.writableEnded || res.destroyed) return;
     if (i >= script.length) {
-      res.write("data: " + JSON.stringify({ kind: "done" }) + "\n\n");
+      send({ kind: "done", traceId, batchId, dataMode, evidenceIds });
       res.end();
       return;
     }
     const line = script[i++];
-    res.write("data: " + JSON.stringify({ kind: "line", cls: line.cls, text: line.text }) + "\n\n");
+    send({ kind: "line", cls: line.cls, text: line.text, traceId, batchId, dataMode, evidenceIds });
     setTimeout(next, 0);
   };
   next();
@@ -1397,15 +1889,33 @@ async function streamChatWithReply(
 ): Promise<void> {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (event: unknown) => res.write("data: " + JSON.stringify(event) + "\n\n");
-  send({ kind: "begin", intent });
+  const initialDataMode = baseMeta.dataMode ?? "demo/synthetic";
+  const initialEvidenceIds: string[] = [];
+  send({ kind: "begin", intent, traceId: baseMeta.traceId, batchId: baseMeta.batchId, dataMode: initialDataMode, evidenceIds: initialEvidenceIds });
   const replyPromise = reply;
-  send({ kind: "stage", stage: "reading_batch", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  send({ kind: "stage", stage: "reading_batch", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: initialEvidenceIds, dataMode: initialDataMode });
+  // These active markers make the backend execution visible while the model
+  // promise is in flight. Completion markers below carry the final verifier,
+  // JEV, and model status after the deterministic checks and model guard run.
+  send({ kind: "stage", stage: "verifier_checked", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: initialEvidenceIds, dataMode: initialDataMode });
+  send({ kind: "stage", stage: "jev_routed", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: initialEvidenceIds, dataMode: initialDataMode });
+  send({ kind: "stage", stage: "model_started", status: "active", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: initialEvidenceIds, dataMode: initialDataMode });
   const result = await replyPromise;
-  send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
-  send({ kind: "stage", stage: "verifier_checked", status: result.verifierStatus === "not_run" ? "fallback" : "completed", detail: result.verifierStatus ?? "checked", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
-  send({ kind: "stage", stage: "jev_routed", status: "completed", detail: "route_to_rule", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
-  send({ kind: "stage", stage: "model_started", status: result.status === "model_assisted" ? "completed" : "fallback", traceId: baseMeta.traceId, batchId: baseMeta.batchId });
-  send({ kind: "stage", stage: "model_completed", status: result.status === "model_assisted" ? "completed" : "fallback", detail: result.safety?.reasons?.join(",") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId });
+  const resultDataMode = result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic";
+  const resultEvidenceIds = result.evidenceIds ?? [];
+  const verifierStatus = result.verifierStatus === "not_run"
+    ? "fallback"
+    : (result.verifierStatus ?? (baseMeta.batchId ? "checked" : "not_run"));
+  const verifierStageStatus = !baseMeta.batchId || result.verifierStatus === "not_run" ? "fallback" : "completed";
+  const jevDecision = !baseMeta.batchId || (result.verifierStatus && result.verifierStatus !== "accepted")
+    ? "request_more_evidence"
+    : "route_to_rule";
+  const modelStatus = result.status === "model_assisted" ? "completed" : "fallback";
+  send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "verifier_checked", status: verifierStageStatus, detail: result.verifierStatus ?? "checked", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "jev_routed", status: "completed", detail: jevDecision, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "model_started", status: modelStatus, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "model_completed", status: modelStatus, detail: result.safety?.reasons?.join(",") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
   if (baseMeta.batchId) {
     const auditRun = {
       schemaVersion: "truthpass.agent.audit.v2",
@@ -1447,8 +1957,8 @@ async function streamChatWithReply(
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
     pipelineDetail: {
-      verifier: { status: result.verifierStatus ?? "checked", reasons: result.verifierReasons },
-      jev: { decision: "route_to_rule", confidence: 0.94 },
+      verifier: { status: result.verifierStatus ?? (baseMeta.batchId ? "checked" : "not_run"), reasons: result.verifierReasons },
+      jev: { decision: jevDecision, confidence: 0.94 },
       deepseek: { status: result.status === "model_assisted" ? "completed" : result.status === "deterministic_fallback" ? "fallback" : "unavailable" },
     },
     promptPolicyVersion: CONSUMER_PROMPT_POLICY_VERSION,
@@ -1465,12 +1975,12 @@ async function streamChatWithReply(
     ...(baseMeta.chainContext ? { chainContext: baseMeta.chainContext } : {}),
     ...(result.chainContext ? { chainContext: result.chainContext } : {}),
   });
-  for (const line of script) send({ kind: "line", ...line });
+  for (const line of script) send({ kind: "line", ...line, traceId: baseMeta.traceId, batchId: baseMeta.batchId, dataMode: resultDataMode, evidenceIds: resultEvidenceIds });
   for (const line of result.lines) {
     if (res.writableEnded || res.destroyed) return;
-    send({ kind: "line", ...line });
+    send({ kind: "line", ...line, traceId: baseMeta.traceId, batchId: baseMeta.batchId, dataMode: resultDataMode, evidenceIds: resultEvidenceIds });
   }
-  send({ kind: "done" });
+  send({ kind: "done", traceId: baseMeta.traceId, batchId: baseMeta.batchId, dataMode: resultDataMode, evidenceIds: resultEvidenceIds });
   res.end();
 }
 
@@ -1488,6 +1998,10 @@ type ConsumerModelContract = {
 };
 
 function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContract): string | null {
+  const english = contract?.locale === "en";
+  const labels = english
+    ? { conclusion: "Conclusion", evidence: "Evidence", uncertainty: "Uncertainty", next: "Next step" }
+    : { conclusion: "结论", evidence: "依据", uncertainty: "不确定", next: "下一步" };
   let value = raw.trim().replace(/^```(?:json|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
@@ -1495,17 +2009,21 @@ function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContrac
     const evidence = typeof parsed.evidence === "string" ? parsed.evidence : typeof parsed.basis === "string" ? parsed.basis : "";
     const uncertainty = typeof parsed.uncertainty === "string" ? parsed.uncertainty : typeof parsed.uncertain === "string" ? parsed.uncertain : "";
     const next = typeof parsed.nextAction === "string" ? parsed.nextAction : typeof parsed.next_step === "string" ? parsed.next_step : typeof parsed.next === "string" ? parsed.next : "";
-    if (conclusion && evidence && uncertainty && next) value = `结论：${conclusion} 依据：${evidence} 不确定：${uncertainty} 下一步：${next}`;
+    if (conclusion && evidence && uncertainty && next) value = `${labels.conclusion}：${conclusion} ${labels.evidence}：${evidence} ${labels.uncertainty}：${uncertainty} ${labels.next}：${next}`;
   } catch {
     // The public contract is plain text; JSON is accepted only as a formatting convenience.
   }
   value = value
     .replace(/\*+/g, "")
     .replace(/(结论|依据|不确定|下一步)\s*:/g, "$1：")
-    .replace(/\b(Conclusion|Verdict)\s*:/gi, "结论：")
-    .replace(/\b(Evidence|Basis)\s*:/gi, "依据：")
-    .replace(/\b(Uncertainty|Unknowns?)\s*:/gi, "不确定：")
-    .replace(/\b(Next\s*step|Next\s*action)\s*:/gi, "下一步：")
+    .replace(/\b(Conclusion|Verdict)\s*:/gi, `${labels.conclusion}：`)
+    .replace(/\b(Evidence|Basis)\s*:/gi, `${labels.evidence}：`)
+    .replace(/\b(Uncertainty|Unknowns?)\s*:/gi, `${labels.uncertainty}：`)
+    .replace(/\b(Next\s*step|Next\s*action)\s*:/gi, `${labels.next}：`)
+    .replace(/结论：/g, `${labels.conclusion}：`)
+    .replace(/依据：/g, `${labels.evidence}：`)
+    .replace(/不确定：/g, `${labels.uncertainty}：`)
+    .replace(/下一步：/g, `${labels.next}：`)
     .replace(/\s*\n+\s*/g, " ")
     .trim();
   return validConsumerModelText(value, contract) ? value : null;
@@ -1513,8 +2031,8 @@ function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContrac
 
 function hasUnsupportedDemoClaim(text: string): boolean {
   // 安全免责声明可以出现这些词，但只能在同一句明确否定时放行。
-  const forbidden = /(真实认证|官方认证|已证明安全|安全无疑)/g;
-  const negation = /(不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无|不代表|不应|不得|不能把|不能直接)/;
+  const forbidden = /(真实认证|官方认证|已证明安全|安全无疑|real certification|official certification|proven safe|guaranteed safe)/gi;
+  const negation = /(不能|不可|无法|不等于|不是|尚未|未能|未提供|没有|暂无|不代表|不应|不得|不能把|不能直接|cannot|can't|not|no|without|does not|doesn't|not a)/i;
   for (const match of text.matchAll(forbidden)) {
     const index = match.index ?? 0;
     const sentenceStart = Math.max(0, text.slice(0, index).search(/[^。！？；;\n]*$/));
@@ -1529,13 +2047,16 @@ function validConsumerModelText(text: string, contract?: ConsumerModelContract):
   if (!value || value.length > 2_000) return false;
   // Keep the public answer machine-readable and short enough for a consumer.
   const sectionBoundary = "(?:^|[\\s。；;、])";
-  if (!new RegExp(sectionBoundary + "结论：").test(value) || !new RegExp(sectionBoundary + "依据：").test(value) || !new RegExp(sectionBoundary + "不确定：").test(value) || !new RegExp(sectionBoundary + "下一步：").test(value)) return false;
+  const labels = contract?.locale === "en"
+    ? ["Conclusion", "Evidence", "Uncertainty", "Next step"]
+    : ["结论", "依据", "不确定", "下一步"];
+  if (labels.some((label) => !new RegExp(sectionBoundary + label.replace(" ", "\\s+") + "：", "i").test(value))) return false;
   if (contract?.dataMode === "demo/synthetic" && hasUnsupportedDemoClaim(value)) return false;
   if (contract?.batchId) {
     const batchIds = value.match(/\b[A-Z]{2,12}-\d{4}-\d{2,6}\b/g) ?? [];
     if (batchIds.some((id) => id !== contract.batchId)) return false;
   }
-  if (contract?.chainContext && /(已上链|交易成功|receipt 已确认|交易已确认)/i.test(value) && !contract.chainContext.transaction) return false;
+  if (contract?.chainContext && /(已上链|交易成功|receipt 已确认|交易已确认|anchored|transaction succeeded|receipt confirmed|purchase confirmed)/i.test(value) && !contract.chainContext.transaction) return false;
   return true;
 }
 
@@ -1680,7 +2201,17 @@ async function buildChainQueryContext(batchId: string | null): Promise<ChainQuer
     } catch {
       // Keep the safe pending state when a batch cannot be inspected.
     }
-    const session = sessionChainTxs.find((item) => item.batchId === batchId);
+    const receiptIndex = await receiptIndexForVerification();
+    // A batch can have purchase, feedback, dispute, and evidence receipts.
+    // Only a purchase/anchor event is allowed to appear as the current
+    // consumer transaction in the public Agent context.
+    const session = receiptIndex.find((item) =>
+      item.batchId === batchId
+      && (item.action === "purchase" || item.action === "recordPurchase" || item.action === "anchor" || item.action === "evidence")
+      && /^(PurchaseRecorded|ConsumerPurchaseSubmitted|EvidenceAnchored|EvidenceSubmitted)$/i.test(item.event)
+      && item.eventVerified === true
+      && (item.receiptStatus === "0x1" || item.receiptStatus === "1"),
+    );
     if (session) transaction = { txHash: session.txHash, event: session.event, explorerUrl: session.explorerUrl, blockNumber: session.blockNumber };
   }
   return {
@@ -1696,19 +2227,25 @@ async function buildChainQueryContext(batchId: string | null): Promise<ChainQuer
   };
 }
 
-async function freeChatReply(question: string, chainContext?: ChainQueryContext): Promise<ChatReplyResult> {
+async function freeChatReply(question: string, chainContext?: ChainQueryContext, locale: "zh" | "en" = "zh"): Promise<ChatReplyResult> {
+  const english = locale === "en";
   const chainPrompt = chainContext
-    ? "如果用户问链状态，只能引用提供的链状态；明确区分 RPC 可达、批次锚定、真实 receipt 和历史记录，不得编造交易结果。"
+    ? (english
+      ? "If the user asks about chain status, cite only the supplied chain status. Distinguish RPC reachability, batch anchoring, a real receipt, and historical replay. Never invent a transaction result."
+      : "如果用户问链状态，只能引用提供的链状态；明确区分 RPC 可达、批次锚定、真实 receipt 和历史记录，不得编造交易结果。")
     : "";
   return callCustomerModel(
-    `你是 TruthPass 商品客服。说人话，用四段短句回答，且必须严格按“结论：… 依据：… 不确定：… 下一步：…”顺序输出。依据必须写明来源（例如商品说明、售后政策、公开证据或链状态）；只引用当前输入，禁止跨批次拼接。语气直接、克制，不堆术语，不制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。${chainPrompt}`,
+    english
+      ? `You are the TruthPass product assistant. Use plain language and output exactly four short sections in this order: “Conclusion: … Evidence: … Uncertainty: … Next step: …”. Name the source in Evidence and cite only the current input; never combine batches. Be direct and restrained. Use only the supplied product policy, after-sales policy, and public evidence. Do not invent test values, efficacy, medical diagnoses, orders, payments, or transaction hashes. If evidence is missing, say so and suggest human review. ${chainPrompt}`
+      : `你是 TruthPass 商品客服。说人话，用四段短句回答，且必须严格按“结论：… 依据：… 不确定：… 下一步：…”顺序输出。依据必须写明来源（例如商品说明、售后政策、公开证据或链状态）；只引用当前输入，禁止跨批次拼接。语气直接、克制，不堆术语，不制造紧迫感。只能依据商品说明、售后政策和公开证据回答；不得编造检测值、疗效、医疗诊断、订单、支付或交易 Hash。没有证据就直说不知道，并建议转人工。${chainPrompt}`,
     chainContext ? JSON.stringify({ question, chainContext, dataMode: "demo/synthetic" }) : question,
     ["customer_policy", ...(chainContext ? ["chain_status"] : [])],
-    { dataMode: "demo/synthetic", chainContext, allowedCitations: ["customer_policy", ...(chainContext ? ["chain_status"] : [])] },
+    { dataMode: "demo/synthetic", chainContext, locale, allowedCitations: ["customer_policy", ...(chainContext ? ["chain_status"] : [])] },
   );
 }
 
-async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[string], question: string, chainContext?: ChainQueryContext): Promise<ChatReplyResult> {
+async function demoConsumerChat(batchId: string, b: DemoBatch, question: string, chainContext?: ChainQueryContext, locale: "zh" | "en" = "zh"): Promise<ChatReplyResult> {
+  const english = locale === "en";
   let collaboration: Record<string, unknown> | undefined;
   try {
     collaboration = await runPublicAgentCollaboration(batchId, question);
@@ -1719,57 +2256,101 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
   const verification = collaboration?.verification && typeof collaboration.verification === "object" ? collaboration.verification as Record<string, unknown> : {};
   const assessment = verification.assessment && typeof verification.assessment === "object" ? verification.assessment as Record<string, unknown> : {};
   const evidenceCard = collaboration?.evidenceCard && typeof collaboration.evidenceCard === "object" ? collaboration.evidenceCard as Record<string, unknown> : {};
-  const evidenceIds = Array.isArray(evidenceCard.evidenceIds)
+  const evidenceIdsFromCard = Array.isArray(evidenceCard.evidenceIds)
     ? evidenceCard.evidenceIds.filter((item): item is string => typeof item === "string")
     : [];
-  const sourceText = selectedFacts.length ? "来源：当前批次 evidence_card 与 deterministic_verifier" : "来源：当前批次登记信息";
-  const fallbackText = selectedFacts.length
-    ? `结论：${verification.status === "accepted" ? "这批资料可以继续了解" : "这批资料暂时不要急着下单"}。依据：${selectedFacts.slice(0, 2).join("；")}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${verification.status === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "先补齐缺失项或转人工复核"}。`
-    : b.passed
-      ? `结论：${b.name}（${batchId}）按当前规则可以继续了解。依据：检测、生产和冷链记录已登记；来源：当前批次登记信息。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：打开证据卡核对来源。`
-      : `结论：${b.name}（${batchId}）暂时不要急着下单。依据：当前规则仍有未通过项；来源：deterministic_verifier。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：补证或转人工复核。`;
+  // Fixture-only batches (for example FO-2026-009) do not enter the
+  // repository-backed collaboration path. They still expose stable,
+  // batch-scoped public evidence references so the Agent trace can show what
+  // was read without inventing a database evidence record.
+  const evidenceIds = evidenceIdsFromCard.length
+    ? evidenceIdsFromCard
+    : evidenceFor(batchId).map((item) => item.evidenceId).filter((item): item is string => typeof item === "string");
+  const productionEvidence = productionProcessFor(batchId);
+  const selectedFactsForOutput = selectedFacts.map((fact) => publicFactForLocale(fact, locale));
+  const missingStagesForOutput = productionEvidence.missingStages.map((stage) => publicFactForLocale(stage, locale));
+  const productionGapText = productionEvidence.missingStages.length
+    ? (english
+      ? `The production record currently covers ${productionEvidence.observedStageCount}/${productionEvidence.requiredStageCount} stages; missing: ${missingStagesForOutput.join(", ")}`
+      : `生产过程当前只记录 ${productionEvidence.observedStageCount}/${productionEvidence.requiredStageCount} 道工序，尚未覆盖：${productionEvidence.missingStages.join("、")}`)
+    : (english ? "The public production record covers the required stages" : "生产过程公开记录已覆盖当前要求的工序");
+  const baseVerificationStatus = String(verification.status ?? (b.passed ? "accepted" : "rejected"));
+  const overallVerificationStatus = baseVerificationStatus === "rejected"
+    ? "rejected"
+    : productionEvidence.missingStages.length > 0
+      ? "review"
+      : baseVerificationStatus;
+  const overallVerificationReasons = [
+    ...(Array.isArray(assessment.reasons) ? assessment.reasons.filter((item): item is string => typeof item === "string") : []),
+    ...(Array.isArray(verification.reasons) ? verification.reasons.filter((item): item is string => typeof item === "string") : []),
+    ...productionEvidence.missingStages.map((stage) => `生产阶段“${stage}”资料未覆盖`),
+  ];
+  const overallVerificationReasonsForOutput = overallVerificationReasons.map((reason) => publicFactForLocale(reason, locale));
+  const sourceText = selectedFacts.length
+    ? (english ? "Source: the current batch evidence card and deterministic verifier" : "来源：当前批次 evidence_card 与 deterministic_verifier")
+    : (english ? "Source: the current batch record" : "来源：当前批次登记信息");
+  const fallbackText = english
+    ? selectedFacts.length
+      ? `Conclusion: ${overallVerificationStatus === "accepted" ? "These records can be reviewed further" : "These records need review before purchase preparation"}. Evidence: ${selectedFactsForOutput.slice(0, 2).join("; ")}; ${productionGapText}; ${sourceText}. Uncertainty: This is demo/synthetic data and is not a substitute for real product certification. Next step: ${overallVerificationStatus === "accepted" ? "Open the evidence card to confirm sources, then prepare a purchase" : "Ask the producer or testing body to complete the missing production records and rerun verification"}.`
+      : b.passed
+        ? `Conclusion: ${overallVerificationStatus === "accepted" ? `${b.name} (${batchId}) is within the current demo rule range for further review` : `${b.name} (${batchId}) is within the current demo rule range, but the production record still needs review`}. Evidence: ${demoParameterDetailForLocale(b, locale)}; ${productionGapText}; ${sourceText}. Uncertainty: This is demo/synthetic data and is not a substitute for real product certification. Next step: ${overallVerificationStatus === "accepted" ? "Open the evidence card to check the sources" : "Ask the producer to complete the production record and rerun verification"}.`
+        : `Conclusion: ${b.name} (${batchId}) needs parameter review before deciding whether to order. Evidence: ${demoParameterDetailForLocale(b, locale)}; ${sourceText}; deterministic verifier. Uncertainty: This is demo/synthetic data and is not a substitute for real product certification. Next step: Ask the producer or testing body to complete the relevant records and check again.`
+    : selectedFacts.length
+      ? `结论：${overallVerificationStatus === "accepted" ? "这批资料可以继续了解" : "这批资料需要先复核，暂不进入购买准备"}。依据：${selectedFacts.slice(0, 2).join("；")}；${productionGapText}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${overallVerificationStatus === "accepted" ? "先打开证据卡确认来源，再生成购买准备" : "由生产方或检测机构补齐生产阶段资料后重新核验"}。`
+      : b.passed
+        ? `结论：${overallVerificationStatus === "accepted" ? `${b.name}（${batchId}）的登记参数落在当前演示规则范围内，可以继续了解` : `${b.name}（${batchId}）的参数虽在当前演示规则范围内，但生产资料仍需复核`}。依据：${demoParameterDetail(b)}${productionGapText}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${overallVerificationStatus === "accepted" ? "打开证据卡核对来源" : "由生产方补齐生产阶段资料后重新核验"}。`
+        : `结论：${b.name}（${batchId}）需要先复核参数再决定是否下单。依据：${demoParameterDetail(b)}${sourceText}；deterministic_verifier。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：由企业或检测机构补齐对应资料后重新核对。`;
   const allowedNumbers = [
     String(b.epaDha), `${b.epaDha}%`,
     String(b.peroxide), `${b.peroxide}mg`,
     String(b.totox),
     String(b.coldGap), `${b.coldGap}小时`, `${b.coldGap}h`,
+    String(productionEvidence.observedStageCount), String(productionEvidence.requiredStageCount),
+    ...productionEvidence.facts.flatMap((fact) => fact.value.match(/\d+(?:\.\d+)?/g) ?? []),
     ...b.productionDate.split(/[^0-9]+/).filter(Boolean),
     ...Object.values(b.heavyMetals).flatMap((value) => [String(value)]),
   ];
   const modelResult = await callCustomerModel(
-    "你是 TruthPass 的商品客服。说人话，严格输出四段短句：“结论：… 依据：… 不确定：… 下一步：…”。依据必须写明来源。只能使用下面当前批次的确定性验证结果和证据卡，禁止跨批次拼接；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。不要把“通过当前规则”说成“商品安全”或“官方认证”。链上内容只能引用 chainContext；没有 transaction 时不得声称交易或 receipt 已确认。",
+    english
+      ? "You are the TruthPass product assistant. Use plain language and output exactly four short sections: “Conclusion: … Evidence: … Uncertainty: … Next step: …”. Name the source in Evidence. Use only the current batch's deterministic verification result and evidence card; never combine batches. Do not invent metrics, efficacy, diagnoses, orders, payments, or transaction hashes. Say when information is missing. Do not turn “within current rules” into “safe” or “officially certified”. Chain content may cite only chainContext; without a transaction, do not claim a confirmed transaction or receipt."
+      : "你是 TruthPass 的商品客服。说人话，严格输出四段短句：“结论：… 依据：… 不确定：… 下一步：…”。依据必须写明来源。只能使用下面当前批次的确定性验证结果和证据卡，禁止跨批次拼接；不得创造新指标、疗效、医疗诊断、订单、支付或交易 Hash；资料不足时必须直说。不要把“通过当前规则”说成“商品安全”或“官方认证”。链上内容只能引用 chainContext；没有 transaction 时不得声称交易或 receipt 已确认。",
     JSON.stringify({
       batchId,
       dataMode: "demo/synthetic",
       evidenceCard: collaboration?.evidenceCard ?? null,
-      selectedFacts,
-      verification: { status: verification.status ?? (b.passed ? "accepted" : "rejected"), reasons: assessment.reasons ?? verification.reasons ?? [] },
-      deterministicFacts: { product: b.name, epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, coldChainGapHours: b.coldGap },
+      selectedFacts: selectedFactsForOutput,
+      verification: { status: overallVerificationStatus, reasons: overallVerificationReasonsForOutput },
+      productionEvidence: {
+        ...productionEvidence,
+        missingStages: missingStagesForOutput,
+      },
+      deterministicFacts: isRiceBatch(batchId)
+        ? { product: b.name, category: "rice", production: productionEvidence.facts, productionStages: productionEvidence.stages }
+        : { product: b.name, category: "fish_oil", epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, totox: b.totox, coldChainGapHours: b.coldGap, heavyMetals: b.heavyMetals },
       chainContext: chainContext ?? null,
       question,
     }),
-    ["evidence_card", "deterministic_verifier"],
+    [...evidenceIds, "evidence_card", "deterministic_verifier"],
     {
       batchId,
       dataMode: "demo/synthetic",
       chainContext,
       verifier: {
-        status: String(verification.status ?? (b.passed ? "accepted" : "rejected")),
-        reasons: Array.isArray(assessment.reasons) ? assessment.reasons.filter((item): item is string => typeof item === "string") : [],
+        status: overallVerificationStatus,
+        reasons: overallVerificationReasonsForOutput,
       },
       jev: {
-        decision: verification.status === "accepted" ? "route_to_rule" : "request_more_evidence",
+        decision: overallVerificationStatus === "accepted" ? "route_to_rule" : "request_more_evidence",
         confidence: 0.94,
       },
       evidenceIds,
       allowedCitations: [...new Set([...evidenceIds, "evidence_card", "deterministic_verifier", "product_policy", ...(chainContext ? ["chain_status"] : [])])],
       allowedNumbers,
+      locale,
     },
   );
-  const verifierStatus = String(verification.status ?? (b.passed ? "accepted" : "rejected"));
-  const verifierReasons = Array.isArray(assessment.reasons)
-    ? assessment.reasons.filter((item): item is string => typeof item === "string")
-    : [];
+  const verifierStatus = overallVerificationStatus;
+  const verifierReasons = overallVerificationReasonsForOutput;
   if (modelResult.lines.length) {
     return {
       ...modelResult,
@@ -1780,12 +2361,15 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
     };
   }
   const fallbackCitations = [
+    ...evidenceIds,
     "evidence_card",
     "deterministic_verifier",
     ...(chainContext ? ["chain_status"] : []),
   ];
   const chainFallback = chainContext
-    ? `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：来源为 chain_status（Chain ${chainContext.chainId} · ${chainContext.chainName}）${chainContext.transaction ? `，本次会话交易为 ${chainContext.transaction.event}` : "，没有本次会话交易 receipt"}。不确定：链节点可读取不等于批次已锚定；当前 dataMode 为 demo/synthetic。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
+    ? english
+      ? `Conclusion: The chain node is ${chainContext.rpcReachable ? "reachable" : "temporarily unavailable"}, and this batch has chain status “${chainContext.anchorStatus}”. Evidence: Source is chain_status (Chain ${chainContext.chainId} · ${chainContext.chainName})${chainContext.transaction ? `; this session's transaction event is ${chainContext.transaction.event}` : "; there is no receipt for this session"}. Uncertainty: A reachable node does not prove that the batch is anchored; dataMode is demo/synthetic. Next step: ${chainContext.transaction ? "Open the block explorer and verify the receipt" : "Prepare the write and confirm it in an external wallet if needed"}.`
+      : `结论：${chainContext.rpcReachable ? "链节点当前可读取" : "链节点当前暂时无法读取"}，这批资料的链上状态是“${chainContext.anchorStatus}”。依据：来源为 chain_status（Chain ${chainContext.chainId} · ${chainContext.chainName}）${chainContext.transaction ? `，本次会话交易为 ${chainContext.transaction.event}` : "，没有本次会话交易 receipt"}。不确定：链节点可读取不等于批次已锚定；当前 dataMode 为 demo/synthetic。下一步：${chainContext.transaction ? "打开区块浏览器核对 receipt" : "如需写入，请先准备操作并由钱包确认"}。`
     : fallbackText;
   return {
     ...modelResult,
@@ -1803,9 +2387,35 @@ async function demoConsumerChat(batchId: string, b: (typeof FISH_OIL_BATCHES)[st
   };
 }
 
-async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse): Promise<void> {
+/**
+ * Request-driven Agent executions are intentionally short lived. Keep a
+ * process-local guard so one Vercel function instance cannot fan out more
+ * than the supported number of model runs at once. A multi-instance
+ * deployment must back this with Redis or another shared limiter for a
+ * fleet-wide cap.
+ */
+const AGENT_MAX_CONCURRENCY = (() => {
+  const configured = Number.parseInt(process.env.TRUTHPASS_AGENT_MAX_CONCURRENCY ?? "10", 10);
+  return Number.isFinite(configured) && configured > 0 ? Math.min(configured, 10) : 10;
+})();
+let activeAgentRuns = 0;
+
+function tryAcquireAgentSlot(): { allowed: true; active: number } | { allowed: false; active: number; retryAfterSeconds: number } {
+  if (activeAgentRuns >= AGENT_MAX_CONCURRENCY) {
+    return { allowed: false, active: activeAgentRuns, retryAfterSeconds: 1 };
+  }
+  activeAgentRuns += 1;
+  return { allowed: true, active: activeAgentRuns };
+}
+
+function releaseAgentSlot(): void {
+  // Defensive clamp keeps a provider/client error from making the process
+  // permanently unavailable if a future path accidentally releases twice.
+  activeAgentRuns = Math.max(0, activeAgentRuns - 1);
+}
+
+async function consumerChat(req: IncomingMessage, batchId: string, question: string, res: ServerResponse, locale: "zh" | "en" = "zh"): Promise<void> {
   const traceId = requestTraceId(req);
-  const chainContext = isChainStatusQuestion(question) ? await buildChainQueryContext(batchId || null) : undefined;
   const rate = consumeChatRateLimit(req);
   if (!rate.allowed) {
     console.info(JSON.stringify({ event: "customer_service_rate_limited", traceId, status: "rate_limited" }));
@@ -1814,34 +2424,76 @@ async function consumerChat(req: IncomingMessage, batchId: string, question: str
     return;
   }
 
+  const slot = tryAcquireAgentSlot();
+  if (!slot.allowed) {
+    console.info(JSON.stringify({ event: "customer_service_concurrency_limited", traceId, status: "rate_limited", active: slot.active, limit: AGENT_MAX_CONCURRENCY }));
+    res.writeHead(429, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Retry-After": String(slot.retryAfterSeconds),
+      "Cache-Control": "no-store",
+      "X-TruthPass-Agent-Limit": String(AGENT_MAX_CONCURRENCY),
+    });
+    res.end(JSON.stringify({
+      error: "AGENT_CONCURRENCY_LIMITED",
+      status: "rate_limited",
+      reason: "agent_concurrency_limit",
+      traceId,
+      active: slot.active,
+      limit: AGENT_MAX_CONCURRENCY,
+      retryAfterSeconds: slot.retryAfterSeconds,
+    }));
+    return;
+  }
+
+  try {
+    await consumerChatWithSlot(req, batchId, question, res, traceId, locale);
+  } finally {
+    releaseAgentSlot();
+  }
+}
+
+async function consumerChatWithSlot(req: IncomingMessage, batchId: string, question: string, res: ServerResponse, traceId: string, locale: "zh" | "en" = "zh"): Promise<void> {
+  const english = locale === "en";
+  const chainContext = isChainStatusQuestion(question) ? await buildChainQueryContext(batchId || null) : undefined;
+
   if (!batchId) {
     const available = [...Object.keys(FISH_OIL_BATCHES), ...Object.keys(RICE_BATCHES)].filter((id) => repository.getBatch(id) || demoBatchFor(id));
     const fallback: ChatReplyResult = {
-      lines: [{ cls: "plain", text: available.length ? "结论：我可以帮你查商品和批次。依据：当前服务已登记可查询批次；来源：customer_fallback。不确定：未提供批次号时无法核对具体证据。下一步：请提供商品名和批次号。" : "结论：目前不能核对具体批次。依据：系统未收到有效批次号；来源：customer_fallback。不确定：没有批次号就不能判断证据状态。下一步：请提供商品名和批次号。" }],
+      lines: [{ cls: "plain", text: english
+        ? (available.length ? "Conclusion: I can check a product and batch. Evidence: The service has registered batches available for lookup; source: customer_fallback. Uncertainty: Without a batch ID I cannot verify the specific evidence. Next step: Provide the product name and batch ID." : "Conclusion: I cannot verify a specific batch yet. Evidence: No valid batch ID was received; source: customer_fallback. Uncertainty: Without a batch ID I cannot determine the evidence status. Next step: Provide the product name and batch ID.")
+        : (available.length ? "结论：我可以帮你查商品和批次。依据：当前服务已登记可查询批次；来源：customer_fallback。不确定：未提供批次号时无法核对具体证据。下一步：请提供商品名和批次号。" : "结论：目前不能核对具体批次。依据：系统未收到有效批次号；来源：customer_fallback。不确定：没有批次号就不能判断证据状态。下一步：请提供商品名和批次号。") }],
       status: "deterministic_fallback",
       dataMode: "demo/synthetic",
       sources: ["customer_fallback"],
       safety: { status: "fallback", citations: ["customer_fallback"], reasons: ["batch_id_required"] },
     };
-    const reply = freeChatReply(question, chainContext).then((result) => result.lines.length ? { ...result, ...(chainContext ? { chainContext } : {}) } : fallback);
+    const reply = freeChatReply(question, chainContext, locale).then((result) => result.lines.length ? { ...result, ...(chainContext ? { chainContext } : {}) } : fallback);
     await streamChatWithReply(res, "consumer_query", [], reply, { batchId: null, traceId });
     return;
   }
 
   const b = demoBatchFor(batchId);
   if (!b) {
-    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: "结论：暂时不能判断批次 " + batchId + "。依据：当前批次没有已登记证据；来源：batch_lookup。不确定：不会用其他批次的数据代替。下一步：请核对批次号，或转人工登记证据。" }], {
+    streamChat(res, "consumer_query", [{ cls: "disclaimer", text: english ? `Conclusion: I cannot determine batch ${batchId} yet. Evidence: This batch has no registered evidence; source: batch_lookup. Uncertainty: I will not substitute data from another batch. Next step: Check the batch ID or ask a human to register the evidence.` : "结论：暂时不能判断批次 " + batchId + "。依据：当前批次没有已登记证据；来源：batch_lookup。不确定：不会用其他批次的数据代替。下一步：请核对批次号，或转人工登记证据。" }], {
       agentMode: "deterministic_fallback",
       serviceStatus: "deterministic_fallback",
       dataMode: "demo/synthetic",
       batchId,
       traceId,
+      // Unknown batches are rejected before any provider call. Keep the
+      // public metadata deterministic even when a model provider is
+      // configured globally for other requests.
+      provider: "deterministic",
+      model: "deterministic-fallback",
+      modelAssisted: false,
       sources: ["batch_lookup"],
+      validationStatus: "fallback",
+      validationReasons: ["batch_not_found"],
     });
     return;
   }
 
-  const reply = demoConsumerChat(batchId, b, question, chainContext);
+  const reply = demoConsumerChat(batchId, b, question, chainContext, locale);
   const lifecycle = lifecyclePublicView(batchId);
   await streamChatWithReply(res, "consumer_evidence", [], reply, {
     batchId,
@@ -2235,10 +2887,10 @@ async function runPublicAgentCollaboration(batchId: string, question: string, te
     const rice = RICE_BATCHES[batchId];
     if (!rice) throw new Error("批次不存在: " + batchId);
     const evidence: ConsumerEvidenceSnapshot["evidence"] = [
-      { evidenceId: `rice-origin-${batchId}`, kind: "production", issuerId: "rice-merchant-demo", sourceKind: "manufacturer", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
-      { evidenceId: `rice-inspection-${batchId}`, kind: "inspection", issuerId: "rice-lab-demo", sourceKind: "third_party", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
-      ...(rice.passed ? [{ evidenceId: `rice-storage-${batchId}`, kind: "cold_chain" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
-      ...(rice.passed ? [{ evidenceId: `rice-shipment-${batchId}`, kind: "shipment" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
+      { evidenceId: `${batchId}:evidence:origin`, kind: "production", issuerId: "rice-merchant-demo", sourceKind: "manufacturer", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
+      { evidenceId: `${batchId}:evidence:inspection`, kind: "inspection", issuerId: "rice-lab-demo", sourceKind: "third_party", status: "submitted", dataMode: "demo/synthetic", signature: "not_checked" },
+      ...(rice.passed ? [{ evidenceId: `${batchId}:evidence:storage`, kind: "cold_chain" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
+      ...(rice.passed ? [{ evidenceId: `${batchId}:evidence:shipment`, kind: "shipment" as const, issuerId: "rice-logistics-demo", sourceKind: "platform_device" as const, status: "submitted" as const, dataMode: "demo/synthetic" as const, signature: "not_checked" as const }] : []),
     ];
     const snapshot: ConsumerEvidenceSnapshot = {
       batchId,
@@ -2430,16 +3082,26 @@ async function runPublicAgentCollaboration(batchId: string, question: string, te
 }
 
 async function mcpInspectBatch(batchId: string, traceId: string) {
-  if (repository.getBatch(batchId)) {
-    const result = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
-    return { ...result, traceId, dataMode: result.verification.dataClass };
-  }
   const fixture = demoBatchFor(batchId);
-  if (!fixture) throw new Error("BATCH_NOT_FOUND");
-  const status = fixture.passed ? "accepted" : "rejected";
-  const reasons = fixture.passed ? [] : [isRiceBatch(batchId) ? "演示批次仍有产地、检测或运输资料缺口，需人工复核" : "演示批次存在未通过的指标，需人工复核"];
-  const fixturePolicy = isRiceBatch(batchId) ? { id: "rice-origin-policy", version: "v1" } : { id: policy.policyId, version: policy.version };
-  return {
+  if (fixture) {
+    const gate = demoVerificationGate(batchId, fixture);
+    const status = gate.status;
+    const reasons = gate.reasons.length > 0
+      ? gate.reasons
+      : fixture.passed
+        ? []
+        : isRiceBatch(batchId)
+          ? ["演示批次仍有产地、检测或运输资料缺口，需人工复核"]
+          : [demoParameterDetail(fixture)];
+    const fixturePolicy = isRiceBatch(batchId) ? { id: "rice-origin-policy", version: "v1" } : { id: policy.policyId, version: "v1" };
+    const fixtureEvidence = evidenceFor(batchId).map((item) => ({
+      evidenceId: item.evidenceId ?? `${batchId}:evidence:${item.step}`,
+      kind: item.title,
+      sourceKind: item.source,
+      status: "registered",
+      dataMode: "demo/synthetic" as const,
+    }));
+    return {
     schemaVersion: "truthpass.cli.inspect.v1",
     command: "inspect",
     batchId,
@@ -2459,11 +3121,20 @@ async function mcpInspectBatch(batchId: string, traceId: string) {
        policy: fixturePolicy,
       assessment: { status, reasons, epaDhaPercent: fixture.epaDha, peroxideValue: fixture.peroxide, coldChainGapHours: fixture.coldGap },
       reasons,
-      evidence: [],
+      // Keep fixture inspection useful to external MCP/Codex callers. These
+      // are public demo references only; they are still explicitly scoped to
+      // this batch and never imply a signed or live production record.
+      evidence: fixtureEvidence,
       evidenceRoot: evidenceHash(`${batchId}:root`),
       anchor: { status: "anchor_pending", network: BOT_CHAIN_MAINNET.network, submitted: false, chainId: BOT_CHAIN_MAINNET.chainId, contractAddress: BOT_CHAIN_MAINNET.contractAddress },
     },
-  };
+    };
+  }
+  if (repository.getBatch(batchId)) {
+    const result = await runCliInspect(repository, { ...task, batchId }, { id: policy.policyId, version: policy.version });
+    return { ...result, traceId, dataMode: result.verification.dataClass };
+  }
+  throw new Error("BATCH_NOT_FOUND");
 }
 
 const mcpHttpHandler = createTruthPassMcpHttpHandler({
@@ -2506,30 +3177,249 @@ const mcpHttpHandler = createTruthPassMcpHttpHandler({
 // ---------- 路由 ----------
 async function feedbackSummaryFor(batchId: string) {
   const memory = consumers.listFeedback(batchId);
-  let rows: Array<{ rating: number; data_mode?: string; created_at?: string }> = [];
+  let rows: Array<{ feedback_id?: string; rating: number; categories?: string[]; data_mode?: string; created_at?: string }> = [];
   if (persistenceEnabled()) {
     try {
       const result = await getDatabasePool().query(
-        "select rating, created_at from consumer_feedbacks where batch_id = $1 order by created_at desc limit 500",
+        "select feedback_id, rating, categories, data_mode, created_at from consumer_feedbacks where batch_id = $1 order by created_at desc limit 500",
         [batchId],
       );
-      rows = result.rows as Array<{ rating: number; created_at?: string }>;
+      rows = result.rows as Array<{ feedback_id?: string; rating: number; categories?: string[]; data_mode?: string; created_at?: string }>;
     } catch (error) {
       console.error("反馈汇总读取失败:", error instanceof Error ? error.message : String(error));
     }
   }
-  const ratings = [...memory.map((item) => item.rating), ...rows.map((item) => Number(item.rating)).filter(Number.isFinite)];
+  const records = new Map<string, { rating: number; categories: string[]; dataMode: "demo/synthetic" | "external"; createdAt?: string }>();
+  for (const item of memory) {
+    records.set(item.feedbackId, { rating: item.rating, categories: item.categories, dataMode: item.dataMode ?? "demo/synthetic", createdAt: item.createdAt });
+  }
+  for (const item of rows) {
+    const id = item.feedback_id ?? `db:${item.created_at ?? ""}:${item.rating}:${JSON.stringify(item.categories ?? [])}`;
+    records.set(id, {
+      rating: Number(item.rating),
+      categories: Array.isArray(item.categories) ? item.categories.map(String) : [],
+      dataMode: item.data_mode === "demo/synthetic" ? "demo/synthetic" : "external",
+      createdAt: item.created_at,
+    });
+  }
+  const entries = [...records.values()].filter((item) => Number.isFinite(item.rating));
+  const ratings = entries.map((item) => item.rating);
+  const categoryCounts: Record<string, number> = {};
+  for (const item of entries) for (const category of item.categories) categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+  const modes = new Set(entries.map((item) => item.dataMode));
+  const sampleMode = modes.size > 1 ? "mixed" : (modes.values().next().value ?? "demo/synthetic");
+  const lastUpdated = entries.map((item) => item.createdAt).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
   return {
     count: ratings.length,
     averageRating: ratings.length ? Number((ratings.reduce((sum, value) => sum + value, 0) / ratings.length).toFixed(2)) : null,
-    dataMode: rows.length ? "external" : "demo/synthetic",
+    categoryCounts,
+    returnRate: null,
+    deliveryIssueRate: null,
+    lastUpdated,
+    sampleMode,
+    dataMode: modes.has("external") ? "external" : "demo/synthetic",
     verifiedPurchaseOnly: true,
-    note: ratings.length ? "仅统计已绑定购买记录的反馈。" : "当前没有已核验购买反馈。",
+    note: ratings.length ? "仅统计已绑定购买记录的反馈；退货和物流异常需接入专门事件字段后计算。" : "当前没有已核验购买反馈。",
   };
+}
+
+type ProductionImprovementReport = {
+  schemaVersion: "truthpass.production.improvement-report.v1";
+  reportId: string;
+  tenantId: string;
+  batchId: string;
+  readOnly: true;
+  dataMode: "demo/synthetic" | "external";
+  generatedAt: string;
+  findings: Array<{ id: string; severity: "medium"; reason: string; status: "open" }>;
+  recommendations: string[];
+  evidenceRoot: string;
+  feedbackSummary: Record<string, unknown>;
+  persisted: boolean;
+  disclaimer: string;
+};
+
+async function buildProductionImprovementReport(tenantId: string, batchId: string): Promise<ProductionImprovementReport> {
+  const inspection = await mcpInspectBatch(batchId, requestTraceId({ headers: {} } as IncomingMessage));
+  const unresolved = inspection.verification.status !== "accepted" ? inspection.verification.reasons : [];
+  const generatedAt = new Date().toISOString();
+  const reportId = `improvement-${sha256Hex32(`${tenantId}:${batchId}:${inspection.verification.evidenceRoot}`).slice(0, 24)}`;
+  return {
+    schemaVersion: "truthpass.production.improvement-report.v1",
+    reportId,
+    tenantId,
+    batchId,
+    readOnly: true,
+    dataMode: inspection.verification.dataClass === "external" ? "external" : "demo/synthetic",
+    generatedAt,
+    findings: unresolved.map((reason, index) => ({ id: `${reportId}-finding-${index + 1}`, severity: "medium" as const, reason, status: "open" as const })),
+    recommendations: unresolved.length
+      ? ["补齐缺失证据并重新运行确定性验收", "由授权生产或检测方提交可核验原始记录"]
+      : ["保持当前采集频率并持续回读链上 receipt"],
+    evidenceRoot: inspection.verification.evidenceRoot,
+    feedbackSummary: await feedbackSummaryFor(batchId),
+    persisted: false,
+    disclaimer: "该报告是只读改进建议，不改变验收结论、不代表生产已完成整改。",
+  };
+}
+
+async function persistProductionImprovementReport(report: ProductionImprovementReport): Promise<void> {
+  if (!persistenceEnabled()) return;
+  await getDatabasePool().query(`
+    create table if not exists truthpass_production_improvement_reports (
+      report_id text primary key,
+      tenant_id text not null,
+      batch_id text not null,
+      data_mode text not null,
+      evidence_root text,
+      findings jsonb not null default '[]'::jsonb,
+      recommendations jsonb not null default '[]'::jsonb,
+      feedback_summary jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+    alter table truthpass_production_improvement_reports add column if not exists tenant_id text;
+    alter table truthpass_production_improvement_reports add column if not exists feedback_summary jsonb not null default '{}'::jsonb;
+    create index if not exists truthpass_improvement_reports_tenant_idx on truthpass_production_improvement_reports(tenant_id, created_at desc);
+  `);
+  await getDatabasePool().query(
+    `insert into truthpass_production_improvement_reports
+      (report_id, tenant_id, batch_id, data_mode, evidence_root, findings, recommendations, feedback_summary)
+     values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb)
+     on conflict (report_id) do update set
+       tenant_id = excluded.tenant_id,
+       batch_id = excluded.batch_id,
+       data_mode = excluded.data_mode,
+       evidence_root = excluded.evidence_root,
+       findings = excluded.findings,
+       recommendations = excluded.recommendations,
+       feedback_summary = excluded.feedback_summary`,
+    [report.reportId, report.tenantId, report.batchId, report.dataMode, report.evidenceRoot, JSON.stringify(report.findings), JSON.stringify(report.recommendations), JSON.stringify(report.feedbackSummary)],
+  );
+}
+
+type FeedbackDraft = {
+  prepareId: string;
+  batchId: string;
+  purchaseId: string;
+  purchaseTxHash: string;
+  walletAddress?: string;
+  rating: number;
+  categories: string[];
+  comment: string;
+  feedbackHash: string;
+  dataMode: "demo/synthetic" | "external";
+  createdAt: string;
+  expiresAt: string;
+  consumed: boolean;
+};
+
+// A draft is deliberately not a feedback record. It only carries the exact
+// payload that the user will confirm after the purchase receipt (and, in
+// production, the contribution receipt) has been read back by the server.
+const pendingFeedbackDrafts = new Map<string, FeedbackDraft>();
+const FEEDBACK_CATEGORIES = ["包装完好", "无明显腥味", "批次可查", "口感不错", "日期新鲜", "物流快速", "保存方便"] as const;
+
+async function feedbackDraftForRequest(prepareId: string): Promise<FeedbackDraft | undefined> {
+  const local = pendingFeedbackDrafts.get(prepareId);
+  if (local) return local;
+  if (!persistenceEnabled()) return undefined;
+  const persisted = await loadPersistedFeedbackDraft(prepareId);
+  if (!persisted) return undefined;
+  const draft = persisted satisfies FeedbackDraft;
+  pendingFeedbackDrafts.set(prepareId, draft);
+  return draft;
+}
+
+function feedbackProductionMode(): boolean {
+  return process.env.TRUTHPASS_FEEDBACK_MODE === "production"
+    || process.env.TRUTHPASS_PRODUCTION_MODE === "true"
+    || process.env.NODE_ENV === "production";
+}
+
+function normalizedFeedbackTxHash(body: Record<string, unknown>): string {
+  const value = typeof body.purchaseTxHash === "string"
+    ? body.purchaseTxHash.trim()
+    : typeof body.txHash === "string" ? body.txHash.trim() : "";
+  return value;
+}
+
+async function receiptIndexForVerification(): Promise<SessionChainTransaction[]> {
+  if (!persistenceEnabled()) return sessionChainTxs;
+  try {
+    const persisted = await loadPersistedChainTransactions();
+    for (const item of persisted) {
+      if (!sessionChainTxs.some((current) => current.txHash.toLowerCase() === item.txHash.toLowerCase())) {
+        sessionChainTxs.push(item as SessionChainTransaction);
+      }
+    }
+  } catch {
+    // A missing durable index must fail closed. The in-memory index may still
+    // contain a receipt verified by this instance, but it cannot be used to
+    // manufacture a success after a persistence outage.
+    return [];
+  }
+  return sessionChainTxs;
+}
+
+async function verifiedPurchaseReceipt(purchaseId: string, purchaseTxHash: string, batchId: string, walletAddress?: string): Promise<SessionChainTransaction | undefined> {
+  const normalizedWallet = walletAddress?.trim().toLowerCase();
+  const receipts = await receiptIndexForVerification();
+  return receipts.find((item) => {
+    const action = item.action === "recordPurchase" ? "purchase" : item.action;
+    if (action !== "purchase" || item.batchId !== batchId) return false;
+    if (!/^(PurchaseRecorded|ConsumerPurchaseSubmitted)$/i.test(item.event)) return false;
+    if (item.txHash.toLowerCase() !== purchaseTxHash.toLowerCase()) return false;
+    if (item.receiptStatus !== "0x1" && item.receiptStatus !== "1") return false;
+    if (item.eventVerified !== true) return false;
+    if (!item.ids?.purchaseId || item.ids.purchaseId.toLowerCase() !== purchaseId.toLowerCase()) return false;
+    if (normalizedWallet && item.wallet.toLowerCase() !== normalizedWallet) return false;
+    return true;
+  });
+}
+
+async function verifiedContributionReceipt(contributionTxHash: string, contributionId: string | undefined, purchaseId: string, batchId: string): Promise<SessionChainTransaction | undefined> {
+  const receipts = await receiptIndexForVerification();
+  return receipts.find((item) => {
+    const action = item.action === "recordContribution" ? "contribution" : item.action;
+    if (action !== "contribution" || item.batchId !== batchId) return false;
+    if (!/^(ContributionRecorded|ConsumerContributionSubmitted)$/i.test(item.event)) return false;
+    if (item.txHash.toLowerCase() !== contributionTxHash.toLowerCase()) return false;
+    if (item.receiptStatus !== "0x1" && item.receiptStatus !== "1") return false;
+    if (item.eventVerified !== true) return false;
+    if (!item.ids?.purchaseId || item.ids.purchaseId.toLowerCase() !== purchaseId.toLowerCase()) return false;
+    if (contributionId && item.ids?.contributionId && item.ids.contributionId.toLowerCase() !== contributionId.toLowerCase()) return false;
+    return true;
+  });
+}
+
+function validateFeedbackFields(body: Record<string, unknown>): { batchId: string; purchaseId: string; purchaseTxHash: string; walletAddress?: string; rating: number; categories: string[]; comment: string; dataMode: "demo/synthetic" | "external" } | { error: string; status: number } {
+  const batchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
+  const purchaseId = typeof body.purchaseId === "string" ? body.purchaseId.trim() : "";
+  const purchaseTxHash = normalizedFeedbackTxHash(body);
+  const walletAddressRaw = typeof body.walletAddress === "string" ? body.walletAddress.trim() : typeof body.wallet === "string" ? body.wallet.trim() : "";
+  const walletAddress = walletAddressRaw ? walletAddressRaw.toLowerCase() : undefined;
+  const rating = body.rating;
+  const categories = Array.isArray(body.categories) ? body.categories.filter((value): value is string => typeof value === "string") : [];
+  const comment = typeof body.comment === "string" ? body.comment.trim() : "";
+  const requestedDemo = body.dataMode === "demo/synthetic" || body.demoMode === true;
+  const production = feedbackProductionMode();
+  if (production && requestedDemo) return { error: "生产模式禁止提交 demo/synthetic 反馈", status: 403 };
+  const dataMode = requestedDemo ? "demo/synthetic" : "external";
+  if (!batchId || (!demoBatchFor(batchId) && !repository.getBatch(batchId))) return { error: "批次不存在或没有登记记录", status: 404 };
+  if (!/^0x[0-9a-fA-F]{64}$/.test(purchaseId)) return { error: "purchaseId 必须是 32 字节标识", status: 400 };
+  if (!/^0x[0-9a-fA-F]{64}$/.test(purchaseTxHash)) return { error: "必须提供购买交易 txHash", status: 400 };
+  if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5) return { error: "评分必须是 1 到 5 的整数", status: 400 };
+  if (!categories.length || categories.length > FEEDBACK_CATEGORIES.length || categories.some((category) => !FEEDBACK_CATEGORIES.includes(category as typeof FEEDBACK_CATEGORIES[number])) || new Set(categories).size !== categories.length) return { error: "反馈标签无效", status: 400 };
+  if (comment.length > 1000) return { error: "补充反馈最多 1000 字符", status: 400 };
+  return { batchId, purchaseId, purchaseTxHash, walletAddress, rating, categories, comment, dataMode };
 }
 
 export async function handleApi(url: URL, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const p = url.pathname;
+  // Ensure the first request observes persisted lifecycle revisions after a
+  // process restart.  This promise is already resolved in memory-demo mode.
+  await lifecycleHydration;
+  await chainTxHydration;
 
   // Configuration driven tenant sites. This in-memory adapter keeps the
   // preview and publish contract usable before the Supabase tenant tables are
@@ -2650,7 +3540,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
+      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.feedback.prepare", "consumer.feedback.confirm", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
       endpoints: {
         sites: `${origin}/api/sites`,
         site: `${origin}/api/sites/{slug}`,
@@ -2667,6 +3557,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         collaboration: `${origin}/api/agent/v1/collaborate`,
         lifecycle: `${origin}/api/products/{batchId}/lifecycle`,
         lifecycleSimulation: `${origin}/api/simulator/lifecycle`,
+        recommendation: `${origin}/api/recommendation?batchId={batchId}`,
         registration: `${origin}/api/agent/register`,
         mcp: `${origin}/mcp`,
         walletBindingChallenge: `${origin}/api/wallet/bind/challenge?address={address}&tenantId={tenantId}&role={role}`,
@@ -2674,6 +3565,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         paymentStatus: `${origin}/api/payments/status`,
         purchaseQuote: `${origin}/api/public/batches/{batchId}/purchase-quote`,
         purchaseStatus: `${origin}/api/public/batches/{batchId}/purchase-status`,
+        feedbackPrepare: `${origin}/api/feedback/prepare`,
+        feedbackConfirm: `${origin}/api/feedback/confirm`,
+        feedbackSummary: `${origin}/api/feedback/summary?batchId={batchId}`,
         alipayCreate: `${origin}/api/payments/alipay/create`,
         alipayNotify: `${origin}/api/payments/alipay/notify`,
         paypalCreateOrder: `${origin}/api/payments/paypal/create-order`,
@@ -2687,6 +3581,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
         enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
         enterpriseAuditExport: `${origin}/api/tenants/{tenantId}/audit/export`,
+        productionImprovementReport: `${origin}/api/tenants/{tenantId}/production-improvement-report?batchId={batchId}`,
         cfiManifest: `${origin}/api/cfi/manifest`,
         publicStandard: `${origin}/api/standards`,
       },
@@ -3331,14 +4226,28 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     const requestedAction = typeof body.action === "string" ? body.action.trim() : "purchase";
+    const normalizedAction = requestedAction === "recordPurchase" ? "purchase"
+      : requestedAction === "recordContribution" ? "contribution"
+        : requestedAction === "raiseDispute" ? "dispute"
+          : requestedAction;
+    const consumerWrite = ["purchase", "contribution", "dispute"].includes(normalizedAction);
     try {
-      await assertWalletActionAuthorized(body, requestedAction);
+      await assertWalletActionAuthorized(body, normalizedAction);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true") {
+      // Consumer writes always need an explicit external wallet. The feature
+      // flag may relax the institution binding lookup for local demos, but it
+      // must never turn a purchase/contribution/dispute receipt into an
+      // anonymous write.
+      if (consumerWrite || process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true") {
         sendJson(res, 403, { error: message, status: "wallet_authorization_required" });
         return true;
       }
+    }
+    const suppliedWallet = typeof body.wallet === "string" ? body.wallet.trim().toLowerCase() : "";
+    if (consumerWrite && !/^0x[0-9a-f]{40}$/.test(suppliedWallet)) {
+      sendJson(res, 403, { error: "消费者写操作必须提供外部钱包地址", status: "wallet_authorization_required" });
+      return true;
     }
     let receipt: RpcReceipt;
     try {
@@ -3352,26 +4261,42 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       });
       return true;
     }
-    if (process.env.TRUTHPASS_ENFORCE_WALLET_BINDING === "true") {
-      try {
-        const transaction = await readMainnetTransaction(txHash);
-        const suppliedWallet = typeof body.wallet === "string" ? body.wallet.trim().toLowerCase() : "";
-        if (!/^0x[0-9a-f]{40}$/.test(suppliedWallet) || String(transaction.from ?? "").toLowerCase() !== suppliedWallet) {
-          sendJson(res, 422, { error: "transaction.from 与已绑定钱包不一致", status: "transaction_sender_mismatch", txHash });
-          return true;
-        }
-        if (!transaction.to || transaction.to.toLowerCase() !== expectedContract.toLowerCase()) {
-          sendJson(res, 422, { error: "transaction.to 与预期交易目标不一致", status: "transaction_target_mismatch", txHash });
-          return true;
-        }
-        if (!transaction.chainId || Number.parseInt(transaction.chainId.replace(/^0x/i, ""), 16) !== BOT_CHAIN_MAINNET.chainId) {
-          sendJson(res, 422, { error: "交易 Chain ID 与 BOT Chain Mainnet 不一致", status: "transaction_chain_mismatch", txHash });
-          return true;
-        }
-      } catch (error) {
-        sendJson(res, 409, { error: error instanceof Error ? error.message : String(error), status: "transaction_unverified", txHash });
+    // A receipt alone does not identify the signer or the intended contract.
+    // Always read the transaction and verify the domain before accepting any
+    // business event. This check is independent of institution-role binding.
+    let chainTransaction: RpcTransaction;
+    try {
+      const transaction = await readMainnetTransaction(txHash);
+      chainTransaction = transaction;
+      if (consumerWrite && String(transaction.from ?? "").toLowerCase() !== suppliedWallet) {
+        sendJson(res, 422, { error: "transaction.from 与消费者钱包不一致", status: "transaction_sender_mismatch", txHash });
         return true;
       }
+      if (!transaction.to || transaction.to.toLowerCase() !== expectedContract.toLowerCase()) {
+        sendJson(res, 422, { error: "transaction.to 与预期交易目标不一致", status: "transaction_target_mismatch", txHash });
+        return true;
+      }
+      if (!transaction.chainId || Number.parseInt(transaction.chainId.replace(/^0x/i, ""), 16) !== BOT_CHAIN_MAINNET.chainId) {
+        sendJson(res, 422, { error: "交易 Chain ID 与 BOT Chain Mainnet 不一致", status: "transaction_chain_mismatch", txHash });
+        return true;
+      }
+      const paidGateway = configuredPaidConsumerGateway();
+      if (normalizedAction === "purchase" && paidGateway && expectedContract.toLowerCase() === paidGateway.address.toLowerCase()) {
+        const actualValue = parseRpcQuantity(transaction.value);
+        if (actualValue === undefined || actualValue !== BigInt(paidGateway.priceWei)) {
+          sendJson(res, 422, {
+            error: "支付金额与当前购买报价不一致",
+            status: "payment_amount_mismatch",
+            txHash,
+            expectedValueWei: paidGateway.priceWei,
+            actualValueWei: actualValue?.toString() ?? null,
+          });
+          return true;
+        }
+      }
+    } catch (error) {
+      sendJson(res, 409, { error: error instanceof Error ? error.message : String(error), status: "transaction_unverified", txHash });
+      return true;
     }
     const expectedIds = (body.ids && typeof body.ids === "object" ? body.ids : {}) as Record<string, unknown>;
     const validation = expectedReceiptEventCheck(receipt, eventName, expectedContract, expectedIds);
@@ -3388,10 +4313,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     }
     const record: SessionChainTransaction = {
       id: `session-tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      action: typeof body.action === "string" ? body.action : "purchase",
+      action: normalizedAction,
       event: eventName,
       batchId: typeof body.batchId === "string" && body.batchId ? body.batchId.trim().toUpperCase() : BATCH_ID,
-      wallet: typeof body.wallet === "string" ? body.wallet : "0x2eBdb6C7617d27999cFDEa61C38cAc1647183c08",
+      wallet: suppliedWallet || (typeof body.wallet === "string" ? body.wallet : "0x2eBdb6C7617d27999cFDEa61C38cAc1647183c08"),
       providerName: typeof body.providerName === "string" ? body.providerName : undefined,
       contractAddress: typeof body.contractAddress === "string" && body.contractAddress
         ? body.contractAddress
@@ -3403,10 +4328,33 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       mode: typeof body.mode === "string" ? body.mode : "wallet_broadcast",
       receiptStatus: receipt.status,
       eventVerified: true,
+      ids: Object.fromEntries(Object.entries(expectedIds).filter(([, value]) => typeof value === "string").map(([key, value]) => [key, String(value)])),
       explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}`,
       createdAt: new Date().toISOString(),
+      ...(chainTransaction.value ? { paymentValueWei: chainTransaction.value } : {}),
     };
-    sessionChainTxs.unshift(record);
+    // A verified receipt is not enough for the application to claim a
+    // completed purchase: the server must also persist the receipt index. In
+    // production, fail closed when the write cannot be completed so a caller
+    // can retry the readback without seeing a false success state.
+    if (persistenceEnabled()) {
+      try {
+        await persistChainTransaction(record);
+      } catch (error) {
+        sendJson(res, 503, {
+          error: "receipt 已核验，但服务端未能持久化交易记录；请稍后重试读取该 txHash",
+          status: "persistence_failed",
+          txHash,
+          receiptStatus: receipt.status,
+          explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}`,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    }
+    if (!sessionChainTxs.some((item) => item.txHash.toLowerCase() === record.txHash.toLowerCase())) {
+      sessionChainTxs.unshift(record);
+    }
     const lifecycleStageByAction: Partial<Record<string, LifecycleStage>> = {
       evidence: "production",
       verification: "regulatory_review",
@@ -3418,7 +4366,24 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       dispute: "regulatory_review",
     };
     const lifecycleStage = lifecycleStageByAction[record.action];
-    if (lifecycleStage && FISH_OIL_BATCHES[record.batchId]) simulateLifecycleStage(record.batchId, lifecycleStage);
+    if (lifecycleStage && FISH_OIL_BATCHES[record.batchId]) {
+      simulateLifecycleStage(record.batchId, lifecycleStage);
+      if (persistenceEnabled()) {
+        try {
+          await persistCurrentLifecycleState(record.batchId);
+        } catch (error) {
+          sendJson(res, 503, {
+            error: "receipt 已核验，但生命周期状态未能持久化；请稍后重试读取该 txHash",
+            status: "persistence_failed",
+            txHash,
+            receiptStatus: receipt.status,
+            explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}`,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          return true;
+        }
+      }
+    }
     sendJson(res, 201, {
       ok: true,
       status: "mainnet_receipt_verified",
@@ -3438,19 +4403,28 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     // Only a transaction accepted by this process after a live receipt and
     // business-event check is a current mainnet receipt. The static
     // BOT_CHAIN_MAINNET transactions are replay evidence and must never be
-    // returned as the current request's txHash.
-    const currentReceipt = sessionChainTxs.find((item) =>
-      item.batchId === batchId && item.eventVerified === true && (item.receiptStatus === "0x1" || item.receiptStatus === "1"),
+    // returned as the current request's txHash. Durable receipts are loaded
+    // as well, so a restart does not erase a verified current transaction.
+    const receiptIndex = await receiptIndexForVerification();
+    const currentReceipt = receiptIndex.find((item) =>
+      item.batchId === batchId
+      && (item.action === "purchase" || item.action === "recordPurchase" || item.action === "anchor" || item.action === "evidence")
+      && /^(PurchaseRecorded|ConsumerPurchaseSubmitted|EvidenceAnchored|EvidenceSubmitted)$/i.test(item.event)
+      && item.eventVerified === true
+      && (item.receiptStatus === "0x1" || item.receiptStatus === "1"),
     );
     const historicalReplay = BOT_CHAIN_MAINNET.verifiedTransactions.some((item) => item.batchId === batchId);
     const chainStatus = currentReceipt ? "mainnet_receipt_verified" : historicalReplay ? "replay_verified" : "anchor_pending";
+    const gate = demoVerificationGate(batchId, b);
     sendJson(res, 200, {
       batchId,
       routeDecision: "route_to_rule",
       confidence: 0.94,
       mode: agentMode(),
       modelAssisted: agentMode() === "model_assisted",
-      passed: b.passed,
+      passed: gate.status === "accepted",
+      verificationStatus: gate.status,
+      verificationReasons: gate.reasons,
       ...(isRiceBatch(batchId)
         ? { origin: b.origin, pesticideStatus: b.passed ? "within_declared_scope" : "review_required", storageCoverage: b.passed ? "covered" : "missing" }
         : { epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, totox: b.totox, coldChainGapHours: b.coldGap }),
@@ -3469,14 +4443,26 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const demoBatch = demoBatchFor(batchId);
     const primaryTx = BOT_CHAIN_MAINNET.verifiedTransactions[0];
     const verifyTx = BOT_CHAIN_MAINNET.verifiedTransactions[1];
-    if (demoBatch && !repository.getBatch(batchId)) {
+    if (demoBatch) {
+      const gate = demoVerificationGate(batchId, demoBatch);
+      const status = gate.status;
+      const reasons = gate.reasons.length > 0
+        ? gate.reasons
+        : demoBatch.passed ? [] : [demoParameterDetail(demoBatch)];
+      const fixtureEvidence = evidenceFor(batchId).map((item) => ({
+        evidenceId: item.evidenceId ?? `${batchId}:evidence:${item.step}`,
+        kind: item.title,
+        sourceKind: item.source,
+        status: "registered",
+        dataMode: "demo/synthetic" as const,
+      }));
       sendJson(res, 200, {
         schemaVersion: "truthpass.cli.inspect.v1",
         command: "inspect",
         batchId,
         stages: [
           { name: "读取批次数据", status: "completed", detail: `${isRiceBatch(batchId) ? "大米" : "鱼油"} demo/synthetic 批次数据` },
-          { name: "确定性验收", status: "completed", detail: demoBatch.passed ? "accepted" : "rejected" },
+          { name: "确定性验收", status: "completed", detail: status },
           { name: "证据根哈希", status: "completed", detail: evidenceHash(`${batchId}:root`) },
           { name: "链上锚定计划", status: "pending", detail: "dry-run：未广播交易，需外部签名" },
         ],
@@ -3485,11 +4471,11 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           dataClass: "demo/synthetic",
           command: "verify",
           batchId,
-          status: demoBatch.passed ? "accepted" : "rejected",
+          status,
           policy: { id: policy.policyId, version: policy.version },
           evidenceRoot: evidenceHash(`${batchId}:root`),
-          evidence: [],
-          assessment: demoBatch.passed ? undefined : { score: 89, checks: {}, reasons: [isRiceBatch(batchId) ? "产地、检测或仓储运输资料仍有缺口" : "部分指标未达验收标准"] },
+          evidence: fixtureEvidence,
+          assessment: status === "accepted" ? undefined : { score: status === "rejected" ? 61 : 89, checks: {}, reasons },
           anchor: {
             status: "anchor_pending",
             submitted: false,
@@ -3497,7 +4483,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
             chainId: BOT_CHAIN_MAINNET.chainId,
             contractAddress: BOT_CHAIN_MAINNET.contractAddress,
           },
-          reasons: demoBatch.passed ? [] : ["部分指标未达验收标准"],
+          reasons,
         },
         chain: {
           chainId: BOT_CHAIN_MAINNET.chainId,
@@ -3568,7 +4554,19 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     }
     try {
       if (!stage) throw new Error("不支持的生命周期阶段: " + rawStage);
-      sendJson(res, 200, { ok: true, ...simulateLifecycleStage(batchId, stage) });
+      const view = simulateLifecycleStage(batchId, stage);
+      try {
+        await persistCurrentLifecycleState(batchId);
+      } catch (error) {
+        sendJson(res, 503, {
+          error: "生命周期已在当前进程更新，但未能持久化；请稍后重试",
+          status: "persistence_failed",
+          batchId,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, ...view });
     } catch (error) {
       sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
     }
@@ -3632,22 +4630,43 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/recommend" && req.method === "GET") {
+    const requestedBatchId = (url.searchParams.get("batchId") || "").trim().toUpperCase();
+    // Keep the legacy array endpoint on the same batch-scoped contract when a
+    // caller asks for one batch. This prevents older clients from bypassing
+    // production-coverage and evidence gates enforced by /api/recommendation.
+    if (requestedBatchId) {
+      try {
+        const contract = await buildRecommendationContract(requestedBatchId, requestTraceId(req));
+        sendJson(res, 200, [contract.item]);
+      } catch (error) {
+        sendJson(res, 404, { error: "batch not found", batchId: requestedBatchId });
+      }
+      return true;
+    }
     const items = Object.entries(FISH_OIL_BATCHES)
-      .filter(([, item]) => item.passed)
+      .filter(([batchId, item]) => requestedBatchId ? batchId === requestedBatchId : item.passed)
       .map(([batchId, item]) => ({ batchId, ...item }))
       .sort((a, b) => b.epaDha - a.epaDha || a.peroxide - b.peroxide || a.coldGap - b.coldGap)
-      .slice(0, 3)
+      .slice(0, requestedBatchId ? 1 : 3)
       .map((item) => ({
         batchId: item.batchId,
         name: item.name,
         origin: item.origin,
         productionDate: item.productionDate,
         imageUrl: item.image,
+        dataMode: "demo/synthetic",
         epaDha: item.epaDha,
         peroxide: item.peroxide,
         coldGap: item.coldGap,
-        reason: `EPA+DHA ${item.epaDha}%、过氧化值 ${item.peroxide} meq/kg、冷链中断 ${item.coldGap} 小时，综合表现优秀`,
-        expertise: "EPA+DHA 是鱼油的核心 Omega-3 成分，含量 ≥70% 属于高浓度配方；过氧化值越低说明油脂越新鲜；冷链中断越短，活性成分保存越好。",
+        recommendationStatus: item.passed ? "recommend_with_scope" : "do_not_recommend",
+        reason: `${demoParameterDetail(item)}推荐只表示登记参数与当前演示规则的比较结果，不表示安全、疗效或真实认证。`,
+        expertise: "EPA+DHA、过氧化值、TOTOX 和冷链异常时长分别取自当前批次登记资料；Agent 只解释核对结果，不替代检测机构。",
+        nextAction: item.passed ? "查看参数明细和来源，再由外部钱包确认购买" : "补齐或复核异常参数后再决定是否购买",
+        productionEvidence: productionProcessFor(item.batchId),
+        parameterDetails: parameterDetailsFor(item.batchId),
+        missingItems: item.passed ? [] : ["需要复核的参数或生产资料"],
+        conflicts: [],
+        traceId: requestTraceId(req),
         evidence: {
           dataMode: "demo/synthetic",
           verificationStatus: item.passed ? "accepted" : "rejected",
@@ -3658,6 +4677,23 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         purchaseQuote: purchaseQuote(item.batchId),
       }));
     sendJson(res, 200, items);
+    return true;
+  }
+
+  // Contract-first recommendation endpoint.  The legacy /api/recommend array
+  // remains available for older clients; new Agent and CLI clients should use
+  // this single batch-scoped object so recommendation, evidence and feedback
+  // cannot drift into separately assembled states.
+  if (p === "/api/recommendation" && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    try {
+      sendJson(res, 200, {
+        schemaVersion: "truthpass.recommendation.v1",
+        ...(await buildRecommendationContract(batchId, requestTraceId(req))),
+      });
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : "BATCH_NOT_FOUND", batchId });
+    }
     return true;
   }
 
@@ -3717,8 +4753,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         const order = createAlipayPagePayForm(input);
         const now = new Date().toISOString();
         const record: PaymentOrderRecord = { ...context, providerOrderId: order.providerOrderId, status: "pending", paymentStatus: "payment_pending", chainStatus: "not_started", createdAt: now, updatedAt: now };
-        paymentOrders.set(record.orderId, record);
         await persistPaymentOrder(record);
+        paymentOrders.set(record.orderId, record);
         sendJson(res, 201, { schemaVersion: "truthpass.payment.order.v1", provider, orderId: record.orderId, providerOrderId: record.providerOrderId, tenantId: record.tenantId, productId: record.productId, batchId: record.batchId, amount: record.amount, currency: record.currency, status: record.paymentStatus, chainStatus: record.chainStatus, formHtml: order.formHtml, note: "请提交表单到支付宝官方网关；支付成功以异步通知验签为准。" });
         return true;
       }
@@ -3729,7 +4765,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           sendJson(res, 400, { status: "payment_failed", provider, reason: result.reason ?? "notify_verification_failed" });
           return true;
         }
-        const record = paymentOrders.get(result.orderId);
+        const record = await findPaymentOrderByProviderOrderId("alipay", result.orderId);
         if (!record || record.provider !== "alipay") {
           sendJson(res, 404, { status: "payment_unbound", provider, orderId: result.orderId });
           return true;
@@ -3738,11 +4774,15 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
           sendJson(res, 422, { status: "payment_amount_mismatch", provider, orderId: record.orderId, expectedAmount: record.amount, receivedAmount: result.amount });
           return true;
         }
-        record.status = "paid";
-        record.paymentStatus = "payment_verified";
-        record.updatedAt = new Date().toISOString();
-        record.rawStatus = { tradeStatus: result.status, amount: result.amount };
-        await persistPaymentOrder(record);
+        const updatedRecord: PaymentOrderRecord = {
+          ...record,
+          status: "paid",
+          paymentStatus: "payment_verified",
+          updatedAt: new Date().toISOString(),
+          rawStatus: { tradeStatus: result.status, amount: result.amount },
+        };
+        await persistPaymentOrder(updatedRecord);
+        paymentOrders.set(updatedRecord.orderId, updatedRecord);
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
         res.end("success");
         return true;
@@ -3753,26 +4793,30 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         const order = await createPayPalOrder(input);
         const now = new Date().toISOString();
         const record: PaymentOrderRecord = { ...context, providerOrderId: order.providerOrderId, status: "pending", paymentStatus: "payment_pending", chainStatus: "not_started", createdAt: now, updatedAt: now };
-        paymentOrders.set(record.orderId, record);
         await persistPaymentOrder(record);
+        paymentOrders.set(record.orderId, record);
         sendJson(res, 201, { schemaVersion: "truthpass.payment.order.v1", provider, orderId: record.orderId, providerOrderId: record.providerOrderId, tenantId: record.tenantId, productId: record.productId, batchId: record.batchId, amount: record.amount, currency: record.currency, status: record.paymentStatus, chainStatus: record.chainStatus, approvalUrl: order.approvalUrl, note: "用户在 PayPal 官方页面批准后，再调用 capture；capture 完成前不产生购买凭证。" });
         return true;
       }
 
       if (provider === "paypal" && action === "capture") {
         const providerOrderId = typeof body.providerOrderId === "string" ? body.providerOrderId.trim() : "";
-        const record = [...paymentOrders.values()].find((item) => item.provider === "paypal" && item.providerOrderId === providerOrderId);
+        const record = await findPaymentOrderByProviderOrderId("paypal", providerOrderId);
         if (!record || !providerOrderId) { sendJson(res, 404, { status: "payment_unbound", provider, providerOrderId }); return true; }
         if (typeof body.orderId === "string" && body.orderId.trim() !== record.orderId) { sendJson(res, 422, { status: "order_scope_mismatch", provider, orderId: body.orderId }); return true; }
         const captured = await capturePayPalOrder(providerOrderId);
         const capturedStatus = typeof captured.status === "string" ? captured.status : "";
         const verified = capturedStatus === "COMPLETED";
-        record.status = verified ? "paid" : "failed";
-        record.paymentStatus = verified ? "payment_verified" : "payment_failed";
-        record.updatedAt = new Date().toISOString();
-        record.rawStatus = { status: capturedStatus, providerOrderId };
-        await persistPaymentOrder(record);
-        sendJson(res, verified ? 200 : 409, { schemaVersion: "truthpass.payment.capture.v1", provider, orderId: record.orderId, providerOrderId, status: record.paymentStatus, chainStatus: record.chainStatus, rawStatus: captured });
+        const updatedRecord: PaymentOrderRecord = {
+          ...record,
+          status: verified ? "paid" : "failed",
+          paymentStatus: verified ? "payment_verified" : "payment_failed",
+          updatedAt: new Date().toISOString(),
+          rawStatus: { status: capturedStatus, providerOrderId },
+        };
+        await persistPaymentOrder(updatedRecord);
+        paymentOrders.set(updatedRecord.orderId, updatedRecord);
+        sendJson(res, verified ? 200 : 409, { schemaVersion: "truthpass.payment.capture.v1", provider, orderId: updatedRecord.orderId, providerOrderId, status: updatedRecord.paymentStatus, chainStatus: updatedRecord.chainStatus, rawStatus: captured });
         return true;
       }
 
@@ -3786,24 +4830,29 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         const related = resource.supplementary_data && typeof resource.supplementary_data === "object" ? resource.supplementary_data as Record<string, unknown> : {};
         const relatedIds = related.related_ids && typeof related.related_ids === "object" ? related.related_ids as Record<string, unknown> : {};
         const providerOrderId = typeof relatedIds.order_id === "string" ? relatedIds.order_id : (typeof resource.order_id === "string" ? resource.order_id : "");
-        const record = [...paymentOrders.values()].find((item) => item.provider === "paypal" && item.providerOrderId === providerOrderId);
+        const record = await findPaymentOrderByProviderOrderId("paypal", providerOrderId);
         if (!record) { sendJson(res, 404, { status: "payment_unbound", provider, providerOrderId }); return true; }
         const eventType = typeof event.event_type === "string" ? event.event_type : "";
         const completed = eventType === "PAYMENT.CAPTURE.COMPLETED" || eventType === "CHECKOUT.ORDER.COMPLETED";
-        record.status = completed ? "paid" : "pending";
-        record.paymentStatus = completed ? "payment_verified" : "payment_pending";
-        record.updatedAt = new Date().toISOString();
-        record.rawStatus = { eventType, resourceId: resource.id };
-        await persistPaymentOrder(record);
-        sendJson(res, 200, { provider, orderId: record.orderId, providerOrderId, status: record.paymentStatus, chainStatus: record.chainStatus, verified: true });
+        const updatedRecord: PaymentOrderRecord = {
+          ...record,
+          status: completed ? "paid" : "pending",
+          paymentStatus: completed ? "payment_verified" : "payment_pending",
+          updatedAt: new Date().toISOString(),
+          rawStatus: { eventType, resourceId: resource.id },
+        };
+        await persistPaymentOrder(updatedRecord);
+        paymentOrders.set(updatedRecord.orderId, updatedRecord);
+        sendJson(res, 200, { provider, orderId: updatedRecord.orderId, providerOrderId, status: updatedRecord.paymentStatus, chainStatus: updatedRecord.chainStatus, verified: true });
         return true;
       }
 
       sendJson(res, 400, { status: "unsupported_payment_action", provider, action });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const statusCode = message === "UNKNOWN_BATCH" ? 404 : message.includes("SCOPE_MISMATCH") ? 403 : 502;
-      sendJson(res, statusCode, { status: "payment_adapter_error", provider, action, error: message });
+      const persistenceFailure = error instanceof PaymentPersistenceError || message === "PAYMENT_PERSISTENCE_FAILED";
+      const statusCode = persistenceFailure ? 503 : message === "UNKNOWN_BATCH" ? 404 : message.includes("SCOPE_MISMATCH") ? 403 : 502;
+      sendJson(res, statusCode, { status: persistenceFailure ? "persistence_failed" : "payment_adapter_error", provider, action, error: persistenceFailure ? "支付订单状态未能持久化，请稍后重试" : message });
     }
     return true;
   }
@@ -3819,8 +4868,19 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     }
     const tenant = siteStore.get(isRiceBatch(batchId) ? "rice-demo" : "fish-oil-demo")?.config;
     const inspection = await mcpInspectBatch(batchId, requestTraceId(req));
+    const recommendation = demoBatch
+      ? await buildRecommendationContract(batchId, requestTraceId(req))
+      : undefined;
     const lifecycle = lifecyclePublicView(batchId);
     const chainContext = await buildChainQueryContext(batchId);
+    const parameterDetails = parameterDetailsFor(batchId);
+    const parameterStatus = demoBatch
+      ? parameterDetails.some((detail) => detail.status === "outside_range")
+        ? "rejected"
+        : parameterDetails.some((detail) => detail.status === "missing")
+          ? "review"
+          : "accepted"
+      : inspection.verification.status;
     const product = demoBatch
       ? {
           productId: isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil",
@@ -3849,10 +4909,35 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         brand: tenant?.brand ?? null,
       },
       product,
-      batch: { batchId, dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"), status: inspection.verification.status },
+      // `inspection.verification.status` is the parameter/evidence gate only.
+      // The public batch status must use the same overall gate that is shown
+      // below, otherwise a batch with missing production stages appears as
+      // accepted in one card and review in another.
+      batch: {
+        batchId,
+        dataMode: demoBatch ? "demo/synthetic" : (dbBatch?.dataMode ?? "demo/synthetic"),
+        status: recommendation?.verificationStatus ?? inspection.verification.status,
+        parameterStatus,
+      },
       lifecycle,
       evidence,
-      verification: inspection.verification,
+      verification: {
+        ...inspection.verification,
+        ...(recommendation ? {
+          status: recommendation.verificationStatus,
+          // Use the recommendation contract's ordered gate reasons as the
+          // public source of truth. It keeps concrete parameter observations
+          // (for example EPA+DHA 55% against the registered rule) visible
+          // before production coverage gaps, and avoids duplicate or stale
+          // verifier messages from a separately assembled inspection view.
+          reasons: [
+            ...recommendation.gateReasons,
+            ...recommendation.missingItems,
+            ...recommendation.conflicts,
+          ].filter((reason, index, list) => list.indexOf(reason) === index),
+        } : {}),
+      },
+      parameterDetails,
       chainContext,
       purchasePolicy: {
         readOnly: true,
@@ -3889,6 +4974,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       amount: base.amount,
       currency: base.currency,
       providers: base.providers,
+      chainPayment: base.chainPayment,
       expiresAt,
       status: "quote_ready",
       paymentStatus: "payment_pending",
@@ -3904,7 +4990,10 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const batchId = decodeURIComponent(purchaseStatusMatch[1]).trim().toUpperCase();
     if (!demoBatchFor(batchId) && !repository.getBatch(batchId)) { sendJson(res, 404, { error: "unknown_batch", batchId }); return true; }
     const payment = await loadPersistedPaymentOrders({ batchId });
-    const chain = sessionChainTxs.filter((item) => item.batchId === batchId && item.action === "purchase").map((item) => ({ txHash: item.txHash, status: item.receiptStatus === "0x1" || item.receiptStatus === "1" ? "mainnet_receipt_verified" : "review_required", eventVerified: item.eventVerified, createdAt: item.createdAt, explorerUrl: item.explorerUrl }));
+    // Receipts survive a service restart through the persisted transaction
+    // index. Keep replay fixtures out of this current purchase list.
+    const receiptIndex = await receiptIndexForVerification();
+    const chain = receiptIndex.filter((item) => item.batchId === batchId && (item.action === "purchase" || item.action === "recordPurchase")).map((item) => ({ txHash: item.txHash, status: item.receiptStatus === "0x1" || item.receiptStatus === "1" ? "mainnet_receipt_verified" : "review_required", eventVerified: item.eventVerified, createdAt: item.createdAt, explorerUrl: item.explorerUrl }));
     sendJson(res, 200, { schemaVersion: "truthpass.purchase.status.v1", batchId, payments: payment, chain, purchaseConfirmed: chain.some((item) => item.status === "mainnet_receipt_verified"), dataMode: "demo/synthetic" });
     return true;
   }
@@ -3914,7 +5003,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const messages = Array.isArray(body.messages) ? body.messages as Array<{ content?: unknown }> : [];
     const last = typeof messages[messages.length - 1]?.content === "string" ? messages[messages.length - 1].content as string : "";
     const requestedBatch = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
-    await consumerChat(req, requestedBatch || extractBatchId(last), last, res);
+    const locale = body.locale === "en" ? "en" : "zh";
+    await consumerChat(req, requestedBatch || extractBatchId(last), last, res, locale);
     return true;
   }
 
@@ -3935,22 +5025,46 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       image: "/assets/fish-oil-product.png",
       passed: false,
     };
+    const productParameters = parameterDetailsFor(batchId);
+    const productProcess = productionProcessFor(batchId);
+    const parameterOutsideRange = productParameters.some((item) => item.status === "outside_range");
+    const productionIncomplete = productProcess.missingStages.length > 0;
+    const productVerificationStatus = parameterOutsideRange
+      ? "rejected"
+      : productionIncomplete
+        ? "review"
+        : batchId === BATCH_ID
+          ? (assessment.status === "accepted" ? "accepted" : "rejected")
+          : (display.passed ? "accepted" : "rejected");
+    const productVerificationSummary = parameterOutsideRange
+      ? (b ? demoParameterDetail(b) : "存在需要复核的参数差异")
+      : productionIncomplete
+        ? `参数核验已完成，但生产过程仍缺少：${productProcess.missingStages.join("、")}`
+        : batchId === BATCH_ID
+          ? "基于数据库登记证据和确定性规则"
+          : (display.passed ? "基于演示数据的综合判断" : (isRiceBatch(batchId) ? "大米演示资料仍有缺口" : b ? demoParameterDetail(b) : "当前批次缺少可展示的参数记录"));
     sendJson(res, 200, {
       batchId,
-      name: dbProduct?.name ?? display.name,
+      // Demo fixtures and the public overview are the same batch source. Do
+      // not let a repository seed with a different product label or date
+      // silently override the fixture that the consumer is inspecting.
+      name: b ? display.name : (dbProduct?.name ?? display.name),
       category: isRiceBatch(batchId) ? "粮食" : "鱼油",
       origin: display.origin,
-      productionDate: dbBatch?.productionAt.slice(0, 10) ?? display.productionDate,
-      dataSource: dbBatch ? "postgres" : "fixtures",
+      productionDate: b ? display.productionDate : (dbBatch?.productionAt.slice(0, 10) ?? display.productionDate),
+      dataSource: b ? "fixtures" : "postgres",
       dataMode: dbBatch?.dataMode ?? "demo/synthetic",
-      supplyChainTags: isRiceBatch(batchId) ? ["产地可查", "天气与土壤", "农残检测", "批次存证"] : ["来自纯净海域", "全程冷链", "多重检测", "区块链存证"],
+      supplyChainTags: isRiceBatch(batchId)
+        ? ["产地可查", "天气与土壤", "农残检测", "批次摘要待确认"]
+        : ["来自纯净海域", "全程冷链", "多重检测", BOT_CHAIN_MAINNET.verifiedTransactions.some((item) => item.batchId === batchId) ? "历史回放可查" : "链上摘要待确认"],
       imageUrl: display.image,
       verification: {
-        status: batchId === BATCH_ID ? (assessment.status === "accepted" ? "accepted" : "rejected") : (display.passed ? "accepted" : "rejected"),
-        summary: batchId === BATCH_ID ? "基于数据库登记证据和确定性规则" : (display.passed ? "基于演示数据的综合判断" : (isRiceBatch(batchId) ? "大米演示资料仍有缺口" : "部分指标未达验收标准")),
+        status: productVerificationStatus,
+        summary: productVerificationSummary,
         scope: `${batchId} 批次及当前公开的规则 ${policy.version}`,
       },
-      productionProcess: productionProcessFor(batchId),
+      parameterDetails: productParameters,
+      productionProcess: productProcess,
       keyMetrics: metricsFor(batchId),
     });
     return true;
@@ -4025,7 +5139,9 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         : key === "epa-dha" ? `≥ ${thresholds.minEpaDhaPercent}%`
           : key === "peroxide" ? `≤ ${thresholds.maxPeroxideValue}`
           : key === "cold-chain" ? `≤ ${thresholds.maxLogisticsGapHours} 小时`
-          : "铅/汞/镉/砷 均需达标",
+          : "Pb ≤ 0.5 · Hg ≤ 0.1 · Cd ≤ 0.1 · As ≤ 1.0 mg/kg",
+      rule: view.rule,
+      status: view.status,
       heavyMetals:
         key === "heavy-metal"
           ? (Object.keys(HEAVY_METAL_LIMITS) as Array<keyof HeavyMetals>).map((k) => ({
@@ -4052,18 +5168,27 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   if (p === "/api/verification" && req.method === "GET") {
     const t = policy.thresholds;
     const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
-    const b = demoBatchFor(batchId) ?? FISH_OIL_BATCHES[BATCH_ID];
+    const b = demoBatchFor(batchId);
+    if (!b) {
+      sendJson(res, 404, { error: "unknown_batch", batchId });
+      return true;
+    }
     const rice = isRiceBatch(batchId);
     const riceMetrics = rice ? metricsFor(batchId) : [];
-    const allPassed = b.passed;
+    const gate = demoVerificationGate(batchId, b);
+    const verificationStatus = gate.status === "accepted" ? "accepted" : gate.status === "missing_evidence" ? "review" : "rejected";
+    const allPassed = verificationStatus === "accepted";
     sendJson(res, 200, {
       batchId,
       productName: b.name,
       policy: { id: rice ? "rice-origin-policy" : policy.policyId, version: policy.version, dataMode: "demo/synthetic" },
-      status: allPassed ? "accepted" : "rejected",
+      status: verificationStatus,
       score: rice ? (allPassed ? 92 : 61) : (allPassed ? 100 : 89),
       evidenceHash: evidenceHash(`${batchId}:verification`),
-      serviceExecution: { status: allPassed ? "accepted" : "rejected", score: rice ? (allPassed ? 92 : 61) : (allPassed ? 100 : 75), evidenceHash: evidenceHash(`${batchId}:verification`) },
+      serviceExecution: { status: verificationStatus, score: rice ? (allPassed ? 92 : 61) : (allPassed ? 100 : 75), evidenceHash: evidenceHash(`${batchId}:verification`) },
+      reasons: gate.reasons,
+      parameterDetails: gate.details,
+      productionProcess: gate.productionEvidence,
       rules: [
         { name: rice ? "批次关系" : "任务匹配", desc: rice ? "产地、检测和物流资料绑定到同一批次" : "证据 taskId 与任务一致", passed: true },
         { name: "批次匹配", desc: `报告批次与请求批次一致（${batchId}）`, passed: true },
@@ -4089,7 +5214,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
             status: allPassed ? "submitted" : e.step > 3 ? "missing" : "submitted",
             occurredAt: e.verifiedAt,
           }))
-        : repository.listEvidence(BATCH_ID).map((e) => ({
+      : repository.listEvidence(batchId).map((e) => ({
         evidenceId: e.evidenceId,
         kind: e.kind,
         issuerId: e.issuerId,
@@ -4103,27 +5228,43 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/observer" && req.method === "GET") {
-    const batchId = url.searchParams.get("batchId") || BATCH_ID;
-    const b = FISH_OIL_BATCHES[batchId] ?? FISH_OIL_BATCHES[BATCH_ID];
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const demoBatch = demoBatchFor(batchId);
+    if (!demoBatch && !repository.getBatch(batchId)) {
+      sendJson(res, 404, { error: "unknown_batch", batchId });
+      return true;
+    }
+    const batchPassed = demoBatch?.passed ?? false;
     const ranking = await registry.evaluate(task);
+    const receiptIndex = await receiptIndexForVerification();
+    const liveReceipt = receiptIndex.find((item) =>
+      item.batchId === batchId
+      && (item.action === "purchase" || item.action === "recordPurchase" || item.action === "anchor" || item.action === "evidence")
+      && /^(PurchaseRecorded|ConsumerPurchaseSubmitted|EvidenceAnchored|EvidenceSubmitted)$/i.test(item.event)
+      && item.eventVerified === true
+      && (item.receiptStatus === "0x1" || item.receiptStatus === "1"),
+    );
+    const replayReceipt = BOT_CHAIN_MAINNET.verifiedTransactions.find((item) => item.batchId === batchId);
+    const chainStatus = liveReceipt ? "mainnet_receipt_verified" : replayReceipt ? "replay_verified" : "anchor_pending";
     sendJson(res, 200, {
       task: `task-${batchId.toLowerCase()}`,
       policy: `${policy.policyId}-${policy.version}`,
       jev: "route_to_rule · 0.94 · demo",
       evidenceRoot: evidenceHash(`${batchId}:root`).slice(0, 10) + "…",
-      chainStatus: `BOT Chain Mainnet (677) · 已锚定 (${BOT_CHAIN_MAINNET.contractAddress.slice(0, 8)}…)`,
+      chainStatus: `BOT Chain Mainnet (677) · ${chainStatus}`,
       chainId: BOT_CHAIN_MAINNET.chainId,
       contractAddress: BOT_CHAIN_MAINNET.contractAddress,
       consumerGatewayAddress: BOT_CHAIN_MAINNET.contracts.consumerGateway.address,
       auditEscrowAddress: BOT_CHAIN_MAINNET.contracts.auditEscrow.address,
       explorerUrl: BOT_CHAIN_MAINNET.explorerUrl,
-      verifiedTransactions: BOT_CHAIN_MAINNET.verifiedTransactions,
+      verifiedTransactions: replayReceipt ? [replayReceipt] : [],
+      currentReceipt: liveReceipt ? { txHash: liveReceipt.txHash, event: liveReceipt.event, explorerUrl: liveReceipt.explorerUrl, blockNumber: liveReceipt.blockNumber } : null,
       sessionTransactions: sessionChainTxs,
       services: ranking.map((r) => {
         const live = r.probe.status === "healthy" ? "online" : r.probe.status === "degraded" ? "degraded" : "offline";
         let verdict: string;
         if (r.probe.status === "offline") verdict = "not-called";
-        else if (r.service.id === "lab-c") verdict = b.passed ? "passed" : "rejected";
+        else if (r.service.id === "lab-c") verdict = batchPassed ? "passed" : "rejected";
         else verdict = r.execution?.status === "accepted" ? "passed" : "rejected";
         return { id: r.service.id, history: r.service.historicalScore, live, verdict };
       }),
@@ -4142,21 +5283,287 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  const tenantImprovementMatch = p.match(/^\/api\/tenants\/([^/]+)\/production-improvement-report\/?$/);
+  if (tenantImprovementMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(tenantImprovementMatch[1]);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const site = [...siteStore.values()].find((record) => String(record.config.tenantId) === tenantId);
+    if (!site) {
+      sendJson(res, 404, { error: "tenant_not_found", tenantId });
+      return true;
+    }
+    const requestedBatch = (url.searchParams.get("batchId") || String((site.config.batch as Record<string, unknown> | undefined)?.defaultBatchId ?? BATCH_ID)).trim().toUpperCase();
+    const siteBatch = String((site.config.batch as Record<string, unknown> | undefined)?.defaultBatchId ?? "").toUpperCase();
+    if (!siteBatch || (isRiceBatch(siteBatch) !== isRiceBatch(requestedBatch))) {
+      sendJson(res, 403, { error: "TENANT_BATCH_SCOPE_MISMATCH", tenantId, batchId: requestedBatch });
+      return true;
+    }
+    try {
+      const report = await buildProductionImprovementReport(tenantId, requestedBatch);
+      try {
+        await persistProductionImprovementReport(report);
+      } catch (error) {
+        sendJson(res, 503, { error: "improvement_report_persistence_failed", status: "persistence_failed", tenantId, batchId: requestedBatch, detail: error instanceof Error ? error.message : String(error) });
+        return true;
+      }
+      sendJson(res, 200, { ...report, persisted: persistenceEnabled(), traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : "BATCH_NOT_FOUND", tenantId, batchId: requestedBatch });
+    }
+    return true;
+  }
+
   if (p === "/api/production/improvement-report" && req.method === "GET") {
     const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
     const inspection = await mcpInspectBatch(batchId, requestTraceId(req));
     const unresolved = inspection.verification.status !== "accepted" ? inspection.verification.reasons : [];
-    sendJson(res, 200, {
-      schemaVersion: "truthpass.production.improvement-report.v1",
-      batchId,
-      readOnly: true,
-      dataMode: inspection.verification.dataClass,
-      generatedAt: new Date().toISOString(),
-      findings: unresolved.map((reason, index) => ({ id: `finding-${index + 1}`, severity: "medium", reason, status: "open" })),
-      recommendations: unresolved.length ? ["补齐缺失证据并重新运行确定性验收", "由授权生产或检测方提交可核验原始记录"] : ["保持当前采集频率并持续回读链上 receipt"],
-      evidenceRoot: inspection.verification.evidenceRoot,
-      disclaimer: "该报告是只读改进建议，不改变验收结论、不代表生产已完成整改。",
-    });
+    sendJson(res, 200, await buildProductionImprovementReport(isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo", batchId));
+    return true;
+  }
+
+  if (p === "/api/feedback/prepare" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      if (body.consent !== true || body.purchaseConfirmed !== true) {
+        sendJson(res, 400, { error: "准备反馈需要明确授权并确认已购买该批次", status: "consent_required" });
+        return true;
+      }
+      const fields = validateFeedbackFields(body);
+      if ("error" in fields) {
+        sendJson(res, fields.status, { error: fields.error, status: "invalid_feedback" });
+        return true;
+      }
+      const now = new Date();
+      const createdAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+      const prepareId = sha256Hex32(`feedback-draft:${fields.batchId}:${fields.purchaseId}:${fields.purchaseTxHash}:${createdAt}:${Math.random()}`);
+      const feedbackHash = sha256Hex32(JSON.stringify({
+        batchId: fields.batchId,
+        purchaseId: fields.purchaseId,
+        purchaseTxHash: fields.purchaseTxHash,
+        rating: fields.rating,
+        categories: fields.categories,
+        comment: fields.comment,
+      }));
+      const draft: FeedbackDraft = {
+        prepareId,
+        ...fields,
+        feedbackHash,
+        createdAt,
+        expiresAt,
+        consumed: false,
+      };
+      if (persistenceEnabled()) {
+        try {
+          await persistFeedbackDraft(draft);
+        } catch (error) {
+          sendJson(res, 503, {
+            error: "反馈准备载荷未能持久化，请稍后重试",
+            status: "persistence_failed",
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          return true;
+        }
+      }
+      pendingFeedbackDrafts.set(prepareId, draft);
+      const purchaseReceipt = await verifiedPurchaseReceipt(fields.purchaseId, fields.purchaseTxHash, fields.batchId, fields.walletAddress);
+      sendJson(res, 200, {
+        schemaVersion: "truthpass.feedback.prepare.v1",
+        status: "pending_confirmation",
+        prepareId,
+        batchId: fields.batchId,
+        purchaseId: fields.purchaseId,
+        purchaseTxHash: fields.purchaseTxHash,
+        walletAddress: fields.walletAddress,
+        rating: fields.rating,
+        categories: fields.categories,
+        comment: fields.comment,
+        feedbackHash,
+        createdAt,
+        expiresAt,
+        purchaseReceiptStatus: purchaseReceipt ? "mainnet_receipt_verified" : "pending_or_unverified",
+        contribution: {
+          required: feedbackProductionMode() || fields.dataMode === "external",
+          nextAction: "用户签名 Contribution 后，将 contributionTxHash 与 prepareId 一起提交 confirm。",
+        },
+        dataMode: fields.dataMode,
+        note: "prepare 只生成待确认反馈载荷，不写入成功反馈；confirm 会重新核验同一 purchaseId、购买 txHash 和 receipt。",
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : String(error), status: "invalid_feedback" });
+    }
+    return true;
+  }
+
+  if (p === "/api/feedback/confirm" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      const prepareId = typeof body.prepareId === "string" ? body.prepareId.trim() : typeof body.draftId === "string" ? body.draftId.trim() : "";
+      let draft: FeedbackDraft | undefined;
+      if (prepareId) {
+        try {
+          draft = await feedbackDraftForRequest(prepareId);
+        } catch (error) {
+          sendJson(res, 503, {
+            error: "反馈准备载荷读取失败，请稍后重试",
+            status: "persistence_failed",
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          return true;
+        }
+      }
+      if (prepareId && !draft) {
+        sendJson(res, 404, { error: "反馈准备载荷不存在或已过期", status: "feedback_prepare_not_found" });
+        return true;
+      }
+      if (draft && draft.consumed) {
+        sendJson(res, 409, { error: "同一反馈准备载荷不能重复确认", status: "feedback_already_confirmed" });
+        return true;
+      }
+      if (draft && Date.parse(draft.expiresAt) <= Date.now()) {
+        pendingFeedbackDrafts.delete(draft.prepareId);
+        sendJson(res, 410, { error: "反馈准备载荷已过期，请重新准备", status: "feedback_prepare_expired" });
+        return true;
+      }
+      const mergedBody: Record<string, unknown> = {
+        ...(draft ? {
+          batchId: draft.batchId,
+          purchaseId: draft.purchaseId,
+          purchaseTxHash: draft.purchaseTxHash,
+          walletAddress: draft.walletAddress,
+          rating: draft.rating,
+          categories: draft.categories,
+          comment: draft.comment,
+          dataMode: draft.dataMode,
+        } : {}),
+        ...body,
+      };
+      if (body.consent !== true || body.purchaseConfirmed !== true) {
+        sendJson(res, 400, { error: "确认反馈需要明确授权并确认已购买该批次", status: "consent_required" });
+        return true;
+      }
+      const fields = validateFeedbackFields(mergedBody);
+      if ("error" in fields) {
+        sendJson(res, fields.status, { error: fields.error, status: "invalid_feedback" });
+        return true;
+      }
+      if (draft) {
+        const sameDraft = fields.batchId === draft.batchId
+          && fields.purchaseId.toLowerCase() === draft.purchaseId.toLowerCase()
+          && fields.purchaseTxHash.toLowerCase() === draft.purchaseTxHash.toLowerCase()
+          && fields.rating === draft.rating
+          && fields.comment === draft.comment
+          && JSON.stringify(fields.categories) === JSON.stringify(draft.categories)
+          && fields.dataMode === draft.dataMode
+          && (fields.walletAddress ?? "") === (draft.walletAddress ?? "");
+        if (!sameDraft) {
+          sendJson(res, 409, { error: "确认载荷与 prepare 返回内容不一致", status: "feedback_payload_mismatch" });
+          return true;
+        }
+        if (typeof body.feedbackHash === "string" && body.feedbackHash.trim().toLowerCase() !== draft.feedbackHash.toLowerCase()) {
+          sendJson(res, 409, { error: "feedbackHash 与 prepare 返回内容不一致", status: "feedback_hash_mismatch" });
+          return true;
+        }
+      }
+      const purchaseReceipt = await verifiedPurchaseReceipt(fields.purchaseId, fields.purchaseTxHash, fields.batchId, fields.walletAddress);
+      if (!purchaseReceipt) {
+        sendJson(res, 422, {
+          error: "confirm 必须绑定同一 purchaseId、购买 txHash 和已核验 PurchaseRecorded receipt",
+          status: "purchase_receipt_unverified",
+          purchaseId: fields.purchaseId,
+          purchaseTxHash: fields.purchaseTxHash,
+          explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${fields.purchaseTxHash}`,
+        });
+        return true;
+      }
+      const contributionTxHash = typeof body.contributionTxHash === "string" ? body.contributionTxHash.trim() : "";
+      const contributionId = typeof body.contributionId === "string" ? body.contributionId.trim() : undefined;
+      const contributionRequired = feedbackProductionMode() || fields.dataMode === "external";
+      if (contributionRequired && !/^0x[0-9a-fA-F]{64}$/.test(contributionTxHash)) {
+        sendJson(res, 400, { error: "生产反馈确认必须提供已核验 contributionTxHash", status: "contribution_receipt_required" });
+        return true;
+      }
+      const contributionReceipt = contributionTxHash
+        ? await verifiedContributionReceipt(contributionTxHash, contributionId, fields.purchaseId, fields.batchId)
+        : undefined;
+      if (contributionTxHash && !contributionReceipt) {
+        sendJson(res, 422, { error: "contributionTxHash 未在本服务中通过同一 purchaseId 的 receipt 核验", status: "contribution_receipt_unverified", contributionTxHash, explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${contributionTxHash}` });
+        return true;
+      }
+      const consentRecord = await consumers.grantConsent({
+        consumerId,
+        batchId: fields.batchId,
+        scopes: ["purchase", "packaging", "odor", "storage", "quality-feedback"],
+        grantedAt: new Date().toISOString(),
+      });
+      const purchase = await consumers.recordPurchase({
+        purchaseId: fields.purchaseId,
+        consumerId,
+        batchId: fields.batchId,
+        purchaseProofHash: fields.purchaseTxHash,
+        createdAt: new Date().toISOString(),
+      });
+      const feedback = await consumers.recordFeedback({
+        purchaseId: purchase.purchaseId,
+        rating: fields.rating,
+        categories: fields.categories,
+        evidence: {
+          source: "verified_purchase_receipt",
+          purchaseConfirmedByConsumer: true,
+          purchaseTxHash: fields.purchaseTxHash,
+          contributionTxHash: contributionTxHash || undefined,
+          walletAddress: fields.walletAddress ?? purchaseReceipt.wallet,
+          feedbackHash: draft?.feedbackHash ?? (typeof body.feedbackHash === "string" ? body.feedbackHash : undefined),
+          comment: fields.comment,
+          dataMode: fields.dataMode,
+        },
+      });
+      const persisted = persistenceEnabled() && Boolean(repository.getBatch(fields.batchId));
+      if (persisted) {
+        try {
+          await persistConsumerRun(consentRecord, purchase, feedback);
+        } catch (error) {
+          sendJson(res, 503, { error: "反馈已校验但未能持久化，请稍后重试", status: "persistence_failed" });
+          return true;
+        }
+      }
+      if (draft) {
+        draft.consumed = true;
+        try {
+          if (persistenceEnabled()) await markFeedbackDraftConsumed(draft.prepareId);
+          pendingFeedbackDrafts.set(draft.prepareId, draft);
+        } catch (error) {
+          sendJson(res, 503, {
+            error: "反馈已写入但准备载荷状态未能持久化，请稍后重试读取结果",
+            status: "persistence_failed",
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          return true;
+        }
+      }
+      sendJson(res, 201, {
+        schemaVersion: "truthpass.feedback.confirm.v1",
+        ok: true,
+        status: "feedback_confirmed",
+        feedbackId: feedback.feedbackId,
+        purchaseId: purchase.purchaseId,
+        purchaseTxHash: fields.purchaseTxHash,
+        contributionTxHash: contributionReceipt?.txHash,
+        contributionReceiptStatus: contributionReceipt ? "mainnet_receipt_verified" : "not_provided_demo",
+        evidenceHash: feedback.evidenceHash,
+        feedbackHash: draft?.feedbackHash ?? body.feedbackHash,
+        persisted,
+        dataMode: fields.dataMode,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const duplicate = message.includes("同一购买记录只能提交一次") || message.includes("幂等键冲突");
+      sendJson(res, duplicate ? 409 : 422, { error: message, status: duplicate ? "feedback_already_confirmed" : "feedback_confirm_failed" });
+    }
     return true;
   }
 
@@ -4168,14 +5575,19 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const allowedCategories = ["包装完好", "无明显腥味", "批次可查", "口感不错", "日期新鲜", "物流快速", "保存方便"];
     const categories = Array.isArray(body.categories) ? body.categories.filter((value): value is string => typeof value === "string") : [];
     const comment = typeof body.comment === "string" ? body.comment.trim() : "";
-    const demoMode = body.dataMode === "demo/synthetic" || body.demoMode === true;
+    const requestedDemoMode = body.dataMode === "demo/synthetic" || body.demoMode === true;
+    if (feedbackProductionMode() && requestedDemoMode) {
+      sendJson(res, 403, { error: "生产模式禁止使用旧接口提交 demo/synthetic 反馈，请使用 /api/feedback/prepare 和 /api/feedback/confirm", status: "production_feedback_requires_receipt" });
+      return true;
+    }
+    const demoMode = requestedDemoMode && !feedbackProductionMode();
     const purchaseId = typeof body.purchaseId === "string" ? body.purchaseId.trim() : "";
     const txHash = typeof body.txHash === "string" ? body.txHash.trim() : "";
     if (body.consent !== true || body.purchaseConfirmed !== true) {
       sendJson(res, 400, { error: "提交反馈需要明确授权并确认已购买该批次" });
       return true;
     }
-    if (!demoMode && (!purchaseId || !/^0x[0-9a-fA-F]{64}$/.test(txHash))) {
+    if (!demoMode && (!/^0x[0-9a-fA-F]{64}$/.test(purchaseId) || !/^0x[0-9a-fA-F]{64}$/.test(txHash))) {
       sendJson(res, 400, { error: "生产反馈必须提供已核验 purchaseId 和 txHash；如为演示请显式标记 dataMode=demo/synthetic", status: "verified_purchase_required" });
       return true;
     }
@@ -4195,7 +5607,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       sendJson(res, 400, { error: "补充反馈最多 1000 字符" });
       return true;
     }
-    const verifiedPurchase = !demoMode && sessionChainTxs.some((item) => item.txHash.toLowerCase() === txHash.toLowerCase() && item.batchId === batchId && item.action === "purchase" && item.eventVerified && (item.receiptStatus === "0x1" || item.receiptStatus === "1"));
+    const verifiedPurchase = demoMode || Boolean(await verifiedPurchaseReceipt(purchaseId, txHash, batchId));
     if (!demoMode && !verifiedPurchase) {
       sendJson(res, 422, { error: "txHash 未在本服务中通过 PurchaseRecorded receipt 核验", status: "purchase_receipt_unverified", txHash, explorerUrl: `${BOT_CHAIN_MAINNET.explorerUrl}/tx/${txHash}` });
       return true;
@@ -4207,6 +5619,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       grantedAt: new Date().toISOString(),
     });
     const freshPurchase = await consumers.recordPurchase({
+      purchaseId: demoMode ? undefined : purchaseId,
       consumerId,
       batchId,
       purchaseProofHash: demoMode
@@ -4218,7 +5631,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       purchaseId: freshPurchase.purchaseId,
       rating,
       categories,
-      evidence: { source: demoMode ? "demo/synthetic" : "verified_purchase_receipt", purchaseConfirmedByConsumer: true, txHash: demoMode ? undefined : txHash, comment },
+      evidence: { source: demoMode ? "demo/synthetic" : "verified_purchase_receipt", purchaseConfirmedByConsumer: true, txHash: demoMode ? undefined : txHash, comment, dataMode: demoMode ? "demo/synthetic" : "external" },
     });
     const persisted = persistenceEnabled() && Boolean(repository.getBatch(batchId));
     if (persisted) {

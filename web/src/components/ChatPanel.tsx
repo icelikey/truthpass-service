@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useChatStream, type ChatMessage } from "../hooks/useChatStream";
-import { createOrder, fetchRecommend, postIotSimulation, type IotSimulationMode } from "../api";
+import { createOrder, fetchPurchaseQuote, fetchRecommend, postIotSimulation, type IotSimulationMode } from "../api";
 import { saveOrderRecord } from "../lib/supabase";
 import { useWallet } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
@@ -46,12 +46,12 @@ type AgentSection = { label: "结论" | "依据" | "不确定" | "下一步"; te
 function parseAgentSections(lines: ChatLine[], locale: "zh" | "en" = "zh"): AgentSection[] {
   const content = lines.map((line) => line.text.trim()).filter(Boolean).join(" ");
   if (!content) return [];
-  const matches = [...content.matchAll(locale === "en" ? /(Conclusion|Evidence|Uncertain|Next step)\s*:\s*/gi : /(结论|依据|不确定|下一步)\s*[:：]/g)];
+  const matches = [...content.matchAll(locale === "en" ? /(Conclusion|Evidence|Uncertainty|Uncertain|Next step)\s*:\s*/gi : /(结论|依据|不确定|下一步)\s*[:：]/g)];
   const canonical = (label: string): AgentSection["label"] => {
     if (locale === "en") {
       if (/^conclusion$/i.test(label)) return "结论";
       if (/^evidence$/i.test(label)) return "依据";
-      if (/^uncertain$/i.test(label)) return "不确定";
+      if (/^uncertain(?:ty)?$/i.test(label)) return "不确定";
       return "下一步";
     }
     return label as AgentSection["label"];
@@ -134,6 +134,11 @@ function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; hi
   return { current: raw?.stage, history };
 }
 
+function stageStatusLabel(status: string | undefined, en: boolean): string {
+  if (en) return status === "active" ? "working" : status === "fallback" ? "fallback" : status === "unavailable" ? "unavailable" : "done";
+  return status === "active" ? "处理中" : status === "fallback" ? "回退" : status === "unavailable" ? "不可用" : "已完成";
+}
+
 function answerValidationMeta(message: ChatMessage): {
   validationStatus?: string;
   validationReasons: string[];
@@ -163,14 +168,19 @@ function RecommendationEvidence({ item, en }: { item: RecommendItem; en: boolean
   const coldStatus = item.coldChain?.status ?? (coldGap > 0 ? "有记录" : "未见中断");
   const gaps = item.gaps ?? [];
   const feedback = item.feedbackSample;
+  const recommendationStatus = item.recommendationStatus ?? "review_before_recommendation";
+  const recommendationLabel = recommendationStatus === "recommend_with_scope" ? (en ? "Recommend with scope" : "在范围内，可继续评估") : recommendationStatus === "do_not_recommend" ? (en ? "Do not recommend" : "暂不推荐") : (en ? "Review before recommendation" : "先复核再决定");
+  const parameterSummary = (item.parameterDetails ?? []).slice(0, 4).map((detail) => `${detail.label} ${detail.observed === undefined ? (en ? "not registered" : "未登记") : `${detail.observed}${detail.unit}`} · ${detail.rule}`).join(en ? "; " : "；");
   return (
     <div className="recommend-evidence-grid" aria-label={en ? "Recommendation evidence" : "推荐依据详情"}>
       <span><b>{en ? "Evidence" : "证据"}</b>{evidenceRefs.length ? evidenceRefs.join(" · ") : (en ? "Registered batch records" : "当前批次登记资料")}</span>
       <span><b>{en ? "Verification" : "核验"}</b>{verification}{item.verification?.score !== undefined ? ` · ${item.verification.score} 分` : ""}</span>
+      <span><b>{en ? "Recommendation" : "推荐状态"}</b>{recommendationLabel}</span>
+      {parameterSummary && <span><b>{en ? "Parameters" : "参数"}</b>{parameterSummary}</span>}
       <span><b>{en ? "Cold chain" : "冷链"}</b>{coldStatus} · {coldGap}h gap</span>
       <span><b>{en ? "Feedback sample" : "反馈样本"}</b>{feedback?.summary ?? (feedback?.count ? `${feedback.count} 条` : (en ? "No sample" : "暂无样本"))}</span>
-      <span><b>{en ? "Gaps" : "缺口"}</b>{gaps.length ? gaps.join("；") : (en ? "None listed" : "当前未列出")}</span>
-      <span><b>{en ? "Next" : "下一步"}</b>{item.nextStep ?? (en ? "Open the evidence card before checkout" : "购买前打开证据卡核对来源")}</span>
+      <span><b>{en ? "Gaps" : "缺口"}</b>{gaps.length ? gaps.join(en ? "; " : "；") : (en ? "None listed" : "当前未列出")}</span>
+      <span><b>{en ? "Next" : "下一步"}</b>{item.nextAction ?? item.nextStep ?? (en ? "Open the evidence card before checkout" : "购买前打开证据卡核对来源")}</span>
       <span className="recommend-data-mode"><b>dataMode</b>{item.dataMode ?? item.evidence?.dataMode ?? "demo/synthetic"}</span>
     </div>
   );
@@ -264,27 +274,32 @@ function MessageView({
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
-      {!message.done && stream.current && (
-        <div className="chat-stage-rail" role="status" aria-live="polite">
-          {(stream.history.length ? stream.history : [stream.current]).map((stage, index) => (
-            <span key={`${stage}-${index}`} className={stage === stream.current ? "active" : "completed"}>
-              <i>{index + 1}</i>{en ? stage.replaceAll("_", " ") : STREAM_STAGE_LABELS[stage]}
-            </span>
-          ))}
-        </div>
-      )}
-      {message.done && stream.current && stream.current !== "done" && (
-        <div className="chat-stage-rail compact" role="status">
-          <span className="completed"><i>✓</i>{en ? "Agent answer complete" : "Agent 回答已完成"}</span>
-        </div>
+      {stream.history.length > 0 && (
+        <details className={`chat-stage-details${message.done ? " is-complete" : ""}`} open>
+          <summary>{en ? "Live data flow" : "数据流过程"} · {message.done ? (en ? "completed" : "已完成") : (en ? "running" : "运行中")}</summary>
+          <div className="chat-stage-rail" role="status" aria-live="polite">
+            {stream.history.map((stage, index) => {
+              const rawMeta = message.meta as (ChatMessage["meta"] & { stageStatuses?: Record<string, string>; stageDetails?: Record<string, string> }) | undefined;
+              const status = rawMeta?.stageStatuses?.[stage];
+              const detail = rawMeta?.stageDetails?.[stage];
+              return (
+                <span key={`${stage}-${index}`} className={stage === stream.current && !message.done ? "active" : status === "fallback" || status === "unavailable" ? "fallback" : "completed"}>
+                  <i>{status === "completed" && message.done ? "✓" : index + 1}</i>
+                  <b>{en ? stage.replaceAll("_", " ") : STREAM_STAGE_LABELS[stage]}</b>
+                  <small>{stageStatusLabel(status, en)}{detail ? ` · ${detail}` : ""}</small>
+                </span>
+              );
+            })}
+          </div>
+        </details>
       )}
       {message.done && hasValidationMeta && (
         <div className={`answer-validation-summary ${deterministicFallback || (validationPassed && citationPassed) ? "passed" : "review"}`} role="status">
-          <strong>{deterministicFallback ? "已安全回退到基础回答" : validationPassed && citationPassed ? "回答通过格式与引用校验" : "回答需要复核"}</strong>
-          <span>{deterministicFallback ? "未发布未经校验的模型原文" : validationPassed ? "格式校验通过" : `格式校验：${answerValidation.validationStatus ?? "未提供"}`}</span>
-          <span>{deterministicFallback ? "内容来自当前批次登记资料" : citationPassed ? "引用校验通过" : `引用校验：${answerValidation.citationStatus ?? "未提供"}`}</span>
+          <strong>{deterministicFallback ? (en ? "Safely fell back to an evidence answer" : "已安全回退到基础回答") : validationPassed && citationPassed ? (en ? "Answer passed format and citation checks" : "回答通过格式与引用校验") : (en ? "Answer needs review" : "回答需要复核")}</strong>
+          <span>{deterministicFallback ? (en ? "Unvalidated model text was not published" : "未发布未经校验的模型原文") : validationPassed ? (en ? "Format check passed" : "格式校验通过") : `${en ? "Format check: " : "格式校验："}${answerValidation.validationStatus ?? (en ? "not provided" : "未提供")}`}</span>
+          <span>{deterministicFallback ? (en ? "Content comes from the current registered records" : "内容来自当前批次登记资料") : citationPassed ? (en ? "Citation check passed" : "引用校验通过") : `${en ? "Citation check: " : "引用校验："}${answerValidation.citationStatus ?? (en ? "not provided" : "未提供")}`}</span>
           {(answerValidation.validationReasons.length > 0 || answerValidation.citationReasons.length > 0) && (
-            <small>{[...answerValidation.validationReasons, ...answerValidation.citationReasons].join("；")}</small>
+            <small>{[...answerValidation.validationReasons, ...answerValidation.citationReasons].join(en ? "; " : "；")}</small>
           )}
         </div>
       )}
@@ -295,7 +310,7 @@ function MessageView({
         <div className="chat-sse-state unavailable" role="status">{en ? "The model service is unavailable. Try again or request human support." : "模型服务暂不可用，请稍后重试或转人工。"}</div>
       )}
       {message.done && statusMeta?.sse === "rate-limited" && (
-        <div className="chat-sse-state rate-limited" role="status">请求过于频繁（rate limited），请稍后再问。</div>
+        <div className="chat-sse-state rate-limited" role="status">{en ? "Too many requests (rate limited). Please try again shortly." : "请求过于频繁（rate limited），请稍后再问。"}</div>
       )}
 
       <div className="msg-bubble">
@@ -323,12 +338,18 @@ function MessageView({
                   <b>{index + 1}. {item.name}</b>
                   <span>{item.batchId} · {item.origin} · {item.productionDate}</span>
                   <p>{item.reason}</p>
-                  {item.expertise && <p className="recommend-expertise">专业提示：{item.expertise}</p>}
+                  {item.expertise && <p className="recommend-expertise">{en ? "Expert note: " : "专业提示："}{item.expertise}</p>}
                   <RecommendationEvidence item={item} en={en} />
                 </div>
-                <button type="button" className="recommend-order" aria-label={`为 ${item.batchId} 生成购买准备`} onClick={() => onOrder(item)}>
-                  购买准备
-                </button>
+                {item.recommendationStatus !== "recommend_with_scope" ? (
+                  <span className="recommend-order" aria-label={en ? `Batch ${item.batchId} requires review` : `批次 ${item.batchId} 需要先复核`}>
+                    {item.recommendationStatus === "do_not_recommend" ? (en ? "Do not recommend" : "暂不推荐") : (en ? "Review first" : "先复核")}
+                  </span>
+                ) : (
+                  <button type="button" className="recommend-order" aria-label={en ? `Prepare checkout for ${item.batchId}` : `为 ${item.batchId} 生成购买准备`} onClick={() => onOrder(item)}>
+                    {en ? "Prepare checkout" : "购买准备"}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -337,38 +358,44 @@ function MessageView({
           <div className="order-card">
             {message.order.imageUrl && <img src={message.order.imageUrl} alt="" />}
             <div className="order-info">
-              <b>{message.order.status === "prepared_pending_checkout" ? "购买准备已生成（待结算）" : "购买记录"} · {message.order.orderId}</b>
-              <span>{message.order.productName} · {message.order.batchId} · 数量 {message.order.quantity}</span>
-              <div className="order-flow-steps" aria-label="购买进度">
-                <span className="active">1 购买准备</span>
-                <span className={message.order.txHash ? "active" : "current"}>2 商家确认</span>
-                <span className={message.order.txHash ? "active" : ""}>3 钱包确认</span>
+              <b>{message.order.status === "prepared_pending_checkout" ? (en ? "Checkout prepared (pending settlement)" : "购买准备已生成（待结算）") : (en ? "Purchase record" : "购买记录")} · {message.order.orderId}</b>
+              <span>{message.order.productName} · {message.order.batchId} · {en ? "Quantity " : "数量 "}{message.order.quantity}</span>
+              <div className="order-flow-steps" aria-label={en ? "Purchase progress" : "购买进度"}>
+                <span className="active">1 {en ? "Prepare" : "购买准备"}</span>
+                <span className={message.order.txHash ? "active" : "current"}>2 {en ? "Merchant" : "商家确认"}</span>
+                <span className={message.order.txHash ? "active" : ""}>3 {en ? "Wallet" : "钱包确认"}</span>
               </div>
               <span className="order-status">
-                状态：{message.order.txHash ? "真实 receipt 已确认" : "购买准备中，等待商家确认价格和地址"}
+                {en ? "Status: " : "状态："}{message.order.txHash ? (en ? "Real receipt verified" : "真实 receipt 已确认") : message.order.purchaseQuote?.chainPayment?.enabled ? (en ? `Quote ready: ${message.order.purchaseQuote.chainPayment.amountBot ?? "0.001"} BOT, waiting for wallet signature` : `报价已准备：${message.order.purchaseQuote.chainPayment.amountBot ?? "0.001"} BOT，等待钱包签名`) : (en ? "Checkout prepared; payment method not confirmed" : "购买准备中，等待支付方式确认")}
               </span>
+              {!message.order.txHash && message.order.purchaseQuote && (
+                <div className="order-quote-summary" role="status">
+                  <span>{en ? "Payment status: " : "支付状态："}{message.order.purchaseQuote.chainPayment?.enabled ? (en ? "BOT Chain 677 available" : "BOT Chain 677 可用") : (en ? "On-chain payment is not configured" : "链上支付未配置")}</span>
+                  <small>{message.order.purchaseQuote.chainPayment?.enabled ? (en ? `Amount ${message.order.purchaseQuote.chainPayment.amountBot ?? "0.001"} BOT · broadcast only after external wallet confirmation` : `金额 ${message.order.purchaseQuote.chainPayment.amountBot ?? "0.001"} BOT · 外部钱包确认后才会广播`) : (en ? "Only a checkout preparation record is available; success is not shown." : "当前只能生成购买准备单，不会显示购买成功。")}</small>
+                </div>
+              )}
               {message.order.txHash ? (
                 <a
                   href={message.order.explorerUrl ?? `https://scan.botchain.ai/tx/${message.order.txHash}`}
                   target="_blank"
                   rel="noreferrer"
                   className="order-chain-link"
-                  aria-label={`在区块浏览器核验交易 ${shortHex(message.order.txHash, 10, 6)}`}
+                  aria-label={en ? `Verify transaction ${shortHex(message.order.txHash, 10, 6)} in block explorer` : `在区块浏览器核验交易 ${shortHex(message.order.txHash, 10, 6)}`}
                 >
-                  BOT Chain 交易 {shortHex(message.order.txHash, 10, 6)} · 核验 ↗
+                  {en ? "BOT Chain transaction " : "BOT Chain 交易 "}{shortHex(message.order.txHash, 10, 6)} · {en ? "Verify" : "核验"} ↗
                 </a>
               ) : (
                 <>
                   <button
                     type="button"
                     className="order-anchor-btn"
-                    aria-label="使用钱包签名上链存证购买凭证"
+                    aria-label={en ? "Use wallet signature to record the purchase credential" : "使用钱包签名上链存证购买凭证"}
                     disabled={!walletReady || txBusy}
                     onClick={() => onAnchorOrder(message.order!)}
                   >
-                    {txBusy ? "正在等待钱包确认…" : "确认钱包操作"}
+                    {txBusy ? (en ? "Waiting for wallet confirmation…" : "正在等待钱包确认…") : (en ? "Confirm wallet action" : "确认钱包操作")}
                   </button>
-                  {!walletReady && <small className="order-wallet-hint">连接自己的钱包后，才可以确认购买记录。</small>}
+                  {!walletReady && <small className="order-wallet-hint">{en ? "Connect your own wallet before confirming the purchase record." : "连接自己的钱包后，才可以确认购买记录。"}</small>}
                 </>
               )}
             </div>
@@ -376,20 +403,20 @@ function MessageView({
         )}
         {message.meta?.sources && message.meta.sources.length > 0 && (
           <div className="chat-sources">
-            <b>来源</b> · {message.meta.sources.join(" · ")}
+            <b>{en ? "Sources" : "来源"}</b> · {message.meta.sources.join(" · ")}
           </div>
         )}
         {message.meta?.chainContext && (
           <div className="chat-chain-context">
             <span>Chain {message.meta.chainContext.chainId} · {message.meta.chainContext.chainName}</span>
             <span>{message.meta.chainContext.latestBlockNumber ? `最新区块 #${message.meta.chainContext.latestBlockNumber}` : "最新区块未读取"}</span>
-            {message.meta.chainContext.transaction ? <a href={message.meta.chainContext.transaction.explorerUrl} target="_blank" rel="noreferrer">查看 receipt ↗</a> : <span>当前没有本次会话 receipt</span>}
+            {message.meta.chainContext.transaction ? <a href={message.meta.chainContext.transaction.explorerUrl} target="_blank" rel="noreferrer">{en ? "View receipt" : "查看 receipt"} ↗</a> : <span>{en ? "No receipt for this session" : "当前没有本次会话 receipt"}</span>}
           </div>
         )}
         {showHandoff && (
           <div className="chat-handoff">
-            <button type="button" aria-label="请求人工客服接手" onClick={onHandoff}>
-              转人工客服
+            <button type="button" aria-label={en ? "Request human support" : "请求人工客服接手"} onClick={onHandoff}>
+              {en ? "Request human support" : "转人工客服"}
             </button>
           </div>
         )}
@@ -483,10 +510,10 @@ export function ChatPanel({
     if (bid) {
       onStart();
       onBatch(bid);
-      await ask(question, bid, onFlowEvent);
+      await ask(question, bid, onFlowEvent, locale);
       onDone();
     } else {
-      await ask(question, "", onFlowEvent);
+      await ask(question, "", onFlowEvent, locale);
     }
   };
 
@@ -501,19 +528,19 @@ export function ChatPanel({
   const recommend = async (text: string) => {
     setInput("");
     pushUser(text);
-    pushAgent([{ cls: "plain", text: "好的，我来根据已登记批次给出补货参考（演示数据）。" }]);
+    pushAgent([{ cls: "plain", text: en ? "I will compare the registered batches and show a scoped reference (demo data)." : "好的，我来根据已登记批次给出补货参考（演示数据）。" }]);
     try {
-      const items = await fetchRecommend();
+      const items = await fetchRecommend(batchId ?? undefined);
       if (!items.length) {
-        pushAgent([{ cls: "plain", text: "当前暂无可展示的补货批次。" }]);
+        pushAgent([{ cls: "plain", text: en ? "There are no batches available to show right now." : "当前暂无可展示的补货批次。" }]);
       } else {
         pushAgent(
-          [{ cls: "plain", text: "以下为演示批次参考，不构成购买建议或疗效承诺：" }],
+          [{ cls: "plain", text: en ? "These are demo batch references, not purchase advice or efficacy claims:" : "以下为演示批次参考，不构成购买建议或疗效承诺：" }],
           { recommendations: items },
         );
       }
     } catch {
-      pushAgent([{ cls: "disclaimer", text: "推荐服务暂不可用。" }]);
+      pushAgent([{ cls: "disclaimer", text: en ? "The recommendation service is temporarily unavailable." : "推荐服务暂不可用。" }]);
     }
   };
 
@@ -525,6 +552,8 @@ export function ChatPanel({
       // the same scope while the order is prepared.
       onBatch(item.batchId);
       const order = await createOrder(item.batchId, 1);
+      const purchaseQuote = await fetchPurchaseQuote(order.batchId).catch(() => undefined);
+      const orderWithQuote = purchaseQuote ? { ...order, purchaseQuote } : order;
       void saveOrderRecord({
         orderId: order.orderId,
         batchId: order.batchId,
@@ -536,14 +565,14 @@ export function ChatPanel({
       onPurchasePrepared?.();
       pushAgent(
         [
-          { cls: "conclusion", text: `已生成购买准备单：${order.orderId}` },
-          { cls: "plain", text: "下一步由商家 Checkout Adapter 完成价格、地址与支付；确认后再由钱包写入购买凭证。当前若无 txHash，状态为 anchor_pending。" },
-          { cls: "disclaimer", text: "演示环境不展示虚构价格、库存或疗效。" },
+          { cls: "conclusion", text: en ? `Checkout preparation created: ${order.orderId}` : `已生成购买准备单：${order.orderId}` },
+          { cls: "plain", text: en ? "The merchant Checkout Adapter handles price, address, and payment. The wallet must confirm before a purchase credential is written. Without a txHash, the state remains anchor_pending." : "下一步由商家 Checkout Adapter 完成价格、地址与支付；确认后再由钱包写入购买凭证。当前若无 txHash，状态为 anchor_pending。" },
+          { cls: "disclaimer", text: en ? "Demo mode does not invent price, inventory, or efficacy claims." : "演示环境不展示虚构价格、库存或疗效。" },
         ],
-        { order },
+        { order: orderWithQuote },
       );
     } catch {
-      pushAgent([{ cls: "disclaimer", text: "购买准备失败，请稍后重试。" }]);
+      pushAgent([{ cls: "disclaimer", text: en ? "Checkout preparation failed. Please try again." : "购买准备失败，请稍后重试。" }]);
     }
   };
 
@@ -558,9 +587,9 @@ export function ChatPanel({
       onReceiptVerified?.();
       pushAgent(
         [
-          { cls: "conclusion", text: `订单 ${order.orderId} 已提交链上存证交易。` },
+          { cls: "conclusion", text: en ? `Order ${order.orderId} was submitted for on-chain recording.` : `订单 ${order.orderId} 已提交链上存证交易。` },
           { cls: "cmd", text: `TxHash: ${tx.txHash}` },
-          { cls: "disclaimer", text: "请以区块浏览器 receipt 为准；界面展示不等于业务结算完成。" },
+          { cls: "disclaimer", text: en ? "Use the block explorer receipt as the source of truth; the UI alone does not complete settlement." : "请以区块浏览器 receipt 为准；界面展示不等于业务结算完成。" },
         ],
         { order: { ...order, txHash: tx.txHash, explorerUrl: tx.explorerUrl } },
       );
@@ -571,9 +600,9 @@ export function ChatPanel({
 
   const handleHandoff = () => {
     pushAgent([
-      { cls: "conclusion", text: "已记录人工转接意向。" },
-      { cls: "plain", text: "请通过商家售后渠道继续；Agent 不会把模型回答包装成质量判定。" },
-      { cls: "disclaimer", text: "转接入口为产品流程占位，当前演示不创建真实工单。" },
+      { cls: "conclusion", text: en ? "Your request for human support has been recorded." : "已记录人工转接意向。" },
+      { cls: "plain", text: en ? "Continue through the merchant after-sales channel. The Agent will not turn model text into a quality verdict." : "请通过商家售后渠道继续；Agent 不会把模型回答包装成质量判定。" },
+      { cls: "disclaimer", text: en ? "This handoff is a demo placeholder and does not create a real ticket." : "转接入口为产品流程占位，当前演示不创建真实工单。" },
     ]);
   };
 
@@ -584,7 +613,7 @@ export function ChatPanel({
     try {
       const result = await postIotSimulation(target, mode);
       setSensorRun({ mode, evidenceId: result.evidenceId, payloadHash: result.payloadHash, message: result.message, pipeline: result.pipeline ?? ["设备发送", "服务端接收", "批次关联", "确定性校验"], verification: result.verification });
-      await ask(`已上传 IoT 模拟数据：${mode}`, target, onFlowEvent);
+      await ask(`已上传 IoT 模拟数据：${mode}`, target, onFlowEvent, locale);
     } catch (error) {
       console.error("IoT 模拟上传失败", error);
     } finally {

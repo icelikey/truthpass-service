@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
+import { AgentDataFlowRail, type AgentFlowEvent, type AgentFlowStatus } from "./AgentDataFlowRail";
 import { EvidencePanel } from "./EvidencePanel";
 import { ProductPanel } from "./ProductPanel";
 import { ConsumerFlowBar, type ConsumerAgentStage } from "./ConsumerFlowBar";
 import { ConsumerActionDock } from "./ConsumerActionDock";
 import { useWallet } from "./WalletContext";
-import type { VerifyState } from "../types";
-import { fetchAgentStatus } from "../api";
+import type { ChatEvent, RecommendItem, VerifyState } from "../types";
+import { fetchAgentStatus, fetchBatchOverview, fetchLifecycle, fetchRecommend } from "../api";
 
 type Locale = "zh" | "en";
 
@@ -102,6 +103,12 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const [autoQueryBatch, setAutoQueryBatch] = useState<string | null>(batchId);
   const [showHow, setShowHow] = useState(false);
   const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; status?: string }>({});
+  const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
+  const [flowDataMode, setFlowDataMode] = useState("demo/synthetic");
+  const [recommendation, setRecommendation] = useState<RecommendItem | null>(null);
+  const [recommendationState, setRecommendationState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
+  const flowSeqRef = useRef(0);
+  const lifecycleRevisionRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (batchId) setQuery(batchId);
@@ -120,6 +127,140 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
     setAutoQueryBatch(next);
     window.setTimeout(() => document.getElementById("agent")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
   };
+
+  const appendFlowEvent = useCallback((event: ChatEvent) => {
+    const stage = event.stage ?? (event.kind === "done" ? "done" : event.kind);
+    const stageLabels: Record<string, string> = locale === "zh"
+      ? {
+          begin: "Agent 开始运行",
+          reading_batch: "读取当前批次",
+          verifier_checked: "Verifier 完成规则核验",
+          jev_routed: "JEV 完成分流",
+          model_started: "模型开始整理解释",
+          model_completed: "模型解释完成",
+          answer: "回答已生成",
+          done: "Agent 运行结束",
+          meta: "运行摘要已返回",
+        }
+      : {
+          begin: "Agent run started",
+          reading_batch: "Reading this batch",
+          verifier_checked: "Verifier checked rules",
+          jev_routed: "JEV routed next step",
+          model_started: "Model started explanation",
+          model_completed: "Model explanation completed",
+          answer: "Answer generated",
+          done: "Agent run finished",
+          meta: "Run metadata returned",
+        };
+    const status: AgentFlowStatus = event.status === "active" || event.status === "completed" || event.status === "fallback" || event.status === "unavailable"
+      ? event.status
+      : "info";
+    const item: AgentFlowEvent = {
+      id: `consumer-flow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      source: "Agent SSE",
+      label: stageLabels[stage] ?? stage,
+      detail: event.detail
+        ?? (event.pipelineDetail ? `Verifier ${event.pipelineDetail.verifier.status} · JEV ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "模型" : "model"} ${event.pipelineDetail.deepseek.status}` : event.text ?? ""),
+      status,
+      at: new Date().toISOString(),
+      batchId: event.batchId ?? batchId ?? undefined,
+      traceId: event.traceId,
+      evidenceCount: event.evidenceIds?.length,
+      dataMode: event.dataMode ?? flowDataMode,
+    };
+    flowSeqRef.current += 1;
+    item.id = `consumer-flow-${Date.now()}-${flowSeqRef.current}`;
+    setFlowEvents((previous) => [...previous.slice(-99), item]);
+    if (event.traceId) setFlowTraceId(event.traceId);
+    if (event.dataMode) setFlowDataMode(event.dataMode);
+  }, [batchId, flowDataMode, locale]);
+
+  const [flowTraceId, setFlowTraceId] = useState<string | undefined>();
+
+  const appendSystemFlow = useCallback((event: Omit<AgentFlowEvent, "id" | "at">) => {
+    flowSeqRef.current += 1;
+    const item: AgentFlowEvent = { ...event, id: `consumer-flow-${Date.now()}-${flowSeqRef.current}`, at: new Date().toISOString() };
+    setFlowEvents((previous) => [...previous.slice(-99), item]);
+    if (event.traceId) setFlowTraceId(event.traceId);
+    if (event.dataMode) setFlowDataMode(event.dataMode);
+  }, []);
+
+  useEffect(() => {
+    if (!batchId) return;
+    let active = true;
+    setFlowEvents([]);
+    setFlowTraceId(undefined);
+    lifecycleRevisionRef.current = undefined;
+    const lifecycleSource = locale === "zh" ? "生命周期 API" : "Lifecycle API";
+    const readPublicContext = async () => {
+      const overviewSource = locale === "zh" ? "批次总览 API" : "Batch overview API";
+      const chainSource = locale === "zh" ? "链状态 API" : "Chain status API";
+      appendSystemFlow({ source: overviewSource, label: locale === "zh" ? "读取批次总览" : "Reading batch overview", detail: `${locale === "zh" ? "正在读取 " : "Reading "}${batchId}${locale === "zh" ? " 的商品、证据和核验状态。" : " product, evidence, and verification state."}`, status: "active", batchId });
+      try {
+        const overview = await fetchBatchOverview(batchId);
+        if (!active) return;
+        const mode = overview.dataMode ?? overview.batch?.dataMode ?? "demo/synthetic";
+        setFlowDataMode(mode);
+        appendSystemFlow({ source: overviewSource, label: locale === "zh" ? "批次总览已读取" : "Batch overview loaded", detail: `${overview.product?.name ?? "Product"} · ${locale === "zh" ? "核验" : "verification"} ${overview.verification?.status ?? overview.batch?.status ?? "pending"} · ${overview.evidence?.length ?? 0} ${locale === "zh" ? "条证据" : "evidence records"}.`, status: "completed", batchId, evidenceCount: overview.evidence?.length, dataMode: mode });
+        const chain = overview.chainContext;
+        if (chain) {
+          appendSystemFlow({
+            source: chainSource,
+            label: locale === "zh" ? "当前批次链状态已返回" : "Current batch chain state returned",
+            detail: `${chain.chainName} (${chain.chainId}) · ${chain.anchorStatus} · ${chain.rpcReachable ? (locale === "zh" ? "RPC 可达" : "RPC reachable") : (locale === "zh" ? "RPC 不可达" : "RPC unavailable")}${chain.transaction ? ` · ${locale === "zh" ? "已有当前交易 receipt" : "current receipt available"}` : ` · ${locale === "zh" ? "没有当前交易 receipt" : "no current receipt"}`}.`,
+            status: chain.rpcReachable ? "completed" : "unavailable",
+            batchId: chain.batchId ?? batchId,
+            traceId: undefined,
+            dataMode: mode,
+          });
+        }
+      } catch (error) {
+        if (!active) return;
+        appendSystemFlow({ source: overviewSource, label: locale === "zh" ? "批次总览读取失败" : "Batch overview failed", detail: error instanceof Error ? error.message : "overview unavailable", status: "unavailable", batchId });
+      }
+      await refreshLifecycle();
+    };
+    const refreshLifecycle = async () => {
+      try {
+        const lifecycle = await fetchLifecycle(batchId);
+        if (!active) return;
+        const firstRead = lifecycleRevisionRef.current === undefined;
+        const changed = !firstRead && lifecycleRevisionRef.current !== lifecycle.contextRevision;
+        lifecycleRevisionRef.current = lifecycle.contextRevision;
+        if (firstRead || changed) {
+          appendSystemFlow({ source: lifecycleSource, label: changed ? (locale === "zh" ? "生命周期资料刚刚更新" : "Lifecycle data updated") : (locale === "zh" ? "生命周期已读取" : "Lifecycle loaded"), detail: `${locale === "zh" ? "上下文版本" : "Context revision"} v${lifecycle.contextRevision} · ${lifecycle.events.length} ${locale === "zh" ? "个阶段" : "stages"}${changed ? (locale === "zh" ? " · 资料刚刚更新" : " · just updated") : ""}.`, status: "completed", batchId, dataMode: lifecycle.dataMode });
+        }
+      } catch (error) {
+        if (!active) return;
+        appendSystemFlow({ source: lifecycleSource, label: locale === "zh" ? "生命周期读取失败" : "Lifecycle read failed", detail: error instanceof Error ? error.message : "lifecycle unavailable", status: "unavailable", batchId });
+      }
+    };
+    void readPublicContext();
+    const timer = window.setInterval(() => { void refreshLifecycle(); }, 10_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [appendSystemFlow, batchId, locale]);
+
+  useEffect(() => {
+    if (!batchId) {
+      setRecommendation(null);
+      setRecommendationState("idle");
+      return;
+    }
+    let active = true;
+    setRecommendation(null);
+    setRecommendationState("loading");
+    void fetchRecommend(batchId).then((items) => {
+      if (!active) return;
+      setRecommendation(items[0] ?? null);
+      setRecommendationState(items[0] ? "ready" : "unavailable");
+    }).catch(() => {
+      if (!active) return;
+      setRecommendation(null);
+      setRecommendationState("unavailable");
+    });
+    return () => { active = false; };
+  }, [batchId]);
 
   return (
     <div className={`tp-consumer-page ${locale === "zh" ? "tp-lang-zh" : "tp-lang-en"}`}>
@@ -180,7 +321,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           <small>{t.pipelineNote}</small>
         </section>
 
-        <ConsumerFlowBar stage={stage} batchId={batchId} />
+        <ConsumerFlowBar stage={stage} batchId={batchId} locale={locale} />
 
         <section className="tp-consumer-workspace" id="agent">
           <div className="tp-consumer-agent-column">
@@ -188,7 +329,11 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
             <ChatPanel
               onStart={props.onStart}
               onDone={props.onDone}
-              onBatch={props.onBatch}
+              onBatch={(id) => {
+                if (id !== batchId) setFlowEvents([]);
+                props.onBatch(id);
+              }}
+              onFlowEvent={appendFlowEvent}
               onPurchasePrepared={props.onPurchasePrepared}
               onWalletPending={props.onWalletPending}
               onReceiptVerified={props.onReceiptVerified}
@@ -196,6 +341,37 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
               autoQueryBatch={autoQueryBatch}
               locale={locale}
             />
+            <AgentDataFlowRail
+              events={flowEvents}
+              batchId={batchId ?? "—"}
+              dataMode={flowDataMode}
+              traceId={flowTraceId ?? flowEvents.at(-1)?.traceId}
+              locale={locale}
+              onClear={() => setFlowEvents([])}
+            />
+            <section className="consumer-auto-recommendation" aria-label={locale === "zh" ? "Agent 推荐结果" : "Agent recommendation"}>
+              <div className="consumer-auto-recommendation-head">
+                <div>
+                  <span className="tp-kicker">{locale === "zh" ? "Agent 建议" : "AGENT RECOMMENDATION"}</span>
+                  <h3>{locale === "zh" ? "先核对，再决定" : "Check the record before deciding"}</h3>
+                </div>
+                {recommendation?.dataMode && <span className="consumer-auto-recommendation-mode">{recommendation.dataMode}</span>}
+              </div>
+              {recommendationState === "loading" && <p className="consumer-auto-recommendation-muted">{locale === "zh" ? "正在根据当前批次的生产、检测和冷链资料整理建议…" : "Reading production, inspection, and cold-chain evidence…"}</p>}
+              {recommendationState === "unavailable" && <p className="consumer-auto-recommendation-muted">{locale === "zh" ? "当前没有可发布的推荐；请先查看证据卡和缺口。" : "No scoped recommendation is available yet. Review the evidence and gaps first."}</p>}
+              {recommendation && <>
+                <div className={`consumer-auto-recommendation-status ${recommendation.recommendationStatus ?? "review_before_recommendation"}`}>
+                  {recommendation.recommendationStatus === "recommend_with_scope" ? (locale === "zh" ? "在当前资料范围内可继续评估" : "Recommend with scope") : recommendation.recommendationStatus === "do_not_recommend" ? (locale === "zh" ? "当前不建议继续购买准备" : "Do not recommend") : (locale === "zh" ? "先复核资料，再决定" : "Review before recommendation")}
+                </div>
+                <p className="consumer-auto-recommendation-reason">{recommendation.reason}</p>
+                <div className="consumer-auto-recommendation-facts">
+                  <span><b>{locale === "zh" ? "参数" : "Parameters"}</b>{recommendation.parameterDetails?.filter((item) => item.status === "within_range").length ?? 0}/{recommendation.parameterDetails?.length ?? 0} {locale === "zh" ? "项在当前规则范围内" : "within the current rule"}</span>
+                  <span><b>{locale === "zh" ? "生产" : "Production"}</b>{recommendation.productionEvidence?.observedStageCount ?? 0}/{recommendation.productionEvidence?.requiredStageCount ?? 0} {locale === "zh" ? "道工序已登记" : "stages registered"}</span>
+                  <span><b>{locale === "zh" ? "反馈" : "Feedback"}</b>{recommendation.feedbackSample?.count ?? 0} {locale === "zh" ? "条已核验购买反馈" : "verified-purchase samples"}</span>
+                </div>
+                <p className="consumer-auto-recommendation-next"><b>{locale === "zh" ? "下一步" : "Next"}</b>{recommendation.nextAction ?? recommendation.nextStep}</p>
+              </>}
+            </section>
           </div>
           <div className="tp-consumer-evidence-column" id="evidence">
             <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "证据卡" : "EVIDENCE CARD"}</span><h2>{t.evidenceTitle}</h2></div>{batchId && <code>{batchId}</code>}</div>
@@ -204,7 +380,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           </div>
         </section>
 
-        <ConsumerActionDock stage={stage} batchId={batchId} />
+        <ConsumerActionDock stage={stage} batchId={batchId} locale={locale} />
 
         <section className="tp-consumer-how" aria-labelledby="consumer-how-title">
           <button type="button" className="tp-consumer-how-toggle" onClick={() => setShowHow((value) => !value)} aria-expanded={showHow}>
@@ -222,4 +398,3 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
     </div>
   );
 }
-

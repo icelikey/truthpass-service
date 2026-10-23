@@ -33,6 +33,22 @@ export const fetchJourney = (batchId: string) => getJson<Journey>(`/api/products
 export const fetchLifecycle = (batchId: string) => getJson<LifecycleView>(`/api/products/${batchId}/lifecycle`);
 export const fetchBatchOverview = (batchId: string) =>
   getJson<PublicBatchOverview>(`/api/public/batches/${encodeURIComponent(batchId)}/overview`);
+export const fetchPurchaseQuote = (batchId: string) =>
+  getJson<NonNullable<PublicBatchOverview["purchaseQuote"]>>(`/api/public/batches/${encodeURIComponent(batchId)}/purchase-quote`);
+export interface PaymentProviderStatusView {
+  provider: "alipay" | "paypal";
+  configured: boolean;
+  mode: "sandbox" | "live" | "production" | "unconfigured";
+  capabilities?: string[];
+  missing?: string[];
+}
+export interface PaymentStatusView {
+  schemaVersion?: string;
+  providers: PaymentProviderStatusView[];
+  paymentAndChainAreSeparate?: boolean;
+  note?: string;
+}
+export const fetchPaymentStatus = () => getJson<PaymentStatusView>("/api/payments/status");
 export async function simulateLifecycleStage(batchId: string, stage: LifecycleStage): Promise<LifecycleView> {
   const res = await fetch("/api/simulator/lifecycle", {
     method: "POST",
@@ -114,7 +130,10 @@ export async function confirmChainTx(params: {
   return (await res.json()) as { ok: boolean; transaction: SessionChainTx };
 }
 
-export const fetchRecommend = () => getJson<RecommendItem[]>("/api/recommend");
+export const fetchRecommend = (batchId?: string) =>
+  batchId
+    ? getJson<{ item: RecommendItem }>(`/api/recommendation?batchId=${encodeURIComponent(batchId)}`).then((result) => result.item ? [result.item] : [])
+    : getJson<RecommendItem[]>("/api/recommend");
 
 export async function createOrder(batchId: string, quantity = 1): Promise<OrderCard> {
   const res = await fetch("/api/orders", {
@@ -187,11 +206,12 @@ export async function postChat(
   batchId: string | null,
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
+  locale: "zh" | "en" = "zh",
 ): Promise<void> {
   const res = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batchId, messages: [{ role: "user", content: question }] }),
+    body: JSON.stringify({ batchId, locale, messages: [{ role: "user", content: question }] }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error("stream unavailable");
@@ -250,6 +270,8 @@ export async function postFeedback(
   consent: boolean,
   purchaseConfirmed: boolean,
   comment?: string,
+  purchaseId?: string,
+  txHash?: string,
 ): Promise<{
   ok: boolean;
   persisted: boolean;
@@ -261,7 +283,7 @@ export async function postFeedback(
   const res = await fetch("/api/feedback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batchId, rating, categories, consent, purchaseConfirmed, comment }),
+    body: JSON.stringify({ batchId, rating, categories, consent, purchaseConfirmed, comment, purchaseId, txHash }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as {

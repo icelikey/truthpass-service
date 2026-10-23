@@ -9,7 +9,7 @@ import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext"
 import type { ChatEvent, VerifyState, LifecycleView, PublicBatchOverview } from "../types";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
-import { fetchBatchOverview, fetchChainStatus, fetchLifecycle } from "../api";
+import { fetchBatchOverview, fetchLifecycle } from "../api";
 
 type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
@@ -54,7 +54,7 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
   const localeHref = localizedSiteRoute(site, view, alternateLocale, view === "developers" ? undefined : batchId);
   return (
     <header className="tenant-site-header">
-      <a className="tp-brand" href={routeFor(site, "home", locale)} aria-label={`${site.brand.name} TruthPass`}>
+      <a className="tp-brand" href={localizedSiteRoute(site, "home", locale, batchId)} aria-label={`${site.brand.name} TruthPass`}>
         <span className="tp-brand-word">TruthPass</span><span className="tenant-site-mark">{site.brand.mark}</span>
       </a>
       <div className="tenant-site-context"><strong>{site.brand.name}</strong><span>{site.product.name}</span></div>
@@ -62,18 +62,18 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
         {labels.map(([key, label, href]) => <a key={key} className={view === key ? "active" : ""} href={href}>{label}</a>)}
       </nav>
       {site.locale.supported.includes(alternateLocale) && <a className="tenant-language-link" href={localeHref}>{zh ? "EN" : "中文"}</a>}
-      <a className="tenant-back-link" href={zh ? "/" : "/en"}>{zh ? "回到 TruthPass" : "Back to TruthPass"}</a>
+      <a className="tenant-back-link" href={`${zh ? "/" : "/en"}?view=consumer&batch=${encodeURIComponent(batchId)}`}>{zh ? "回到 TruthPass" : "Back to TruthPass"}</a>
     </header>
   );
 }
 
-function SiteStateBar({ site, locale, view }: { site: TenantSiteConfig; locale: "zh" | "en"; view: TenantView }) {
+function SiteStateBar({ site, locale, view, batchId }: { site: TenantSiteConfig; locale: "zh" | "en"; view: TenantView; batchId: string }) {
   const zh = locale === "zh";
   return (
     <div className="tenant-site-statebar">
       <span className="tp-demo-ribbon">{site.product.demoMode === "demo/synthetic" ? (zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION") : (zh ? "正式资料" : "PRODUCTION DATA")}</span>
       <span>{zh ? `当前页面：${view === "home" ? "消费者首页" : view}` : `Current page: ${view}`}</span>
-      <span>{zh ? `默认批次 ${site.batch.defaultBatchId}` : `Default batch ${site.batch.defaultBatchId}`}</span>
+      <span>{zh ? `当前批次 ${batchId}` : `Current batch ${batchId}`}</span>
     </div>
   );
 }
@@ -227,6 +227,9 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   const lifecycleRevisionRef = useRef<number | undefined>(undefined);
   const flowSeqRef = useRef(0);
   const zh = locale === "zh";
+  const overviewSource = zh ? "批次总览 API" : "Batch overview API";
+  const lifecycleSource = zh ? "生命周期 API" : "Lifecycle API";
+  const chainSource = zh ? "链状态 API" : "Chain status API";
   const appendFlowEvent = useCallback((event: Omit<AgentFlowEvent, "id" | "at">) => {
     flowSeqRef.current += 1;
     const item: AgentFlowEvent = {
@@ -245,10 +248,29 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     setBatchId(nextBatch);
   }, [site]);
   useEffect(() => {
+    const syncFromUrl = () => {
+      const nextBatch = currentBatch(site);
+      setBatchId((previous) => {
+        if (previous === nextBatch) return previous;
+        setQuery(nextBatch);
+        setQuickPrompt(null);
+        setFlowEvents([]);
+        lifecycleRevisionRef.current = undefined;
+        return nextBatch;
+      });
+    };
+    window.addEventListener("popstate", syncFromUrl);
+    window.addEventListener("truthpass:batch-changed", syncFromUrl);
+    return () => {
+      window.removeEventListener("popstate", syncFromUrl);
+      window.removeEventListener("truthpass:batch-changed", syncFromUrl);
+    };
+  }, [site]);
+  useEffect(() => {
     let active = true;
     setOverview(null);
     appendFlowEvent({
-      source: "批次总览 API",
+      source: overviewSource,
       label: zh ? "请求批次总览" : "Requesting batch overview",
       detail: zh ? `正在读取 ${batchId} 的商品、证据、核验和购买状态。` : `Reading product, evidence, verification, and purchase state for ${batchId}.`,
       status: "active",
@@ -258,7 +280,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       if (!active) return;
       setOverview(next);
       appendFlowEvent({
-        source: "批次总览 API",
+        source: overviewSource,
         label: zh ? "批次总览已读取" : "Batch overview loaded",
         detail: zh
           ? `${next.product?.name ?? "商品"} · 核验 ${next.verification?.status ?? next.batch?.status ?? "待核验"} · ${next.evidence?.length ?? 0} 条证据。`
@@ -268,10 +290,21 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         evidenceCount: next.evidence?.length ?? 0,
         dataMode: next.dataMode ?? next.batch?.dataMode ?? "demo/synthetic",
       });
+      const chain = next.chainContext;
+      if (chain) {
+        appendFlowEvent({
+          source: chainSource,
+          label: zh ? "当前批次链状态已返回" : "Current batch chain state returned",
+          detail: `${chain.chainName} (${chain.chainId}) · ${chain.anchorStatus} · ${chain.rpcReachable ? (zh ? "RPC 可达" : "RPC reachable") : (zh ? "RPC 不可达" : "RPC unavailable")}${chain.transaction ? ` · ${zh ? "已有当前交易 receipt" : "current receipt available"}` : ` · ${zh ? "没有当前交易 receipt" : "no current receipt"}`}.`,
+          status: chain.rpcReachable ? "completed" : "unavailable",
+          batchId: chain.batchId ?? batchId,
+          dataMode: next.dataMode ?? next.batch?.dataMode ?? site.product.demoMode,
+        });
+      }
     }).catch((error: unknown) => {
       if (!active) return;
       appendFlowEvent({
-        source: "批次总览 API",
+        source: overviewSource,
         label: zh ? "批次总览读取失败" : "Batch overview failed",
         detail: error instanceof Error ? error.message : (zh ? "接口未返回批次总览。" : "The overview API did not return a batch."),
         status: "unavailable",
@@ -280,39 +313,6 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     });
     return () => { active = false; };
   }, [appendFlowEvent, batchId, zh]);
-
-  useEffect(() => {
-    let active = true;
-    appendFlowEvent({
-      source: "链状态 API",
-      label: zh ? "读取链状态" : "Reading chain status",
-      detail: zh ? `正在确认 Chain ${site.wallet.chainId} 的 RPC 和当前批次锚定状态。` : `Checking RPC and anchor state for Chain ${site.wallet.chainId}.`,
-      status: "active",
-      batchId,
-    });
-    void fetchChainStatus().then((chain) => {
-      if (!active) return;
-      const live = chain.liveRpc.reachable ? (zh ? "RPC 可达" : "RPC reachable") : (zh ? "RPC 不可达" : "RPC unavailable");
-      appendFlowEvent({
-        source: "链状态 API",
-        label: zh ? "链状态已返回" : "Chain status returned",
-        detail: `${chain.chainName} (${chain.chainId}) · ${live} · ${chain.sessionTransactions.length} ${zh ? "条会话交易" : "session transactions"}.`,
-        status: chain.liveRpc.reachable ? "completed" : "unavailable",
-        batchId,
-        dataMode: site.product.demoMode,
-      });
-    }).catch((error: unknown) => {
-      if (!active) return;
-      appendFlowEvent({
-        source: "链状态 API",
-        label: zh ? "链状态读取失败" : "Chain status failed",
-        detail: error instanceof Error ? error.message : (zh ? "链状态接口未返回。" : "The chain status API did not respond."),
-        status: "unavailable",
-        batchId,
-      });
-    });
-    return () => { active = false; };
-  }, [appendFlowEvent, batchId, site.product.demoMode, site.wallet.chainId, zh]);
 
   useEffect(() => {
     let active = true;
@@ -328,7 +328,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         setLifecycle(next);
         if (changed || firstRead) {
           appendFlowEvent({
-            source: "生命周期 API",
+            source: lifecycleSource,
             label: changed ? (zh ? "生命周期资料刚刚更新" : "Lifecycle data updated") : (zh ? "生命周期已读取" : "Lifecycle loaded"),
             detail: `${zh ? "上下文版本" : "Context revision"} v${next.contextRevision} · ${next.events.length} ${zh ? "个阶段" : "stages"} · ${next.nextAction === "complete" ? (zh ? "流程完成" : "complete") : `${zh ? "下一步" : "next"} ${next.nextAction}`}.`,
             status: "completed",
@@ -339,7 +339,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       } catch (error: unknown) {
         if (!active) return;
         appendFlowEvent({
-          source: "生命周期 API",
+          source: lifecycleSource,
           label: zh ? "生命周期读取失败" : "Lifecycle read failed",
           detail: error instanceof Error ? error.message : (zh ? "生命周期接口未返回。" : "The lifecycle API did not respond."),
           status: "unavailable",
@@ -462,7 +462,7 @@ export function TenantSitePage({ site, view = "home", locale = site.locale.defau
   return (
     <div className={`tenant-site-page ${locale === "zh" ? "tp-lang-zh" : "tp-lang-en"}`}>
       <SiteHeader site={site} view={view} locale={locale} />
-      <SiteStateBar site={site} locale={locale} view={view} />
+      <SiteStateBar site={site} locale={locale} view={view} batchId={currentBatch(site)} />
       {view === "home" && <TenantHome site={site} locale={locale} />}
       {view === "agent" && <TenantAgent site={site} locale={locale} />}
       {view === "wallet" && <TenantWallet site={site} locale={locale} />}

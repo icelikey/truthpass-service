@@ -2,27 +2,14 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMetricDetail, fetchProduct, fetchVerification } from "../api";
 import { ICON_URLS, METRIC_BAR_PCT } from "../data";
-import { useCountUp } from "../hooks/useCountUp";
 import type { KeyMetric, MetricSource, ProductBatch, ProductionPublicSummary, VerifyState } from "../types";
 import { useModal } from "./ModalContext";
 
-function parseMetricValue(value: string): { num: number | null; suffix: string; decimals: number } {
-  const m = value.match(/^([\d.]+)(.*)$/);
-  if (!m) return { num: null, suffix: value, decimals: 0 };
-  const decimals = m[1].match(/\.(\d+)/)?.[1]?.length ?? 0;
-  return { num: parseFloat(m[1]), suffix: m[2], decimals };
-}
-
 function AnimatedValue({ value }: { value: string }) {
-  const { num, suffix, decimals } = parseMetricValue(value);
-  const animated = useCountUp(num ?? 0, 1500);
-  if (num === null) return <>{value}</>;
-  return (
-    <>
-      {animated.toFixed(decimals)}
-      {suffix}
-    </>
-  );
+  // Evidence metrics are factual values. Do not expose an intermediate
+  // count-up frame that can be mistaken for the registered measurement.
+  // The surrounding bar still animates as a visual affordance.
+  return <>{value}</>;
 }
 
 function MetricSources({ sources, en = false }: { sources: MetricSource[]; en?: boolean }) {
@@ -34,7 +21,7 @@ function MetricSources({ sources, en = false }: { sources: MetricSource[]; en?: 
           <br />
           {en ? "Report: " : "报告编号："}{s.reportNo}
           <br />
-          PDF：{s.pdf}
+          {en ? "PDF: " : "PDF："}{s.pdf}
           <br />
           {en ? "Tested: " : "检测时间："}{s.time}
           <br />
@@ -56,7 +43,7 @@ function MetricDetailModal({ batchId, metricKey, label, value, en = false }: { b
         {en ? "Value: " : "数值："}<b style={{ color: "var(--cyan-2)" }}>{data?.value ?? value}</b>
         {data && (
           <>
-            {" "}· {en ? "Threshold: " : "门槛："}<b style={{ color: "var(--ok)" }}>{data.threshold}</b>
+            {" "}· {en ? "Current range: " : "当前规则范围："}<b style={{ color: "var(--ok)" }}>{data.threshold}</b>
           </>
         )}
       </p>
@@ -135,6 +122,7 @@ function MetricCard({ metric, batchId, en = false }: { metric: KeyMetric; batchI
         <span className="metric-bar-fill" style={{ width: `${barPct}%` } as CSSProperties} />
       </div>
       <div className="metric-unit">{metric.unit}</div>
+      {metric.rule && <div className="metric-rule">{en ? "Range: " : "当前范围："}{metric.rule}</div>}
     </div>
   );
 }
@@ -152,7 +140,7 @@ function RulesView({ batchId, en = false }: { batchId: string; en?: boolean }) {
         </div>
       ))}
       <p className={data?.status === "accepted" ? "rule-verdict" : "rule-verdict fail"}>
-        {en ? "Overall: " : "综合："}{data?.status === "accepted" ? (en ? "Accepted under current rules" : "按当前规则通过") : (en ? "Not accepted" : "未通过")} ({en ? "score" : "得分"} {data?.score}/100) · {en ? "evidence hash" : "证据哈希"} {data?.evidenceHash.slice(0, 16)}…
+         {en ? "Overall: " : "综合："}{data?.status === "accepted" ? (en ? "Within current rule range" : "在当前规则范围内") : (en ? "Needs review" : "需要复核")} ({en ? "coverage score" : "规则覆盖得分"} {data?.score}/100) · {en ? "evidence hash" : "证据哈希"} {data?.evidenceHash.slice(0, 16)}…
       </p>
     </>
   );
@@ -205,7 +193,7 @@ function BatchCompleteness({ product, en = false }: { product: ProductBatch; en?
   const process = product.productionProcess;
   const gaps: string[] = [];
   if (missing > 0) gaps.push(en ? `${missing} checks not covered` : `${missing} 项检测未覆盖`);
-  if (failed > 0) gaps.push(en ? `${failed} checks failed` : `${failed} 项未通过`);
+  if (failed > 0) gaps.push(en ? `${failed} checks need review` : `${failed} 项需要复核`);
   if (process.missingStages.length > 0) gaps.push(en ? `Stage gap: ${process.missingStages.join(", ")}` : `工序缺口：${process.missingStages.join("、")}`);
 
   return (
@@ -220,9 +208,9 @@ function BatchCompleteness({ product, en = false }: { product: ProductBatch; en?
             <strong>{passed}/{total} {en ? "passed" : "通过"}</strong>
           </div>
           <div className="completeness-list" style={{ marginTop: 8 }}>
-            <span className="ok">{en ? "Checks passed" : "检测通过"} {passed}</span>
+            <span className="ok">{en ? "Within current range" : "在当前范围内"} {passed}</span>
             {missing > 0 && <span className="partial">{en ? "Not covered" : "未覆盖"} {missing}</span>}
-            {failed > 0 && <span className="partial">{en ? "Failed" : "未通过"} {failed}</span>}
+            {failed > 0 && <span className="partial">{en ? "Needs review" : "需要复核"} {failed}</span>}
             <span className={process.status === "conformant" ? "ok" : "partial"}>
               {en ? "Stages" : "工序"} {process.observedStageCount}/{process.requiredStageCount}
             </span>
@@ -247,6 +235,36 @@ function BatchCompleteness({ product, en = false }: { product: ProductBatch; en?
         </div>
       )}
     </>
+  );
+}
+
+function ParameterLedger({ product, en = false }: { product: ProductBatch; en?: boolean }) {
+  const details = product.parameterDetails ?? [];
+  if (!details.length) return null;
+  return (
+    <details className="parameter-ledger">
+      <summary>{en ? "View parameter details" : "查看参数明细"}</summary>
+      <div className="parameter-ledger-grid" role="table" aria-label={en ? "Parameter details" : "参数明细"}>
+        <div className="parameter-ledger-row parameter-ledger-head" role="row">
+          <span>{en ? "Parameter" : "参数"}</span>
+          <span>{en ? "Observed" : "登记值"}</span>
+          <span>{en ? "Current range" : "当前规则范围"}</span>
+          <span>{en ? "State" : "状态"}</span>
+        </div>
+        {details.map((detail) => {
+          const state = detail.status === "within_range" ? (en ? "Within range" : "范围内") : detail.status === "outside_range" ? (en ? "Review" : "需复核") : (en ? "Missing" : "未登记");
+          return (
+            <div className="parameter-ledger-row" role="row" key={detail.key}>
+              <span>{detail.label}</span>
+              <span>{detail.observed === undefined ? (en ? "Not registered" : "未登记") : `${detail.observed} ${detail.unit}`}</span>
+              <span>{detail.rule}</span>
+              <span className={detail.status === "within_range" ? "ok" : "partial"}>{state}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="parameter-ledger-note">{en ? "The comparison describes registered evidence against the selected policy; it is not a quality or safety certification." : "这里比较的是登记资料与当前规则快照，不等同于商品质量或安全认证。"}</p>
+    </details>
   );
 }
 
@@ -349,7 +367,7 @@ export function ProductPanel({ state, batchId, locale = "zh" }: { state: VerifyS
               {(product.dataMode ?? "demo/synthetic") === "external" ? (en ? "External data" : "真实资料") : (en ? "Demo data" : "演示资料")}
             </span>
             <span className={`status-pill ${product.verification.status === "accepted" ? "verified" : product.verification.status === "rejected" ? "rejected" : "review"}`}>
-              {product.verification.status === "accepted" ? (en ? "Accepted under current rules" : "当前规则通过") : product.verification.status === "rejected" ? (en ? "Needs review" : "需要复核") : (en ? "Insufficient evidence" : "资料不足")}
+              {product.verification.status === "accepted" ? (en ? "Within current range" : "在当前规则范围内") : product.verification.status === "rejected" ? (en ? "Needs review" : "需要复核") : (en ? "Evidence incomplete" : "资料尚未完整")}
             </span>
           </div>
           <h2 className="product-name">{product.name}</h2>
@@ -393,17 +411,17 @@ export function ProductPanel({ state, batchId, locale = "zh" }: { state: VerifyS
       </div>
 
       <div className="verdict-wrap">
-        <button
-          className={product.verification.status === "rejected" ? "verdict fail" : "verdict"}
+          <button
+          className={product.verification.status === "rejected" ? "verdict fail" : product.verification.status === "review" ? "verdict review" : "verdict"}
           type="button"
           aria-label={en ? "View full acceptance rules and scoring" : "查看完整验收规则与得分说明"}
           onClick={() => openModal(en ? "Full acceptance rules (v1.0 · 9 checks)" : "完整验收规则（v1.0 · 9 项）", <RulesView batchId={batchId} en={en} />)}
           onMouseEnter={() => setTooltipVisible(true)}
           onMouseLeave={() => setTooltipVisible(false)}
         >
-          <span className="verdict-icon">{product.verification.status === "rejected" ? "✗" : "✓"}</span>
+          <span className="verdict-icon">{product.verification.status === "rejected" ? "✗" : product.verification.status === "review" ? "!" : "✓"}</span>
           <span className="verdict-text">
-            <strong>{product.verification.status === "rejected" ? (en ? "Acceptance failed" : "未通过验收") : (en ? "Accepted under current rules" : "按当前规则通过")}</strong>
+            <strong>{product.verification.status === "rejected" ? (en ? "Do not recommend" : "暂不推荐") : product.verification.status === "review" ? (en ? "Review missing evidence" : "资料需要复核") : (en ? "Within the current rule range" : "在当前规则范围内")}</strong>
             <small>{product.verification.summary}</small>
           </span>
           <span className="verdict-chevron">›</span>
@@ -422,6 +440,7 @@ export function ProductPanel({ state, batchId, locale = "zh" }: { state: VerifyS
           <MetricCard key={metric.key} metric={metric} batchId={batchId} en={en} />
         ))}
       </div>
+      <ParameterLedger product={product} en={en} />
 
       <ProductionProcess process={product.productionProcess} en={en} />
 

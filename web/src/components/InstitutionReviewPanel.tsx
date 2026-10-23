@@ -78,7 +78,7 @@ export function InstitutionReviewPanel({ locale = "zh", tenant }: { locale?: "zh
   return (
     <main className="institution-shell">
       <header className="institution-header">
-        <a href={tenantHome} className="institution-brand">TRUTH<span>PASS</span></a>
+        <a href={`${tenantHome}?batch=${encodeURIComponent(batchId)}`} className="institution-brand">TRUTH<span>PASS</span></a>
         <div><span className="eyebrow">INSTITUTION REVIEW</span><h1>{en ? "Review one batch. Keep every decision traceable." : "一批一查，出了问题找得到。"}</h1><p>{en ? "Inspection, review, and arbitration each leave a record. The agent organizes evidence; the assigned wallet confirms it." : "检测、审核、仲裁各自留下记录。Agent 只整理依据，最终确认由对应钱包完成。"}</p></div>
         <div className="institution-header-actions"><a className="institution-language" href={tenantLocaleHref}>{en ? "中文" : "English"}</a><a className="institution-language" href={tenantInstitution}>{en ? "Current site" : "当前站点"}</a><button type="button" className="merchant-secondary" onClick={() => setWalletModalOpen(true)}>{address ? `${walletName ?? (en ? "Wallet" : "钱包")} · ${shortHex(address)}` : (en ? "Open institution wallet" : "打开机构钱包")}</button></div>
       </header>

@@ -25,7 +25,7 @@ function buildReportHtml(
     .map((key) => {
       const m = metricFor(product, key);
       if (!m) return "";
-      const verdict = m.status === "pass" ? "达标" : m.status === "fail" ? "超标" : "未覆盖";
+      const verdict = m.status === "pass" ? "在当前范围内" : m.status === "fail" ? "需要复核" : "未覆盖";
       const cls = m.status === "pass" ? "ok" : m.status === "fail" ? "fail" : "muted";
       return `<tr><td>${m.label}</td><td>${m.value}</td><td>${m.unit}</td><td class="${cls}">${verdict}</td></tr>`;
     })
@@ -55,12 +55,12 @@ th{background:#eef5f6;color:#0b3d4c}
 <h1>TruthPass 检测报告</h1>
 <p class="meta">批次号：${product.batchId}　商品：${product.name}</p>
 <p class="meta">产地：${product.origin}　生产日期：${product.productionDate}</p>
-<p class="meta">验收结论：<strong class="${verification.status === "accepted" ? "ok" : "fail"}">${verification.status === "accepted" ? "通过验收" : "未通过验收"}</strong>（得分 ${verification.score}/100）</p>
+<p class="meta">参数范围结论：<strong class="${verification.status === "accepted" ? "ok" : "fail"}">${verification.status === "accepted" ? "在当前规则范围内" : "需要复核"}</strong>（规则覆盖得分 ${verification.score}/100）</p>
 <h2>检测项目</h2>
 <table><thead><tr><th>检测项</th><th>检测结果</th><th>单位</th><th>判定</th></tr></thead><tbody>${rows}</tbody></table>
 <h2>验收规则</h2>
 <table><thead><tr><th>规则</th><th>说明</th><th>结果</th></tr></thead><tbody>
-${verification.rules.map((r) => `<tr><td>${r.name}</td><td>${r.desc}</td><td class="${r.passed ? "ok" : "fail"}">${r.passed ? "通过" : "不通过"}</td></tr>`).join("")}
+${verification.rules.map((r) => `<tr><td>${r.name}</td><td>${r.desc}</td><td class="${r.passed ? "ok" : "fail"}">${r.passed ? "在当前范围内" : "需要复核"}</td></tr>`).join("")}
 </tbody></table>
 <p class="foot">证据哈希：${verification.evidenceHash}<br/>生成时间：${now}<br/>本报告为 demo/synthetic 演示数据，不作为真实供应链证明。</p>
 </body>

@@ -55,11 +55,17 @@ export default function App() {
   const tenantBatchQuery = new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase() || "";
   const tenantBatchPrefix = tenantSite?.batch.defaultBatchId.split("-")[0];
   const tenantActiveBatch = tenantSite && tenantBatchQuery.startsWith(`${tenantBatchPrefix}-`) ? tenantBatchQuery : tenantSite?.batch.defaultBatchId ?? null;
-  const isMerchantRoute = pathname.startsWith("/merchant");
+  const isMerchantRoute = pathname === "/merchant" || pathname === "/en/merchant";
   const isInstitutionRoute = pathname === "/institution" || pathname === "/en/institution";
-  const isConsumerView = new URLSearchParams(window.location.search).get("view") === "consumer";
+  const queryParams = new URLSearchParams(window.location.search);
+  // A QR/deep link normally carries only `?batch=...`. Treat that as the
+  // focused consumer experience as well, otherwise a user who scans a batch
+  // code without the legacy `view=consumer` flag falls back to the old
+  // technical console. Explicit `view=console` remains available for the
+  // internal legacy surface.
+  const isConsumerView = queryParams.get("view") === "consumer" || (queryParams.has("batch") && queryParams.get("view") !== "console");
   const authRequested = new URLSearchParams(window.location.search).get("auth") === "1";
-  const isPublicPageRoute = ["/", "/developers", "/en", "/en/merchant", "/en/developers", "/design-preview", "/cases/rice", "/en/cases/rice"].includes(pathname)
+  const isPublicPageRoute = ["/", "/developers", "/en", "/en/developers", "/design-preview", "/cases/rice", "/en/cases/rice"].includes(pathname)
     && !authRequested
     && !((pathname === "/" || pathname === "/en") && isConsumerView);
 
@@ -107,7 +113,7 @@ export default function App() {
             details: {
               origin: product.origin,
               productionDate: product.productionDate,
-              verdict: verification.status === "accepted" ? "通过验收" : "未通过验收",
+              verdict: verification.status === "accepted" ? "在当前规则范围内" : "需要复核",
               score: verification.score,
               evidenceHash: verification.evidenceHash,
               metrics: product.keyMetrics.map((m) => ({
@@ -139,9 +145,14 @@ export default function App() {
     if (pathname === "/cases/rice" || pathname === "/en/cases/rice") {
       const legacySite = getTenantSite("rice-demo")!;
       const legacyLocale = pathname.startsWith("/en/") ? "en" : "zh";
+      const legacyBatchCandidate = new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase() || "";
+      const legacyPrefix = legacySite.batch.defaultBatchId.split("-")[0];
+      const legacyBatch = legacyBatchCandidate.startsWith(`${legacyPrefix}-`)
+        ? legacyBatchCandidate
+        : legacySite.batch.defaultBatchId;
       return (
         <ModalProvider>
-          <WalletProvider activeBatchId={legacySite.batch.defaultBatchId} onToast={showToast} locale={legacyLocale}>
+          <WalletProvider activeBatchId={legacyBatch} onToast={showToast} locale={legacyLocale}>
             <TenantSitePage site={legacySite} view="home" locale={legacyLocale} />
             {toast && <div className="toast" role="status">{toast}</div>}
           </WalletProvider>
@@ -248,8 +259,8 @@ export default function App() {
         />
         <Hero />
         <CliReferencePanel />
-        <ConsumerFlowBar stage={consumerStage} batchId={batchId} />
-        <ConsumerActionDock stage={consumerStage} batchId={batchId} />
+        <ConsumerFlowBar stage={consumerStage} batchId={batchId} locale={pathname === "/en" ? "en" : "zh"} />
+        <ConsumerActionDock stage={consumerStage} batchId={batchId} locale={pathname === "/en" ? "en" : "zh"} />
         <main className={inQueryMode ? "layout" : "assistant-only"}>
           <ChatPanel
             onStart={() => {

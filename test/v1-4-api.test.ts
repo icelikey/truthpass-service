@@ -48,6 +48,121 @@ test("integrated API exposes a grounded CLI explanation endpoint", async () => {
   });
 });
 
+test("public product views expose parameter values and rule ranges instead of a single quality verdict", async () => {
+  await withServer(async (baseUrl) => {
+    const productResponse = await fetch(`${baseUrl}/api/products/FO-2026-009`);
+    const product = await productResponse.json() as Record<string, any>;
+    assert.equal(productResponse.status, 200);
+    assert.ok(Array.isArray(product.parameterDetails));
+    const epa = product.parameterDetails.find((item: Record<string, unknown>) => item.key === "epa-dha");
+    assert.equal(epa.observed, 55);
+    assert.equal(epa.rule, "≥ 70%");
+    assert.equal(epa.status, "outside_range");
+    assert.match(product.verification.summary, /EPA\+DHA 55%/);
+    assert.doesNotMatch(product.verification.summary, /未达到标准/);
+
+    const overviewResponse = await fetch(`${baseUrl}/api/public/batches/FO-2026-009/overview`);
+    const overview = await overviewResponse.json() as Record<string, any>;
+    assert.equal(overviewResponse.status, 200);
+    assert.equal(overview.batch.batchId, "FO-2026-009");
+    assert.ok(Array.isArray(overview.parameterDetails));
+    assert.equal(overview.parameterDetails.find((item: Record<string, unknown>) => item.key === "peroxide").observed, 2.5);
+    const pendingChainEvidence = overview.evidence.find((item: Record<string, unknown>) => item.icon === "chain");
+    assert.equal(pendingChainEvidence.status, "anchor_pending");
+    assert.equal(pendingChainEvidence.explorerUrl, undefined);
+    assert.match(String(pendingChainEvidence.description), /没有.*真实 receipt/);
+    assert.match(String(overview.verification.reasons?.[0]), /EPA\+DHA 实测 55%/);
+
+    const historicalResponse = await fetch(`${baseUrl}/api/public/batches/FO-2026-001/overview`);
+    const historical = await historicalResponse.json() as Record<string, any>;
+    assert.equal(historical.batch.status, "review");
+    assert.equal(historical.batch.parameterStatus, "accepted");
+    assert.equal(historical.verification.status, "review");
+    assert.match(String(historical.verification.reasons?.[0]), /浓缩|脱臭|灌装|包装|仓储/);
+
+    const primaryProductResponse = await fetch(`${baseUrl}/api/products/FO-2026-001`);
+    const primaryProduct = await primaryProductResponse.json() as Record<string, any>;
+    assert.equal(primaryProductResponse.status, 200);
+    // The product view and the public overview must describe the same fixture
+    // batch, even when the repository contains a separately seeded record.
+    assert.equal(primaryProduct.name, historical.product.name);
+    assert.equal(primaryProduct.productionDate, historical.product.productionDate);
+    assert.equal(primaryProduct.dataMode, historical.dataMode);
+    assert.equal(primaryProduct.dataSource, "fixtures");
+    const historicalChainEvidence = historical.evidence.find((item: Record<string, unknown>) => item.icon === "chain");
+    assert.equal(historicalChainEvidence.status, "replay_verified");
+    assert.match(String(historicalChainEvidence.description), /历史回放/);
+  });
+});
+
+test("verification endpoint stays batch-scoped and exposes concrete gate reasons", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/verification?batchId=FO-2026-009`);
+    const body = await response.json() as Record<string, any>;
+    assert.equal(response.status, 200);
+    assert.equal(body.batchId, "FO-2026-009");
+    assert.equal(body.status, "rejected");
+    assert.match(String(body.reasons?.[0]), /EPA\+DHA 实测 55%/);
+    assert.ok(Array.isArray(body.parameterDetails));
+    assert.equal(body.productionProcess.dataMode, "demo/synthetic");
+
+    const unknownResponse = await fetch(`${baseUrl}/api/verification?batchId=UNKNOWN-2026-001`);
+    const unknown = await unknownResponse.json() as Record<string, any>;
+    assert.equal(unknownResponse.status, 404);
+    assert.equal(unknown.error, "unknown_batch");
+
+    const unknownObserverResponse = await fetch(`${baseUrl}/api/observer?batchId=UNKNOWN-2026-001`);
+    const unknownObserver = await unknownObserverResponse.json() as Record<string, any>;
+    assert.equal(unknownObserverResponse.status, 404);
+    assert.equal(unknownObserver.error, "unknown_batch");
+  });
+});
+
+test("recommendation output is scoped to registered production parameters", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/recommend?batchId=FO-2026-009`);
+    const items = await response.json() as Array<Record<string, any>>;
+    assert.equal(response.status, 200);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].batchId, "FO-2026-009");
+    assert.equal(items[0].recommendationStatus, "do_not_recommend");
+    assert.match(items[0].reason, /EPA\+DHA 55%/);
+    assert.ok(Array.isArray(items[0].productionEvidence.stages));
+    assert.ok(Array.isArray(items[0].parameterDetails));
+    assert.equal(items[0].dataMode, "demo/synthetic");
+
+    const contractResponse = await fetch(`${baseUrl}/api/recommendation?batchId=FO-2026-009`);
+    const contract = await contractResponse.json() as Record<string, any>;
+    assert.equal(contractResponse.status, 200);
+    assert.equal(contract.schemaVersion, "truthpass.recommendation.v1");
+    assert.equal(contract.batchId, "FO-2026-009");
+    assert.equal(contract.recommendationStatus, "do_not_recommend");
+    assert.equal(contract.verificationStatus, "rejected");
+    assert.ok(Array.isArray(contract.evidenceIds));
+    assert.match(contract.traceId, /^0x[0-9a-f]{64}$/);
+
+    const partialResponse = await fetch(`${baseUrl}/api/recommendation?batchId=FO-2026-001`);
+    const partial = await partialResponse.json() as Record<string, any>;
+    assert.equal(partialResponse.status, 200);
+    assert.equal(partial.recommendationStatus, "review_before_recommendation");
+    assert.equal(partial.verificationStatus, "review");
+    assert.ok(partial.missingItems.some((item: string) => item.includes("浓缩")));
+
+    const legacyPartialResponse = await fetch(`${baseUrl}/api/recommend?batchId=FO-2026-001`);
+    const legacyPartial = await legacyPartialResponse.json() as Array<Record<string, any>>;
+    assert.equal(legacyPartialResponse.status, 200);
+    assert.equal(legacyPartial[0].recommendationStatus, "review_before_recommendation");
+
+    const riceResponse = await fetch(`${baseUrl}/api/recommendation?batchId=RC-2026-001`);
+    const rice = await riceResponse.json() as Record<string, any>;
+    assert.equal(riceResponse.status, 200);
+    assert.equal(rice.batchId, "RC-2026-001");
+    assert.equal(rice.tenantId, "tenant-rice-demo");
+    assert.equal(rice.productId, "rice-wuchang");
+    assert.equal(rice.dataMode, "demo/synthetic");
+  });
+});
+
 test("integrated wallet preparation binds consumer actions to the public gateway and escrow", async () => {
   await withServer(async (baseUrl) => {
     const wallet = "0x3333333333333333333333333333333333333333";
@@ -207,5 +322,38 @@ test("customer service rate limits repeated session requests", async () => {
       await response.text();
     }
     assert.equal(lastStatus, 429);
+  });
+});
+
+test("customer service caps concurrent Agent runs at ten and releases slots", async () => {
+  await withServer(async (baseUrl) => {
+    const responses = await Promise.all(Array.from({ length: 12 }, (_, index) => fetch(baseUrl + "/api/agent/chat", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": `198.51.100.${100 + index}`,
+        "x-truthpass-session": `concurrency-test-${index}`,
+      },
+      body: JSON.stringify({
+        batchId: "FO-2026-001",
+        messages: [{ role: "user", content: "检测结果怎么看？" }],
+      }),
+    }).then(async (response) => ({ status: response.status, body: await response.text() }))));
+
+    const limited = responses.filter((response) => response.status === 429);
+    assert.ok(limited.length >= 1, "超过十个并发请求时应返回 429");
+    assert.ok(responses.some((response) => response.status === 200));
+    const limitedBody = limited[0]?.body ?? "";
+    assert.match(limitedBody, /AGENT_CONCURRENCY_LIMITED|agent_concurrency_limit/);
+
+    // All accepted requests must finish before the server closes. A follow-up
+    // request proves finally{} released every slot after the first burst.
+    const followUp = await fetch(baseUrl + "/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-session": "concurrency-follow-up" },
+      body: JSON.stringify({ batchId: "FO-2026-001", messages: [{ role: "user", content: "还缺什么资料？" }] }),
+    });
+    assert.equal(followUp.status, 200);
+    await followUp.text();
   });
 });

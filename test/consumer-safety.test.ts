@@ -22,6 +22,20 @@ test("consumer safety accepts a cited four-field JSON answer", () => {
   assert.deepEqual(result.citations, ["FO-2026-001:inspection", "FO-2026-001:cold-chain"]);
 });
 
+test("consumer safety preserves English labels for English model output", () => {
+  const result = validateConsumerModelOutput(JSON.stringify({
+    conclusion: "These records can be reviewed further.",
+    evidence: "Inspection and cold-chain records are registered.",
+    uncertainty: "The current data is demo/synthetic.",
+    nextAction: "Open the evidence card to review the sources.",
+    citations: ["FO-2026-001:inspection", "FO-2026-001:cold-chain"],
+  }), { ...baseContract, locale: "en" });
+  assert.equal(result.status, "accepted");
+  assert.match(result.text ?? "", /^Conclusion：/);
+  assert.match(result.text ?? "", /Evidence：/);
+  assert.doesNotMatch(result.text ?? "", /结论：|依据：|不确定：|下一步：/);
+});
+
 test("consumer safety rejects cross-batch citations and fabricated numbers", () => {
   const result = validateConsumerModelOutput(JSON.stringify({
     conclusion: "FO-2026-002 的型号是 X-99。",

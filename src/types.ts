@@ -90,6 +90,19 @@ export interface ProductBatchAssessment {
   score: number;
   checks: Record<string, boolean>;
   reasons: string[];
+  /** Machine-readable parameter comparison. A failed comparison is not a
+   * product certification claim; it only describes the registered value
+   * against the selected policy snapshot. */
+  parameterDetails?: Array<{
+    key: string;
+    label: string;
+    observed?: number;
+    unit: string;
+    operator: ">=" | "<=";
+    target: number;
+    status: "within_range" | "outside_range" | "missing";
+    difference?: number;
+  }>;
   evidenceHash: string;
 }
 
@@ -113,6 +126,54 @@ export interface FeedbackRecord {
   evidenceHash: string;
   createdAt: string;
   revoked: boolean;
+}
+
+/** Two-phase consumer feedback API payloads. Preparation never creates a
+ * successful feedback record; confirmation must carry the same purchase
+ * receipt context back to the server. */
+export interface FeedbackPrepareRequest {
+  batchId: string;
+  purchaseId: string;
+  purchaseTxHash: string;
+  walletAddress?: string;
+  rating: number;
+  categories: string[];
+  comment?: string;
+  consent: true;
+  purchaseConfirmed: true;
+  dataMode?: DataMode;
+}
+
+export interface FeedbackPrepareResponse {
+  schemaVersion: "truthpass.feedback.prepare.v1";
+  status: "pending_confirmation";
+  prepareId: string;
+  batchId: string;
+  purchaseId: string;
+  purchaseTxHash: string;
+  feedbackHash: string;
+  expiresAt: string;
+  purchaseReceiptStatus: "mainnet_receipt_verified" | "pending_or_unverified";
+  dataMode: DataMode;
+}
+
+export interface FeedbackConfirmRequest extends FeedbackPrepareRequest {
+  prepareId: string;
+  contributionTxHash?: string;
+  contributionId?: string;
+  feedbackHash?: string;
+}
+
+export interface FeedbackConfirmResponse {
+  schemaVersion: "truthpass.feedback.confirm.v1";
+  ok: true;
+  status: "feedback_confirmed";
+  feedbackId: string;
+  purchaseId: string;
+  purchaseTxHash: string;
+  contributionTxHash?: string;
+  evidenceHash: string;
+  dataMode: DataMode;
 }
 
 export interface ServiceAdapter {

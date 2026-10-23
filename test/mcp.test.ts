@@ -38,6 +38,17 @@ test("MCP exposes read-only tools with JSON-RPC tracing and CORS", async () => {
     assert.equal(inspectedBody.result.structuredContent.batchId, "FO-2026-001");
     assert.equal(inspectedBody.result.structuredContent.dataMode, "demo/synthetic");
     assert.equal(inspectedBody.result._meta.traceId, "mcp-test-002");
+
+    const fixtureInspected = await fetch(`${baseUrl}/api/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-request-id": "mcp-test-003" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "inspect-fixture", method: "tools/call", params: { name: "truthpass.inspect_batch", arguments: { batchId: "FO-2026-009" } } }),
+    });
+    const fixtureBody = await fixtureInspected.json() as Record<string, any>;
+    const evidence = fixtureBody.result.structuredContent.verification.evidence as Array<Record<string, unknown>>;
+    assert.ok(evidence.length >= 1);
+    assert.ok(evidence.every((item) => String(item.evidenceId).startsWith("FO-2026-009:evidence:")));
+    assert.ok(evidence.every((item) => item.dataMode === "demo/synthetic"));
   });
 });
 test("MCP keeps protected operations pending confirmation and rejects invalid batches", async () => {

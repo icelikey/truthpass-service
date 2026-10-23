@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-export type AgentFlowSource = "Agent SSE" | "批次总览 API" | "生命周期 API" | "链状态 API";
+/**
+ * Sources are rendered in the user's locale. Keep the well-known Chinese
+ * labels for backwards compatibility, while allowing the equivalent English
+ * labels emitted by the English consumer page.
+ */
+export type AgentFlowSource =
+  | "Agent SSE"
+  | "Agent stream"
+  | "批次总览 API"
+  | "Batch overview API"
+  | "生命周期 API"
+  | "Lifecycle API"
+  | "链状态 API"
+  | "Chain status API";
 export type AgentFlowStatus = "pending" | "active" | "completed" | "fallback" | "unavailable" | "info";
 
 export interface AgentFlowEvent {
@@ -54,6 +67,24 @@ export function AgentDataFlowRail({
   const logRef = useRef<HTMLDivElement | null>(null);
   const [follow, setFollow] = useState(true);
 
+  // Lifecycle polling can append an event after the SSE stream has finished.
+  // Derive completion from the current run history instead of only looking at
+  // the latest row, otherwise the heading regresses to "following" on the
+  // next poll even though the Agent already returned an answer. Conversely,
+  // scope the check to the latest start event so a second question for the
+  // same batch does not inherit the previous run's completed state.
+  const startMarkers = events.map((event) => event.label === (zh ? "Agent 开始运行" : "Agent run started"));
+  const latestStartIndex = startMarkers.lastIndexOf(true);
+  const currentRunEvents = latestStartIndex >= 0 ? events.slice(latestStartIndex) : events;
+  const runComplete = currentRunEvents.some((event) =>
+    event.label === (zh ? "Agent 运行结束" : "Agent run finished")
+      || event.label === (zh ? "生命周期读取失败" : "Lifecycle read failed")
+      || event.label === (zh ? "批次总览读取失败" : "Batch overview failed"),
+  );
+  const runHeading = runComplete
+    ? (zh ? "本次查询已返回" : "This run has returned")
+    : (zh ? "正在查这批资料" : "Following this batch");
+
   useEffect(() => {
     if (!follow || !logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -64,7 +95,7 @@ export function AgentDataFlowRail({
       <div className="agent-data-flow-head">
         <div>
           <span className="tp-kicker">{zh ? "运行现场 · API 数据流" : "RUN TRACE · API DATA FLOW"}</span>
-          <h2>{zh ? "正在查这批资料" : "Following this batch"}</h2>
+          <h2>{runHeading}</h2>
           <p>{zh ? "每一条记录都来自 SSE 或公开 API；没有事件就不会显示结果。" : "Every row comes from SSE or a public API; no event is shown without a source."}</p>
         </div>
         <div className="agent-data-flow-actions">

@@ -8,6 +8,7 @@ import {
   ChainNetworkMismatchError,
   buildRecordVerificationTransaction,
   buildConsumerGatewayPurchaseTransaction,
+  buildPaidConsumerGatewayPurchaseTransaction,
   buildConsumerGatewayContributionTransaction,
   buildConsumerGatewayDisputeTransaction,
   buildAuditEscrowOpenChallengeTransaction,
@@ -166,6 +167,22 @@ test("consumer gateway calldata targets the public self-service gateway", () => 
   assert.equal(contribution.data.slice(0, 10), CONSUMER_GATEWAY_CONTRIBUTION_SELECTOR);
   assert.equal(dispute.data.slice(0, 10), CONSUMER_GATEWAY_DISPUTE_SELECTOR);
   assert.equal(purchase.chainId, 677);
+});
+
+test("paid consumer gateway calldata carries the explicit BOT amount", () => {
+  const config = getBotChainConfig("mainnet", { contractAddress: ADDRESS });
+  const purchase = buildPaidConsumerGatewayPurchaseTransaction({
+    purchaseId: REQUEST,
+    batchCommitment: ROOT,
+    purchaseProofHash: SCHEMA,
+    consentHash: SOURCE,
+    gatewayAddress: ADDRESS,
+    priceWei: "1000000000000000",
+  }, config);
+  assert.equal(purchase.to, ADDRESS);
+  assert.equal(purchase.value, "0x38d7ea4c68000");
+  assert.equal(purchase.chainId, 677);
+  assert.notEqual(purchase.data.slice(0, 10), CONSUMER_GATEWAY_PURCHASE_SELECTOR);
 });
 
 test("audit escrow calldata carries challenge stake and distinct agent/verifier actions", () => {

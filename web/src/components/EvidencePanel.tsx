@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchCliInspect, fetchEvidenceLink, fetchJourney } from "../api";
+import { fetchBatchOverview, fetchCliInspect, fetchEvidenceLink, fetchJourney } from "../api";
 import { ICON_URLS } from "../data";
 import { useWallet } from "./WalletContext";
 import { shortHex } from "../lib/wallet";
@@ -40,6 +40,11 @@ export function EvidencePanel({ state, batchId, focusTech = false, locale = "zh"
     queryFn: () => fetchCliInspect(batchId),
     enabled: state === "done",
   });
+  const { data: overview, isError: overviewError } = useQuery({
+    queryKey: ["batch-overview", batchId],
+    queryFn: () => fetchBatchOverview(batchId),
+    enabled: state === "done",
+  });
   const [showTech, setShowTech] = useState(false);
   const [techView, setTechView] = useState<"inspect" | "envelope" | "assessment" | "anchor">("inspect");
 
@@ -68,6 +73,15 @@ export function EvidencePanel({ state, batchId, focusTech = false, locale = "zh"
   const incomplete = stages.filter((s) => s.status !== "completed");
   const evidenceItems = cliInspect?.verification.evidence ?? [];
   const anchorStatus = cliInspect?.verification.anchor.status;
+  // Keep the public summary pending until the canonical batch overview is
+  // loaded. Falling back to CLI inspection immediately can briefly show an
+  // older status (for example accepted) while the overview correctly says
+  // review, which is confusing on a trust-facing page.
+  const publicVerificationStatus = overview
+    ? (overview.verification?.status ?? overview.batch?.status)
+    : overviewError
+      ? cliInspect?.verification.status
+      : undefined;
   const modeFromEvidence = evidenceItems.find((item) => item.dataMode)?.dataMode;
   const modeLabel = modeFromEvidence ?? "demo/synthetic";
 
@@ -81,8 +95,8 @@ export function EvidencePanel({ state, batchId, focusTech = false, locale = "zh"
       <div className="evidence-summary" aria-label={en ? "Evidence completeness and status" : "证据完整度与状态"}>
         <div className="evidence-summary-row">
           <span>{en ? "Acceptance" : "验收状态"}</span>
-          <span className={`status-pill ${cliInspect?.verification.status === "accepted" ? "verified" : cliInspect?.verification.status === "rejected" ? "rejected" : "review"}`}>
-            {cliInspect?.verification.status ?? "loading"}
+          <span className={`status-pill ${publicVerificationStatus === "accepted" ? "verified" : publicVerificationStatus === "rejected" ? "rejected" : "review"}`}>
+            {publicVerificationStatus ?? "loading"}
           </span>
         </div>
         <div className="evidence-summary-row">

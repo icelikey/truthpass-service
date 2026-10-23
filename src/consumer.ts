@@ -29,6 +29,8 @@ export interface ConsumerFeedback {
   rating: number;
   categories: string[];
   evidenceHash: string;
+  /** Whether the bound evidence came from a real external receipt or demo data. */
+  dataMode: "demo/synthetic" | "external";
   createdAt: string;
   contributionPoints: number;
 }
@@ -55,12 +57,12 @@ export class ConsumerParticipationRegistry {
     return true;
   }
 
-  async recordPurchase(input: Omit<PurchaseRecord, "purchaseId">): Promise<PurchaseRecord> {
+  async recordPurchase(input: Omit<PurchaseRecord, "purchaseId"> & { purchaseId?: string }): Promise<PurchaseRecord> {
     const consent = this.consents.get(`${input.consumerId}:${input.batchId}`);
     if (!consent) throw new Error("消费者尚未授权该批次的最小反馈范围");
     if (consent.revokedAt) throw new Error("消费者授权已撤销");
     if (consent.expiresAt && Date.parse(consent.expiresAt) <= Date.parse(input.createdAt)) throw new Error("消费者授权已过期");
-    const purchaseId = await sha256Hex(`${input.consumerId}:${input.batchId}:${input.purchaseProofHash}`);
+    const purchaseId = input.purchaseId?.trim() || await sha256Hex(`${input.consumerId}:${input.batchId}:${input.purchaseProofHash}`);
     const existing = this.purchases.get(purchaseId);
     if (existing) {
       if (existing.consumerId !== input.consumerId || existing.batchId !== input.batchId || existing.purchaseProofHash !== input.purchaseProofHash) {
@@ -89,6 +91,11 @@ export class ConsumerParticipationRegistry {
     const evidenceHash = await sha256Hex(canonicalizeJson(input.evidence));
     const feedbackId = await sha256Hex(`${input.purchaseId}:${evidenceHash}`);
     const contributionPoints = Math.min(20, 5 + input.categories.length * 3);
+    const dataMode = input.evidence.dataMode === "demo/synthetic"
+      ? "demo/synthetic"
+      : input.evidence.dataMode === "external" || input.evidence.source === "verified_purchase_receipt"
+        ? "external"
+        : "demo/synthetic";
     const feedback: ConsumerFeedback = {
       feedbackId,
       purchaseId: purchase.purchaseId,
@@ -97,6 +104,7 @@ export class ConsumerParticipationRegistry {
       rating: input.rating,
       categories: input.categories,
       evidenceHash,
+      dataMode,
       createdAt,
       contributionPoints,
     };

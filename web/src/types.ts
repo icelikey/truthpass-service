@@ -6,6 +6,8 @@ export interface KeyMetric {
   label: string;
   value: string;
   unit: string;
+  /** Human-readable comparison shown beside the observed value. */
+  rule?: string;
   bar: number;
   status: "pass" | "missing" | "fail";
 }
@@ -36,15 +38,25 @@ export interface ProductBatch {
   supplyChainTags: string[];
   imageUrl: string;
   verification: {
-    status: "accepted" | "partial" | "rejected";
+    status: "accepted" | "partial" | "review" | "rejected";
     summary: string;
     scope: string;
   };
+  parameterDetails?: Array<{
+    key: string;
+    label: string;
+    observed?: number;
+    unit: string;
+    rule: string;
+    status: "within_range" | "outside_range" | "missing";
+    difference?: number;
+  }>;
   keyMetrics: KeyMetric[];
   productionProcess: ProductionPublicSummary;
 }
 
 export interface EvidenceStep {
+  evidenceId?: string;
   step: number;
   icon: string;
   title: string;
@@ -52,6 +64,9 @@ export interface EvidenceStep {
   description: string;
   hash: string;
   verifiedAt: string;
+  status?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified";
+  batchId?: string;
+  dataMode?: "demo/synthetic" | "external";
 }
 
 export interface JourneyStep {
@@ -88,6 +103,8 @@ export interface MetricDetail {
   value: string;
   unit: string;
   threshold: string;
+  rule?: string;
+  status?: "pass" | "missing" | "fail";
   sources: MetricSource[];
   heavyMetals?: HeavyMetalItem[];
 }
@@ -116,6 +133,8 @@ export interface ChatEvent {
   kind: "begin" | "meta" | "line" | "stage" | "answer" | "done" | AgentStreamStage;
   stage?: AgentStreamStage;
   stages?: AgentStreamStage[];
+  stageStatuses?: Partial<Record<AgentStreamStage, "pending" | "active" | "completed" | "fallback" | "unavailable">>;
+  stageDetails?: Partial<Record<AgentStreamStage, string>>;
   validationStatus?: string;
   validationReasons?: string[];
   citationStatus?: string;
@@ -174,7 +193,14 @@ export interface RecommendItem {
   peroxide: number;
   coldGap: number;
   reason: string;
+  recommendationStatus?: "recommend_with_scope" | "review_before_recommendation" | "do_not_recommend";
   expertise?: string;
+  nextAction?: string;
+  missingItems?: string[];
+  conflicts?: string[];
+  traceId?: string;
+  productionEvidence?: ProductionPublicSummary;
+  parameterDetails?: Array<{ key: string; label: string; observed?: number; unit: string; rule: string; status: "within_range" | "outside_range" | "missing"; difference?: number }>;
   imageUrl?: string;
   dataMode?: "demo/synthetic" | "external";
   evidence?: {
@@ -201,6 +227,7 @@ export interface OrderCard {
   imageUrl?: string;
   txHash?: string;
   explorerUrl?: string;
+  purchaseQuote?: PublicBatchOverview["purchaseQuote"];
 }
 
 export type VerifyState = "idle" | "running" | "done";
@@ -261,6 +288,7 @@ export interface SessionChainTx {
   mode?: "wallet_broadcast";
   receiptStatus?: string;
   eventVerified?: boolean;
+  ids?: Record<string, string>;
   createdAt: string;
 }
 
@@ -336,12 +364,18 @@ export interface PublicBatchOverview {
   schemaVersion?: string;
   tenant?: { tenantId?: string; slug?: string; brand?: { name?: string } | null };
   product?: { productId?: string; name?: string; category?: string; dataMode?: "demo/synthetic" | "external" };
-  batch?: { batchId?: string; dataMode?: "demo/synthetic" | "external"; status?: string };
+  batch?: { batchId?: string; dataMode?: "demo/synthetic" | "external"; status?: string; parameterStatus?: string };
   lifecycle?: LifecycleView;
   evidence?: Array<{ evidenceId?: string; kind?: string; sourceKind?: string; dataMode?: string }>;
   verification?: { status?: string; reasons?: string[] };
   chainContext?: ChatEvent["chainContext"];
-  purchaseQuote?: { status?: string; amount?: string; currency?: string; chainId?: number };
+  purchaseQuote?: {
+    status?: string;
+    amount?: string;
+    currency?: string;
+    chainId?: number;
+    chainPayment?: { enabled?: boolean; gatewayAddress?: string | null; amountWei?: string; amountBot?: string; status?: string };
+  };
   tenantId?: string;
   productId?: string;
   feedbackSummary?: { count?: number; averageRating?: number; sampleMode?: string };

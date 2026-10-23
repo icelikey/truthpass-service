@@ -16,6 +16,19 @@ function parseUtc(value: string): number | undefined {
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
+function formatParameterRange(
+  label: string,
+  observed: number | undefined,
+  unit: string,
+  operator: ">=" | "<=",
+  target: number,
+): string {
+  if (observed === undefined) return `${label}：未登记实测值；当前规则范围 ${operator}${target}${unit}`;
+  const difference = operator === ">=" ? target - observed : observed - target;
+  if (difference <= 0) return `${label}：实测 ${observed}${unit}；当前规则范围 ${operator}${target}${unit}，差值 ${Math.abs(difference)}${unit}`;
+  return `${label}：实测 ${observed}${unit}；当前规则范围 ${operator}${target}${unit}，超出范围 ${difference}${unit}`;
+}
+
 /**
  * Deterministic fish-oil/service acceptance. The function deliberately uses
  * only code-owned values; JEV can request another route but cannot mark a
@@ -72,31 +85,36 @@ export async function verifyExecution(
     reasons.push("结果缺少有效的服务签名");
     conflictCodes.push("INVALID_SIGNATURE");
   }
-  if (!checks.logisticsWithinLimit) reasons.push("物流记录存在超出验收标准的中断");
+  if (!checks.logisticsWithinLimit) {
+    const limit = task.acceptance.maxLogisticsGapHours;
+    reasons.push(limit === undefined
+      ? `物流记录：实测中断 ${evidence.logisticsGapHours} 小时；当前任务未声明范围`
+      : `物流记录：实测中断 ${evidence.logisticsGapHours} 小时；当前规则范围 ≤${limit} 小时，超出范围 ${Math.max(0, evidence.logisticsGapHours - limit)} 小时`);
+  }
 
   if (!checks.epaDhaWithinLimit) {
     if (evidence.epaDhaPercent === undefined && task.acceptance.minEpaDhaPercent !== undefined) {
       reasons.push("缺少 EPA+DHA 实测值");
       missingCodes.push("EPA_DHA_MISSING");
-    } else reasons.push("EPA+DHA 实测含量低于任务要求");
+    } else if (task.acceptance.minEpaDhaPercent !== undefined) reasons.push(formatParameterRange("EPA+DHA", evidence.epaDhaPercent, "%", ">=", task.acceptance.minEpaDhaPercent));
   }
   if (!checks.peroxideWithinLimit) {
     if (evidence.peroxideValue === undefined && task.acceptance.maxPeroxideValue !== undefined) {
       reasons.push("缺少过氧化值检测值");
       missingCodes.push("PEROXIDE_MISSING");
-    } else reasons.push("过氧化值高于任务要求");
+    } else if (task.acceptance.maxPeroxideValue !== undefined) reasons.push(formatParameterRange("过氧化值", evidence.peroxideValue, " meq/kg", "<=", task.acceptance.maxPeroxideValue));
   }
   if (!checks.totoxWithinLimit) {
     if (evidence.totox === undefined && task.acceptance.maxTotox !== undefined) {
       reasons.push("缺少 TOTOX 检测值");
       missingCodes.push("TOTOX_MISSING");
-    } else reasons.push("TOTOX 高于任务要求");
+    } else if (task.acceptance.maxTotox !== undefined) reasons.push(formatParameterRange("TOTOX", evidence.totox, "", "<=", task.acceptance.maxTotox));
   }
   if (!checks.coldChainWithinLimit) {
     if (evidence.coldChainGapHours === undefined && task.acceptance.requireColdChain) {
       reasons.push("缺少冷链温度证据");
       missingCodes.push("COLD_CHAIN_MISSING");
-    } else reasons.push("冷链记录存在超温中断");
+    } else if (task.acceptance.maxLogisticsGapHours !== undefined) reasons.push(formatParameterRange("冷链异常时长", evidence.coldChainGapHours, " 小时", "<=", task.acceptance.maxLogisticsGapHours));
   }
 
   const requiredEvidence = task.acceptance.requiredEvidence ?? [];
@@ -197,13 +215,67 @@ export async function assessProductBatch(
     totoxWithinLimit: evidence.totox !== undefined && evidence.totox <= policy.thresholds.maxTotox,
     coldChainWithinLimit: evidence.coldChainGapHours !== undefined && evidence.coldChainGapHours <= policy.thresholds.maxLogisticsGapHours,
   };
+  const parameterDetails = [
+    {
+      key: "epa_dha",
+      label: "EPA+DHA",
+      observed: evidence.epaDhaPercent,
+      unit: "%",
+      operator: ">=" as const,
+      target: policy.thresholds.minEpaDhaPercent,
+      status: evidence.epaDhaPercent === undefined ? "missing" as const : checks.epaDhaWithinLimit ? "within_range" as const : "outside_range" as const,
+      difference: evidence.epaDhaPercent === undefined ? undefined : evidence.epaDhaPercent - policy.thresholds.minEpaDhaPercent,
+    },
+    {
+      key: "peroxide",
+      label: "过氧化值",
+      observed: evidence.peroxideValue,
+      unit: " meq/kg",
+      operator: "<=" as const,
+      target: policy.thresholds.maxPeroxideValue,
+      status: evidence.peroxideValue === undefined ? "missing" as const : checks.peroxideWithinLimit ? "within_range" as const : "outside_range" as const,
+      difference: evidence.peroxideValue === undefined ? undefined : policy.thresholds.maxPeroxideValue - evidence.peroxideValue,
+    },
+    {
+      key: "totox",
+      label: "TOTOX",
+      observed: evidence.totox,
+      unit: "",
+      operator: "<=" as const,
+      target: policy.thresholds.maxTotox,
+      status: evidence.totox === undefined ? "missing" as const : checks.totoxWithinLimit ? "within_range" as const : "outside_range" as const,
+      difference: evidence.totox === undefined ? undefined : policy.thresholds.maxTotox - evidence.totox,
+    },
+    {
+      key: "cold_chain_gap",
+      label: "冷链异常时长",
+      observed: evidence.coldChainGapHours,
+      unit: " 小时",
+      operator: "<=" as const,
+      target: policy.thresholds.maxLogisticsGapHours,
+      status: evidence.coldChainGapHours === undefined ? "missing" as const : checks.coldChainWithinLimit ? "within_range" as const : "outside_range" as const,
+      difference: evidence.coldChainGapHours === undefined ? undefined : policy.thresholds.maxLogisticsGapHours - evidence.coldChainGapHours,
+    },
+  ];
   const score = Math.round((Object.values(checks).filter(Boolean).length / Object.keys(checks).length) * 100);
   const reasons: string[] = [];
-  if (!checks.logisticsWithinLimit) reasons.push("物流记录存在超出验收标准的中断");
-  if (!checks.epaDhaWithinLimit) reasons.push(`EPA+DHA 未达到 ${policy.thresholds.minEpaDhaPercent}% 或缺少检测值`);
-  if (!checks.peroxideWithinLimit) reasons.push(`过氧化值未达到 ≤${policy.thresholds.maxPeroxideValue} 或缺少检测值`);
-  if (!checks.totoxWithinLimit) reasons.push(`TOTOX 未达到 ≤${policy.thresholds.maxTotox} 或缺少检测值`);
-  if (!checks.coldChainWithinLimit) reasons.push("冷链记录存在超温中断或缺少温度证据");
-  const result = { status: Object.values(checks).every(Boolean) ? "accepted" as const : "rejected" as const, policyId: policy.policyId, policyVersion: policy.version, score, checks, reasons };
+  if (!checks.logisticsWithinLimit) reasons.push(`物流记录：实测中断 ${evidence.logisticsGapHours} 小时；当前规则范围 ≤${policy.thresholds.maxLogisticsGapHours} 小时，超出范围 ${Math.max(0, evidence.logisticsGapHours - policy.thresholds.maxLogisticsGapHours)} 小时`);
+  if (!checks.epaDhaWithinLimit) {
+    if (evidence.epaDhaPercent === undefined) reasons.push(formatParameterRange("EPA+DHA", undefined, "%", ">=", policy.thresholds.minEpaDhaPercent));
+    else reasons.push(formatParameterRange("EPA+DHA", evidence.epaDhaPercent, "%", ">=", policy.thresholds.minEpaDhaPercent));
+  }
+  if (!checks.peroxideWithinLimit) {
+    if (evidence.peroxideValue === undefined) reasons.push(formatParameterRange("过氧化值", undefined, " meq/kg", "<=", policy.thresholds.maxPeroxideValue));
+    else reasons.push(formatParameterRange("过氧化值", evidence.peroxideValue, " meq/kg", "<=", policy.thresholds.maxPeroxideValue));
+  }
+  if (!checks.totoxWithinLimit) {
+    if (evidence.totox === undefined) reasons.push(formatParameterRange("TOTOX", undefined, "", "<=", policy.thresholds.maxTotox));
+    else reasons.push(formatParameterRange("TOTOX", evidence.totox, "", "<=", policy.thresholds.maxTotox));
+  }
+  if (!checks.coldChainWithinLimit) {
+    if (evidence.coldChainGapHours === undefined) reasons.push(formatParameterRange("冷链异常时长", undefined, " 小时", "<=", policy.thresholds.maxLogisticsGapHours));
+    else reasons.push(formatParameterRange("冷链异常时长", evidence.coldChainGapHours, " 小时", "<=", policy.thresholds.maxLogisticsGapHours));
+  }
+  const result = { status: Object.values(checks).every(Boolean) ? "accepted" as const : "rejected" as const, policyId: policy.policyId, policyVersion: policy.version, score, checks, reasons, parameterDetails };
   return { ...result, evidenceHash: await sha256Hex(canonicalizeJson({ kind: "product-assessment", policy, task, evidence, result })) };
 }

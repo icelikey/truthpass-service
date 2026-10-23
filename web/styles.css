@@ -445,6 +445,16 @@ body {
 .chat-stage-rail span.active i { background: rgba(93,213,213,.2); }
 .chat-stage-rail span.completed i { background: rgba(90,205,150,.2); }
 .chat-stage-rail.compact { padding: 5px 8px; border-color: rgba(90,205,150,.2); }
+.chat-stage-details { margin: 10px 0 12px; border: 1px solid rgba(124,142,160,.24); border-radius: 12px; background: rgba(15,27,40,.62); overflow: hidden; }
+.chat-stage-details > summary { cursor: pointer; padding: 9px 12px; color: var(--bone, #e7e0d2); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.chat-stage-details[open] > summary { border-bottom: 1px solid rgba(124,142,160,.18); }
+.chat-stage-details .chat-stage-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; padding: 10px; }
+.chat-stage-details .chat-stage-rail > span { display: grid; grid-template-columns: 24px 1fr; gap: 2px 8px; align-items: center; min-height: 42px; padding: 7px 8px; border-radius: 9px; background: rgba(255,255,255,.045); }
+.chat-stage-details .chat-stage-rail > span > i { grid-row: span 2; }
+.chat-stage-details .chat-stage-rail > span > b { font-size: 12px; }
+.chat-stage-details .chat-stage-rail > span > small { color: rgba(231,224,210,.66); font-size: 10px; line-height: 1.35; }
+.chat-stage-details .chat-stage-rail > span.active { outline: 1px solid rgba(114,196,214,.72); background: rgba(62,132,150,.16); }
+.chat-stage-details .chat-stage-rail > span.fallback { outline: 1px solid rgba(220,133,82,.48); }
 .answer-validation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; margin: 7px 0 2px; padding: 7px 9px; border: 1px solid rgba(220,167,86,.3); border-radius: 8px; background: rgba(66,45,20,.2); color: #d8c49f; font-size: 10px; line-height: 1.4; }
 .answer-validation-summary strong { color: #f3ca7d; font-size: 11px; }
 .answer-validation-summary span { color: #b8c6ca; }
@@ -467,6 +477,17 @@ body {
 .order-info b { font-size: 13px; color: var(--text); }
 .order-info span { font-size: 11px; color: var(--muted); }
 .order-info .order-status { color: var(--ok); }
+.order-quote-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--cyan);
+  background: rgba(93, 213, 213, 0.08);
+}
+.order-quote-summary span { color: var(--cyan-2); font-size: 11px; }
+.order-quote-summary small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .disclaimer {
   color: var(--muted); font-size: 12px; margin-top: 8px;
   padding-top: 8px; border-top: 1px dashed var(--line-soft);
@@ -712,6 +733,28 @@ body {
   display: flex;
   align-items: flex-end;
 }
+.metric-rule {
+  color: var(--cyan-2);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.parameter-ledger {
+  margin: 14px 0 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 12px 14px;
+}
+.parameter-ledger summary { cursor: pointer; color: var(--cyan-2); font-size: 13px; font-weight: 700; }
+.parameter-ledger-grid { margin-top: 12px; display: grid; gap: 1px; overflow-x: auto; }
+.parameter-ledger-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 1fr) minmax(180px, 1.4fr) minmax(88px, .7fr); gap: 10px; align-items: center; min-width: 620px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; }
+.parameter-ledger-row:last-child { border-bottom: 0; }
+.parameter-ledger-head { color: var(--muted); font-size: 11px; }
+.parameter-ledger-row .ok { color: var(--ok); }
+.parameter-ledger-row .partial { color: var(--warn); }
+.parameter-ledger-note { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .metric-q {
   position: absolute; top: 12px; right: 12px;
   width: 22px; height: 22px; border-radius: 50%;
@@ -1431,6 +1474,9 @@ body {
 .verdict.fail { border-color: rgba(240, 109, 103, 0.45); background: rgba(240, 109, 103, 0.1); }
 .verdict.fail .verdict-icon { background: var(--reject); box-shadow: 0 0 12px rgba(240, 109, 103, 0.4); }
 .verdict.fail .verdict-text strong { color: var(--reject); }
+.verdict.review { border-color: rgba(224,170,86,.45); background: rgba(224,170,86,.1); }
+.verdict.review .verdict-icon { background: var(--gold, #d7aa57); color: #171a22; box-shadow: 0 0 12px rgba(224,170,86,.32); }
+.verdict.review .verdict-text strong { color: var(--gold, #d7aa57); }
 
 /* ============ BOT Chain Mainnet (677) & EVM 多钱包交互 ============ */
 .chain-badge-link {
@@ -1816,6 +1862,24 @@ body {
 .wallet-next-step-status strong { color: var(--cyan-2); }
 .wallet-next-step-status.error { border-color: rgba(240, 109, 103, .45); background: rgba(240, 109, 103, .1); }
 .wallet-next-step-status.error strong { color: var(--reject); }
+.wallet-payment-status {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 190, 86, .24);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 190, 86, .08), rgba(5, 13, 25, .38));
+}
+.wallet-payment-status .wallet-section-head { align-items: start; margin-bottom: 10px; }
+.wallet-payment-status .wallet-section-head > div { display: flex; flex-direction: column; gap: 4px; }
+.wallet-payment-status .wallet-section-head small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.wallet-payment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.wallet-payment-provider { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 9px 10px; border: 1px solid rgba(240, 109, 103, .25); border-radius: 9px; background: rgba(5, 13, 25, .36); }
+.wallet-payment-provider.configured { border-color: rgba(16, 185, 129, .38); }
+.wallet-payment-provider strong { color: var(--text); font-size: 12px; }
+.wallet-payment-provider span { color: #f3ce86; font-size: 10.5px; }
+.wallet-payment-provider.configured span { color: #8ff0c9; }
+.wallet-payment-provider small, .wallet-payment-note { color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+.wallet-payment-note { display: block; margin-top: 9px; }
 .wallet-plugin-notice {
   display: flex;
   align-items: flex-start;
@@ -3672,6 +3736,21 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .agent-flow-event-meta code { color: #665f53; overflow-wrap: anywhere; }
 .agent-flow-data-mode { color: #8e2d23; }
 .agent-data-flow-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px; margin-top: 10px; color: #8c8375; font-size: 10px; line-height: 1.4; }
+.consumer-auto-recommendation { margin-top: 14px; padding: 15px 16px; border: 1px solid rgba(200,163,106,.35); border-radius: 14px; background: rgba(22,29,39,.76); color: #e9e4d8; }
+.consumer-auto-recommendation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.consumer-auto-recommendation-head h3 { margin: 6px 0 0; color: #f3eee4; font: 500 21px/1.15 Georgia, serif; }
+.consumer-auto-recommendation-mode { color: #f3ca7d; font-size: 10px; line-height: 1.4; }
+.consumer-auto-recommendation-muted { margin: 12px 0 0; color: #a9b7bd; font-size: 12px; line-height: 1.5; }
+.consumer-auto-recommendation-status { display: inline-flex; margin-top: 12px; padding: 5px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.consumer-auto-recommendation-status.recommend_with_scope { color: #08271e; background: #9bd4bd; }
+.consumer-auto-recommendation-status.review_before_recommendation { color: #31250d; background: #e6c57c; }
+.consumer-auto-recommendation-status.do_not_recommend { color: #fff1ee; background: #a9473c; }
+.consumer-auto-recommendation-reason { margin: 10px 0 0; color: #d8e2e4; font-size: 12px; line-height: 1.55; }
+.consumer-auto-recommendation-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.consumer-auto-recommendation-facts span { min-width: 0; padding: 8px; border: 1px solid rgba(157,178,191,.18); border-radius: 9px; color: #b9c7ca; font-size: 10px; line-height: 1.4; }
+.consumer-auto-recommendation-facts b, .consumer-auto-recommendation-next b { display: block; margin-bottom: 3px; color: #f3eee4; font-size: 10px; }
+.consumer-auto-recommendation-next { margin: 12px 0 0; color: #d8e2e4; font-size: 11px; line-height: 1.5; }
+@media (max-width: 650px) { .consumer-auto-recommendation-facts { grid-template-columns: 1fr; } }
 @media (max-width: 680px) {
   .agent-data-flow-head { flex-direction: column; }
   .agent-data-flow-actions { justify-content: flex-start; }

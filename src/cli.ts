@@ -751,18 +751,18 @@ function agentTranslation(result: Record<string, unknown>): string {
     ? jevDecision.conflictCodes.join("、")
     : "无";
   const qualityText = [
-    `EPA+DHA ${quality.epaDhaPercent ?? "未知"}%（门槛 ≥ ${limits.epaDhaMinPercent ?? "未声明"}%）`,
-    `过氧化值 ${quality.peroxideValue ?? "未知"}（门槛 ≤ ${limits.peroxideMaxValue ?? "未声明"}）`,
-    `TOTOX ${quality.totox ?? "未知"}（门槛 ≤ ${limits.totoxMax ?? "未声明"}）`,
-    `冷链中断 ${quality.coldChainGapHours ?? "未知"} 小时（门槛 ≤ ${limits.coldChainGapMaxHours ?? "未声明"} 小时）`,
+    `EPA+DHA ${quality.epaDhaPercent ?? "未登记"}%（实测值；当前规则范围 ≥ ${limits.epaDhaMinPercent ?? "未声明"}%）`,
+    `过氧化值 ${quality.peroxideValue ?? "未登记"}（实测值；当前规则范围 ≤ ${limits.peroxideMaxValue ?? "未声明"}）`,
+    `TOTOX ${quality.totox ?? "未登记"}（实测值；当前规则范围 ≤ ${limits.totoxMax ?? "未声明"}）`,
+    `冷链中断 ${quality.coldChainGapHours ?? "未登记"} 小时（实测值；当前规则范围 ≤ ${limits.coldChainGapMaxHours ?? "未声明"} 小时）`,
   ].join("；");
   const liveJev = jev.liveApiEnabled === true;
   const chainText = chain.anchored === true
     ? `已在 ${chain.network ?? "目标链"}（Chain ID ${chain.chainId ?? "未知"}）记录，${receiptCount}/4 类业务 receipt 校验通过`
     : `当前没有完整的可验证链上回执（${chain.availabilityReason ?? "manifest unavailable"}）`;
   const conclusion = verification.status === "accepted"
-    ? "当前批次通过演示验收，可以向用户展示证据并在征得同意后准备下单。"
-    : "当前批次未通过验收，不应向用户推荐或继续下单。";
+    ? "当前登记参数落在演示规则范围内，可以向用户展示证据并在征得同意后准备下单。"
+    : "当前批次需要复核：请先查看上面的具体参数、规则范围、缺失资料和冲突，不把单一状态词当成商品质量结论。";
   return [
     `【真验 Agent 转译】${product.name ?? "鱼油产品"}，批次 ${batch.id ?? batch.batchId ?? "未知"}。`,
     `生产时间：${batch.productionTime ?? "未知"}；检测服务：${evidence.serviceName ?? evidence.serviceId ?? "未知"}。`,

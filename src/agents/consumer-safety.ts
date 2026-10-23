@@ -65,14 +65,21 @@ function cleanModelText(raw: string): string {
   return raw.trim().replace(/^```(?:json|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
-function normalizeSectionLabels(value: string): string {
+function normalizeSectionLabels(value: string, locale: "zh" | "en" = "zh"): string {
+  const labels = locale === "en"
+    ? { conclusion: "Conclusion", evidence: "Evidence", uncertainty: "Uncertainty", next: "Next step" }
+    : { conclusion: "结论", evidence: "依据", uncertainty: "不确定", next: "下一步" };
   return value
     .replace(/\*+/g, "")
     .replace(/(结论|依据|不确定|下一步)\s*:/g, "$1：")
-    .replace(/\bConclusion\s*:/gi, "结论：")
-    .replace(/\b(Evidence|Basis)\s*:/gi, "依据：")
-    .replace(/\b(Uncertainty|Unknowns?)\s*:/gi, "不确定：")
-    .replace(/\b(Next\s*step|Next\s*action)\s*:/gi, "下一步：")
+    .replace(/\bConclusion\s*:/gi, `${labels.conclusion}：`)
+    .replace(/\b(Evidence|Basis)\s*:/gi, `${labels.evidence}：`)
+    .replace(/\b(Uncertainty|Unknowns?)\s*:/gi, `${labels.uncertainty}：`)
+    .replace(/\b(Next\s*step|Next\s*action)\s*:/gi, `${labels.next}：`)
+    .replace(/结论：/g, `${labels.conclusion}：`)
+    .replace(/依据：/g, `${labels.evidence}：`)
+    .replace(/不确定：/g, `${labels.uncertainty}：`)
+    .replace(/下一步：/g, `${labels.next}：`)
     .replace(/\s*\n+\s*/g, " ")
     .trim();
 }
@@ -83,7 +90,7 @@ function maxJsonDepth(value: unknown, depth = 0): number {
   return Math.max(depth, ...Object.values(value as Record<string, unknown>).map((item) => maxJsonDepth(item, depth + 1)));
 }
 
-function asModelOutput(raw: string): { output?: ConsumerModelOutput; text?: string; reason?: string } {
+function asModelOutput(raw: string, locale: "zh" | "en" = "zh"): { output?: ConsumerModelOutput; text?: string; reason?: string } {
   const value = cleanModelText(raw);
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
@@ -104,13 +111,16 @@ function asModelOutput(raw: string): { output?: ConsumerModelOutput; text?: stri
         nextAction: String(parsed.nextAction).trim(),
         citations,
       };
-      return { output, text: `结论：${output.conclusion} 依据：${output.evidence} 不确定：${output.uncertainty} 下一步：${output.nextAction}` };
+      const labels = locale === "en"
+        ? { conclusion: "Conclusion", evidence: "Evidence", uncertainty: "Uncertainty", next: "Next step" }
+        : { conclusion: "结论", evidence: "依据", uncertainty: "不确定", next: "下一步" };
+      return { output, text: `${labels.conclusion}：${output.conclusion} ${labels.evidence}：${output.evidence} ${labels.uncertainty}：${output.uncertainty} ${labels.next}：${output.nextAction}` };
     }
   } catch {
     // Plain text is retained as a compatibility path, but still requires
     // explicit citations below.
   }
-  const text = normalizeSectionLabels(value);
+  const text = normalizeSectionLabels(value, locale);
   if (!FOUR_SECTION.test(text)) return { reason: "missing_required_sections" };
   const citationMatch = value.match(/(?:引用|citations?)\s*[:：]\s*\[([^\]]+)\]/i);
   const citations = citationMatch ? citationMatch[1].split(",").map((item) => item.trim()).filter(Boolean) : [];
@@ -153,7 +163,7 @@ function hasVerifiedReceipt(chainContext?: ConsumerSafetyChainContext): boolean 
 }
 
 export function validateConsumerModelOutput(raw: string, contract: ConsumerSafetyContract): ConsumerSafetyResult {
-  const parsed = asModelOutput(raw);
+  const parsed = asModelOutput(raw, contract.locale ?? "zh");
   const reasons: string[] = [];
   const citations = parsed.output?.citations ?? [];
   const allowedCitations = new Set(contract.allowedCitations);

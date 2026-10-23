@@ -42,7 +42,13 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
   const demoConfig = { tenantId: merchantTenantId, brandName: merchantBrandName, productId: merchantProductId, productName: merchantProductName, defaultBatchId };
   const siteHome = tenant ? (locale === "en" ? `/en/sites/${tenant.slug}` : `/sites/${tenant.slug}`) : "/";
   const siteMerchant = tenant ? `${siteHome}/merchant` : "/merchant";
-  const siteConsumer = tenant ? `${siteHome}/agent?batch=${encodeURIComponent(defaultBatchId)}` : "/";
+  const requestedBatchId = (() => {
+    if (typeof window === "undefined") return defaultBatchId;
+    const candidate = new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase();
+    if (!candidate || !tenant) return candidate || defaultBatchId;
+    const prefix = defaultBatchId.split("-")[0];
+    return candidate.startsWith(`${prefix}-`) ? candidate : defaultBatchId;
+  })();
   const { setWalletModalOpen, address, chainId } = useWallet();
   const { user, loading: authLoading, configured: authConfigured, signIn, signUp } = useAuth();
   const [tab, setTab] = useState<MerchantTab>("overview");
@@ -70,6 +76,8 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
   const [authOpen, setAuthOpen] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const merchantApiEnabled = import.meta.env.VITE_TRUTHPASS_MERCHANT_API_ENABLED === "true";
+  const activeBatchId = selectedBatch?.batchId ?? requestedBatchId;
+  const siteConsumer = tenant ? `${siteHome}/agent?batch=${encodeURIComponent(activeBatchId)}` : "/";
 
   useEffect(() => {
     if (merchantApiEnabled && authConfigured && !user) {
@@ -83,10 +91,11 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
       .then(async (next) => {
         if (!active) return;
         setSummary(next);
-        setSelectedBatch(next.batches[0] ?? null);
+        const initialBatch = next.batches.find((batch) => batch.batchId.toUpperCase() === requestedBatchId) ?? next.batches[0] ?? null;
+        setSelectedBatch(initialBatch);
         const [status, nextLifecycle] = await Promise.all([
           fetchAgentStatus().catch(() => null),
-          fetchLifecycle(next.batches[0]?.batchId ?? defaultBatchId).catch(() => null),
+          fetchLifecycle(initialBatch?.batchId ?? defaultBatchId).catch(() => null),
         ]);
         setAgentStatus(status);
         setLifecycle(nextLifecycle);
@@ -98,7 +107,7 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
       })
       .finally(() => setLoading(false));
     return () => { active = false; };
-  }, [authConfigured, authLoading, merchantApiEnabled, user, merchantTenantId, defaultBatchId]);
+  }, [authConfigured, authLoading, merchantApiEnabled, user, merchantTenantId, defaultBatchId, requestedBatchId]);
 
   const reviewItems = useMemo(
     () =>

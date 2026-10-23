@@ -20,6 +20,13 @@ const demoIssues: EvidenceIssue[] = [
   { id: "ev-shipment-001", batchId: DEMO_BATCH, kind: "shipment", title: "出货记录", status: "review", issuer: "物流服务 D", signature: "missing", hash: "0x91e2…b7d4", detail: "出货记录缺少真实机构签名。", nextAction: "补充物流机构公钥和签名材料。" },
 ];
 
+const riceDemoIssues: EvidenceIssue[] = [
+  { id: "ev-origin-001", batchId: "RC-2026-001", kind: "production", title: "产地与种植记录", status: "passed", issuer: "北境稻作农场", signature: "not_checked", hash: "0xrice…0r01", detail: "产地、土壤和种植时间已关联到当前批次。", nextAction: "接入真实农场签名和地块凭证。" },
+  { id: "ev-pesticide-001", batchId: "RC-2026-001", kind: "inspection", title: "农残检测报告", status: "passed", issuer: "北境食品实验室", signature: "not_checked", hash: "0xrice…0r02", detail: "当前演示范围内的农残指标已登记。", nextAction: "配置检测机构公钥后完成签名核验。" },
+  { id: "ev-storage-001", batchId: "RC-2026-001", kind: "cold_chain", title: "仓储记录", status: "passed", issuer: "北境仓储服务", signature: "not_checked", hash: "0xrice…0r03", detail: "仓储和温湿度记录已关联到当前批次。", nextAction: "接入真实仓储设备和出入库凭证。" },
+  { id: "ev-shipment-001", batchId: "RC-2026-001", kind: "shipment", title: "出货与运输记录", status: "review", issuer: "北境物流服务", signature: "missing", hash: "0xrice…0r04", detail: "出货记录缺少真实物流机构签名。", nextAction: "补充物流机构公钥和运输交接材料。" },
+];
+
 const demoSummary: MerchantSummary = {
   tenantId: TENANT_ID,
   brandName: "海蓝营养",
@@ -48,7 +55,8 @@ function demoConfig(config: MerchantDemoConfig = {}) {
 
 function buildDemoIssues(config: MerchantDemoConfig = {}): EvidenceIssue[] {
   const current = demoConfig(config);
-  return demoIssues.map((issue, index) => ({
+  const template = current.productId === "rice-wuchang" || current.prefix === "RC" ? riceDemoIssues : demoIssues;
+  return template.map((issue, index) => ({
     ...issue,
     id: `${current.prefix ?? current.defaultBatchId.split("-")[0].toLowerCase()}-${issue.kind}-${index + 1}`,
     batchId: current.defaultBatchId,
@@ -60,14 +68,18 @@ function buildDemoSummary(config: MerchantDemoConfig = {}): MerchantSummary {
   const issues = buildDemoIssues(config);
   const batch2 = current.batchId("002");
   const batch3 = current.batchId("003");
-  const productPolicy = `${current.productId}-quality@v1`;
+  const rice = current.productId === "rice-wuchang" || current.prefix === "RC";
+  const productPolicy = rice ? "rice-origin-policy@v1" : `${current.productId}-quality@v1`;
+  const defaultStatus: MerchantBatchSummary["status"] = rice ? "accepted_with_scope" : "review";
+  const defaultCompleteness = rice ? 82 : 75;
+  const defaultIssues = rice ? issues.map((item) => item.kind === "shipment" ? item : { ...item, status: "passed" as const }) : issues;
   return {
     ...demoSummary,
     tenantId: current.tenantId,
     brandName: current.brandName,
     batches: [
-      { batchId: current.defaultBatchId, productName: current.productName, policy: productPolicy, status: "review", completeness: 75, source: "demo/synthetic", lastUpdated: "2026-10-15 08:00", issues },
-      { batchId: batch2, productName: current.productName, policy: productPolicy, status: "rejected", completeness: 50, source: "demo/synthetic", lastUpdated: "2026-10-14 16:20", issues: [{ ...issues[1], id: `${current.defaultBatchId}-inspection-2`, batchId: batch2, status: "revoked", detail: "检测报告批次号与当前商品不匹配。", nextAction: "重新提交与批次一致的检测报告。" }] },
+      { batchId: current.defaultBatchId, productName: current.productName, policy: productPolicy, status: defaultStatus, completeness: defaultCompleteness, source: "demo/synthetic", lastUpdated: "2026-10-15 08:00", issues: defaultIssues },
+      { batchId: batch2, productName: current.productName, policy: productPolicy, status: "rejected", completeness: rice ? 56 : 50, source: "demo/synthetic", lastUpdated: "2026-10-14 16:20", issues: [{ ...issues[1], id: `${current.defaultBatchId}-inspection-2`, batchId: batch2, status: "revoked", detail: rice ? "农残检测报告批次号与当前商品不匹配。" : "检测报告批次号与当前商品不匹配。", nextAction: rice ? "重新提交与批次一致的农残检测报告。" : "重新提交与批次一致的检测报告。" }] },
       { batchId: batch3, productName: current.productName, policy: productPolicy, status: "accepted_with_scope", completeness: 100, source: "demo/synthetic", lastUpdated: "2026-10-13 11:42", issues: issues.map((item) => ({ ...item, batchId: batch3, status: "passed" })) },
     ],
   };

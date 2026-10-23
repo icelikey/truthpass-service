@@ -132,6 +132,12 @@ export interface ConsumerGatewayPurchaseInput {
   gatewayAddress: string;
 }
 
+/** Input for TruthPassPaidConsumerGatewayV2.recordPaidPurchase. */
+export interface PaidConsumerGatewayPurchaseInput extends ConsumerGatewayPurchaseInput {
+  /** Native BOT amount in wei, encoded as a hex quantity. */
+  priceWei: string;
+}
+
 export interface ConsumerGatewayContributionInput {
   contributionId: string;
   purchaseId: string;
@@ -330,6 +336,8 @@ export const REVOKE_OR_SUPERSEDE_SIGNATURE =
   "revokeOrSupersede(uint8,bytes32,bytes32,bytes32,uint256,bytes32)";
 export const CONSUMER_GATEWAY_PURCHASE_SIGNATURE =
   "recordPurchase(bytes32,bytes32,bytes32,bytes32)";
+export const PAID_CONSUMER_GATEWAY_PURCHASE_SIGNATURE =
+  "recordPaidPurchase(bytes32,bytes32,bytes32,bytes32)";
 export const CONSUMER_GATEWAY_CONTRIBUTION_SIGNATURE =
   "recordContribution(bytes32,bytes32,bytes32,bytes32,uint8)";
 export const CONSUMER_GATEWAY_DISPUTE_SIGNATURE =
@@ -662,6 +670,34 @@ export function buildConsumerGatewayPurchaseTransaction(
       asBytes32(input.consentHash, "consentHash").slice(2),
     ]),
     value: "0x0",
+    chainId: config.chainId,
+    chainIdHex: config.chainIdHex,
+  };
+}
+
+/**
+ * Build the paid gateway call without holding a key or contacting the chain.
+ * The caller still has to show `value` to the external wallet and verify the
+ * payment and anchor events after the receipt is mined.
+ */
+export function buildPaidConsumerGatewayPurchaseTransaction(
+  input: PaidConsumerGatewayPurchaseInput,
+  config: BotChainConfig,
+): TruthPassWriteTransaction {
+  const value = /^\d+$/.test(input.priceWei)
+    ? `0x${BigInt(input.priceWei).toString(16)}`
+    : asHexQuantity(input.priceWei, "priceWei");
+  if (/^0x0+$/i.test(value)) throw new BotChainError("priceWei must be greater than zero");
+  return {
+    action: "consumerPurchase",
+    to: asAddress(input.gatewayAddress, "gatewayAddress"),
+    data: truthPassCalldata(PAID_CONSUMER_GATEWAY_PURCHASE_SELECTOR, [
+      asBytes32(input.purchaseId, "purchaseId").slice(2),
+      asBytes32(input.batchCommitment, "batchCommitment").slice(2),
+      asBytes32(input.purchaseProofHash, "purchaseProofHash").slice(2),
+      asBytes32(input.consentHash, "consentHash").slice(2),
+    ]),
+    value,
     chainId: config.chainId,
     chainIdHex: config.chainIdHex,
   };
@@ -1275,6 +1311,8 @@ export const REVOKE_OR_SUPERSEDE_SELECTOR =
   `0x${keccak256Hex(REVOKE_OR_SUPERSEDE_SIGNATURE).slice(0, 8)}`;
 export const CONSUMER_GATEWAY_PURCHASE_SELECTOR =
   `0x${keccak256Hex(CONSUMER_GATEWAY_PURCHASE_SIGNATURE).slice(0, 8)}`;
+export const PAID_CONSUMER_GATEWAY_PURCHASE_SELECTOR =
+  `0x${keccak256Hex(PAID_CONSUMER_GATEWAY_PURCHASE_SIGNATURE).slice(0, 8)}`;
 export const CONSUMER_GATEWAY_CONTRIBUTION_SELECTOR =
   `0x${keccak256Hex(CONSUMER_GATEWAY_CONTRIBUTION_SIGNATURE).slice(0, 8)}`;
 export const CONSUMER_GATEWAY_DISPUTE_SELECTOR =

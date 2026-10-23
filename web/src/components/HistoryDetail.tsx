@@ -45,7 +45,7 @@ export function HistoryDetail({
       return {
         origin: product.origin,
         productionDate: product.productionDate,
-        verdict: verification.status === "accepted" ? "通过验收" : "未通过验收",
+        verdict: verification.status === "accepted" ? "在当前规则范围内" : "需要复核",
         score: verification.score,
         evidenceHash: verification.evidenceHash,
         metrics: product.keyMetrics.map((m) => ({
@@ -91,7 +91,7 @@ export function HistoryDetail({
         {view.verdict && (
           <span>
             结论{" "}
-            <b className={view.verdict === "通过验收" ? "green-text" : "red-text"}>
+            <b className={view.verdict === "在当前规则范围内" ? "green-text" : "red-text"}>
               {view.verdict}
             </b>
           </span>

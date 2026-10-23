@@ -31,3 +31,23 @@ test("purchase binding rejects missing scope and revoked consent", async () => {
     /已撤销/,
   );
 });
+
+test("consumer purchase can preserve the wallet event purchaseId", async () => {
+  const registry = new ConsumerParticipationRegistry();
+  await registry.grantConsent({ consumerId: "c-3", batchId: "FO-3", scopes: ["purchase", "quality-feedback"], grantedAt: "2026-10-06T12:00:00Z" });
+  const purchase = await registry.recordPurchase({
+    purchaseId: "0x" + "a".repeat(64),
+    consumerId: "c-3",
+    batchId: "FO-3",
+    purchaseProofHash: "0x" + "b".repeat(64),
+    createdAt: "2026-10-06T12:01:00Z",
+  });
+  assert.equal(purchase.purchaseId, "0x" + "a".repeat(64));
+  const feedback = await registry.recordFeedback({
+    purchaseId: purchase.purchaseId,
+    rating: 5,
+    categories: ["批次可查"],
+    evidence: { source: "verified_purchase_receipt" },
+  });
+  assert.equal(feedback.purchaseId, purchase.purchaseId);
+});
