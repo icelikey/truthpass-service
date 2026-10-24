@@ -117,6 +117,33 @@ function serviceStatusMeta(status?: string): { pill: string; cls: string; sse: s
   }
 }
 
+function providerIssueLabel(issue: string | undefined, en: boolean): string | null {
+  switch (issue) {
+    case "billing_required":
+      return en
+        ? "The model account needs billing or available credits. The evidence fallback is still working."
+        : "模型账户需要计费或可用额度；当前已安全回退到批次资料回答。";
+    case "unauthorized":
+      return en
+        ? "The model credential was rejected. The evidence fallback is still working."
+        : "模型凭据未被接受；当前已安全回退到批次资料回答。";
+    case "rate_limited":
+      return en
+        ? "The model provider rate limited this request. The evidence fallback is still working."
+        : "模型服务限制了本次请求；当前已安全回退到批次资料回答。";
+    case "invalid_response":
+      return en
+        ? "The model response failed the safety contract and was not shown."
+        : "模型回答没有通过安全契约，原文未展示。";
+    case "unavailable":
+      return en
+        ? "The model provider is unavailable. The evidence fallback is still working."
+        : "模型服务暂不可用；当前已安全回退到批次资料回答。";
+    default:
+      return null;
+  }
+}
+
 const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
   begin: "开始",
   reading_batch: "读取批次",
@@ -260,7 +287,7 @@ function MessageView({
           <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Evidence fallback" : "基础回答")} </summary>
           <div className="agent-trace-grid">
             <span><b>{en ? "Model" : "模型"}</b>{message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Compatible API" : "兼容接口")} · ${message.meta.model ?? (en ? "configured model" : "已配置模型")}` : "deterministic fallback"}</span>
-            <span><b>{en ? "Pipeline" : "流程"}</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? (en ? "Rule checks" : "规则核验") : stage === "jev" ? "JEV" + (en ? " routing" : " 分流") : stage === "deepseek" ? (en ? "DeepSeek explanation" : "DeepSeek 解释") : stage).join(" → ")}</span>
+            <span><b>{en ? "Pipeline" : "流程"}</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? (en ? "Rule checks" : "规则核验") : stage === "jev" ? "JEV" + (en ? " routing" : " 分流") : stage === "deepseek" ? (en ? `${message.meta?.provider ?? "Model"} explanation` : `${message.meta?.provider ?? "模型"} 解释`) : stage).join(" → ")}</span>
             {message.meta.pipelineDetail && <span><b>{en ? "Result" : "结果"}</b>Verifier: {message.meta.pipelineDetail.verifier.status} · JEV: {message.meta.pipelineDetail.jev.decision} · Model: {message.meta.pipelineDetail.deepseek.status}</span>}
             <span><b>{en ? "Citations" : "引用"}</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : (en ? "No additional evidence IDs" : "当前回答没有额外证据 ID")}</span>
             <span><b>Trace ID</b><code>{message.meta.traceId ?? "—"}</code></span>
@@ -311,6 +338,11 @@ function MessageView({
       )}
       {message.done && statusMeta?.sse === "rate-limited" && (
         <div className="chat-sse-state rate-limited" role="status">{en ? "Too many requests (rate limited). Please try again shortly." : "请求过于频繁（rate limited），请稍后再问。"}</div>
+      )}
+      {message.done && message.meta?.providerIssue && (
+        <div className="chat-sse-state provider-diagnostic" role="status">
+          {providerIssueLabel(message.meta.providerIssue, en)}
+        </div>
       )}
 
       <div className="msg-bubble">

@@ -110,7 +110,7 @@ export function RiceCasePage({ locale }: { locale: RiceLocale }) {
         ? (zh ? "请求受限 · 使用基础回答" : "Rate limited · fallback answer")
         : requestStatus === "maintenance"
           ? (zh ? "服务维护中 · 使用基础回答" : "Maintenance · fallback answer")
-      : (zh ? "基础回答 · DeepSeek 未参与" : "Fallback answer · DeepSeek not used");
+      : (zh ? "基础回答 · 模型未参与" : "Fallback answer · model not used");
   const evidenceCount = meta ? (meta.evidenceIds?.length ?? 0) : null;
 
   return (

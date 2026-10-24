@@ -9,7 +9,7 @@ import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext"
 import type { ChatEvent, VerifyState, LifecycleView, PublicBatchOverview } from "../types";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
-import { fetchBatchOverview, fetchLifecycle } from "../api";
+import { fetchAgentStatus, fetchBatchOverview, fetchLifecycle } from "../api";
 
 type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
@@ -214,6 +214,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     model?: string;
     provider?: string;
     modelAssisted?: boolean;
+    providerIssue?: ChatEvent["providerIssue"];
     dataMode?: string;
     traceId?: string;
     evidenceIds?: string[];
@@ -221,6 +222,14 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }>();
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
   const [overview, setOverview] = useState<PublicBatchOverview | null>(null);
+  const [agentService, setAgentService] = useState<{
+    providerConfigured?: boolean;
+    configuredProvider?: string | null;
+    configuredModel?: string | null;
+    lastSuccessfulProvider?: string | null;
+    lastSuccessfulModel?: string | null;
+    lastModelRuntimeStatus?: string | null;
+  } | null>(null);
   const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
   const [lifecycleUpdated, setLifecycleUpdated] = useState(false);
   const [showContext, setShowContext] = useState(false);
@@ -247,6 +256,15 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     const nextBatch = currentBatch(site);
     setBatchId(nextBatch);
   }, [site]);
+  useEffect(() => {
+    let active = true;
+    void fetchAgentStatus().then((next) => {
+      if (active) setAgentService(next);
+    }).catch(() => {
+      if (active) setAgentService(null);
+    });
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     const syncFromUrl = () => {
       const nextBatch = currentBatch(site);
@@ -357,14 +375,25 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   const agentRibbon = modelActuallyUsed
     ? (zh ? `${agentMeta?.provider ?? "DeepSeek"} · 已参与解释` : `${agentMeta?.provider ?? "DeepSeek"} · explanation active`)
     : requestStatus === "provider_unavailable"
-      ? (zh ? "模型暂不可用 · 基础资料仍可查" : "Model unavailable · evidence remains available")
+      ? (agentMeta?.providerIssue === "billing_required"
+        ? (zh ? "模型额度未满足 · 基础资料仍可查" : "Model credits unavailable · evidence remains available")
+        : (zh ? "模型暂不可用 · 基础资料仍可查" : "Model unavailable · evidence remains available"))
       : requestStatus === "rate_limited"
         ? (zh ? "请求受限 · 使用基础回答" : "Rate limited · fallback answer")
         : requestStatus === "maintenance"
           ? (zh ? "服务维护中 · 使用基础回答" : "Maintenance · fallback answer")
           : agentMeta
-            ? (zh ? "基础回答 · DeepSeek 未参与" : "Evidence fallback · DeepSeek not used")
+            ? (zh ? "基础回答 · 模型未参与" : "Evidence fallback · model not used")
             : (zh ? "等待真实 Agent 查询" : "Waiting for an Agent query");
+  const runtimeNotice = agentMeta?.providerIssue === "billing_required"
+    ? (zh ? "模型账户额度未满足，已安全回退；批次读取、Verifier 和 JEV 仍已运行。" : "Model billing or credits are unavailable; the evidence fallback is active. Batch reading, Verifier, and JEV still ran.")
+    : modelActuallyUsed
+      ? (zh ? `${agentMeta?.provider ?? "模型"} 已参与本次解释；回答仍受当前批次引用校验。` : `${agentMeta?.provider ?? "Model"} explained this run; citations remain scoped to this batch.`)
+      : agentMeta
+        ? (zh ? "本次查询已完成批次读取、规则核验和 JEV 分流，模型原文未发布。" : "This run completed batch reading, rule checks, and JEV routing; raw model text was not published.")
+        : agentService?.providerConfigured
+          ? (zh ? `已配置 ${agentService.configuredProvider ?? "模型服务"}，等待本次查询结果。` : `${agentService.configuredProvider ?? "Model provider"} is configured; waiting for this run.`)
+          : (zh ? "模型未配置，当前会使用有来源的基础回答。" : "No model provider is configured; sourced fallback answers remain available.");
   const handleFlowEvent = useCallback((event: ChatEvent) => {
     const stage = event.stage ?? (AGENT_FLOW_STAGE_LABELS[event.kind] ? event.kind : undefined);
     if (!stage && event.kind !== "meta") return;
@@ -395,6 +424,18 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "商品 Agent" : "PRODUCT AGENT"}</p><h1>{zh ? "你问什么，我查什么。" : "Ask once. Get the record."}</h1><p>{zh ? "所有流程从对话开始。需要时，我会把证据、生命周期、钱包和下一步打开给你。" : "Start with a question. I will open the evidence, lifecycle, wallet step, or next action when you need it."}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "和商品助手对话" : "Talk to the product Agent"}</strong><span>{batchId}</span></div>
+        <div className={`tenant-agent-runtime-notice ${agentMeta?.providerIssue ? "attention" : modelActuallyUsed ? "model" : ""}`} role="status">
+          <strong>{zh ? "你现在看到的是一次真实查询" : "This is a live scoped query"}</strong>
+          <span>{runtimeNotice}</span>
+        </div>
+        <AgentDataFlowRail
+          events={flowEvents}
+          batchId={batchId}
+          dataMode={overview?.dataMode ?? lifecycle?.dataMode ?? site.product.demoMode}
+          traceId={agentMeta?.traceId}
+          locale={locale}
+          onClear={() => setFlowEvents([])}
+        />
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
@@ -420,14 +461,6 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           locale={locale}
           productLabel={site.product.name}
           minimal
-        />
-        <AgentDataFlowRail
-          events={flowEvents}
-          batchId={batchId}
-          dataMode={overview?.dataMode ?? lifecycle?.dataMode ?? site.product.demoMode}
-          traceId={agentMeta?.traceId}
-          locale={locale}
-          onClear={() => setFlowEvents([])}
         />
         <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起资料" : "Hide record") : (zh ? "打开这批资料" : "Open this record")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "只在你需要时展开详细资料" : "Open details only when needed")}</span></div>
       </section>

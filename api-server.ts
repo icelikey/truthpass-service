@@ -1776,7 +1776,7 @@ type ChatReplyResult = {
   providerUsed?: string;
   modelUsed?: string;
   /** Safe public classification only; provider response bodies and credentials stay server-side. */
-  providerIssue?: "unauthorized" | "rate_limited" | "invalid_response" | "unavailable";
+  providerIssue?: "unauthorized" | "billing_required" | "rate_limited" | "invalid_response" | "unavailable";
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
@@ -1806,7 +1806,7 @@ type ChatMeta = {
   provider?: string;
   /** Public model identifier only; never expose credentials or prompt text. */
   model?: string;
-  providerIssue?: "unauthorized" | "rate_limited" | "invalid_response" | "unavailable";
+  providerIssue?: "unauthorized" | "billing_required" | "rate_limited" | "invalid_response" | "unavailable";
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];
@@ -2144,9 +2144,11 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       if (!res.ok) {
         providerIssue = res.status === 401 || res.status === 403
           ? "unauthorized"
-          : res.status === 429
-            ? "rate_limited"
-            : "unavailable";
+          : res.status === 402
+            ? "billing_required"
+            : res.status === 429
+              ? "rate_limited"
+              : "unavailable";
         const diagnostic = { event: "customer_service_provider_unavailable", endpointHost: new URL(endpoint).host, status: res.status, at: new Date().toISOString() } as const;
         lastCustomerModelDiagnostic = diagnostic;
         console.warn(JSON.stringify(diagnostic));

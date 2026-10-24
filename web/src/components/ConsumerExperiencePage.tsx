@@ -54,7 +54,7 @@ const copy = {
     evidenceTitle: "这批的依据",
     techTitle: "查看回答依据",
     techBody: "这里可以看到 Agent 读了哪些资料、规则怎么判断，以及下一步由谁处理。",
-    pipeline: ["读取批次资料", "规则核验", "JEV 分流", "DeepSeek 解释"],
+    pipeline: ["读取批次资料", "规则核验", "JEV 分流", "模型解释"],
     pipelineNote: "模型只负责把已有结果讲明白，不能替机构签字，也不能替你付款。",
     status: "演示环境在线",
     wallet: "连接钱包",
@@ -86,7 +86,7 @@ const copy = {
     evidenceTitle: "Evidence for this batch",
     techTitle: "See how the answer was made",
     techBody: "Review the records, deterministic checks, routing decision, and the person responsible for the next step.",
-    pipeline: ["Read batch records", "Run rule checks", "Route with JEV", "Explain with DeepSeek"],
+    pipeline: ["Read batch records", "Run rule checks", "Route with JEV", "Model explanation"],
     pipelineNote: "The model explains existing results. It cannot sign for an institution or pay for you.",
     status: "Demo service online",
     wallet: "Connect wallet",
@@ -102,7 +102,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const [query, setQuery] = useState(batchId ?? "");
   const [autoQueryBatch, setAutoQueryBatch] = useState<string | null>(batchId);
   const [showHow, setShowHow] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; provider?: string; providerIssue?: string; modelAssisted?: boolean; status?: string }>({});
+  const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; provider?: string | null; providerIssue?: string; modelAssisted?: boolean; status?: string }>({});
   const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
   const [flowDataMode, setFlowDataMode] = useState("demo/synthetic");
   const [recommendation, setRecommendation] = useState<RecommendItem | null>(null);
@@ -333,7 +333,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
 
         <section className="tp-consumer-workspace" id="agent">
           <div className="tp-consumer-agent-column">
-            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentStatus.modelAssisted === true ? (locale === "zh" ? "DeepSeek · 已参与解释" : "DeepSeek · explanation active") : agentStatus.status === "provider_unavailable" ? (locale === "zh" ? "模型认证失败 · 已安全回退" : "Model auth failed · safe fallback") : agentStatus.status === "rate_limited" ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback") : agentStatus.status === "deterministic_fallback" || agentStatus.status === "ready" ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Fallback · evidence available") : (locale === "zh" ? "Agent 连接中" : "Agent connecting")}</span></div>
+            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentStatus.modelAssisted === true ? (`${agentStatus.provider ?? "模型"} · ${locale === "zh" ? "已参与解释" : "explanation active"}`) : agentStatus.status === "provider_unavailable" ? (locale === "zh" ? "模型暂不可用 · 已安全回退" : "Model unavailable · safe fallback") : agentStatus.status === "rate_limited" ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback") : agentStatus.status === "deterministic_fallback" || agentStatus.status === "ready" ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Fallback · evidence available") : (locale === "zh" ? "Agent 连接中" : "Agent connecting")}</span></div>
             <AgentDataFlowRail
               events={flowEvents}
               batchId={batchId ?? "—"}
@@ -408,7 +408,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           <button type="button" className="tp-consumer-how-toggle" onClick={() => setShowHow((value) => !value)} aria-expanded={showHow}>
             <span><span className="tp-kicker">{locale === "zh" ? "透明说明" : "TRANSPARENT BY DESIGN"}</span><strong id="consumer-how-title">{t.techTitle}</strong></span><span aria-hidden="true">{showHow ? "⌃" : "⌄"}</span>
           </button>
-          {showHow && <div className="tp-consumer-how-body"><p>{t.techBody}</p><div className="tp-consumer-how-grid"><span><b>{locale === "zh" ? "规则核验" : "Rule checks"}</b>{locale === "zh" ? "检查时间、批次、来源和缺口。" : "Check time, batch, source, and gaps."}</span><span><b>JEV</b>{locale === "zh" ? "决定补资料、复核或继续解释。" : "Routes to evidence, review, or explanation."}</span><span><b>DeepSeek</b>{locale === "zh" ? "把已有结果讲成人话。" : "Explains the registered result in plain language."}</span><span><b>{locale === "zh" ? "数据模式" : "Data mode"}</b>{locale === "zh" ? "当前页面标明演示或真实资料。" : "The page labels demo or external data."}</span></div></div>}
+          {showHow && <div className="tp-consumer-how-body"><p>{t.techBody}</p><div className="tp-consumer-how-grid"><span><b>{locale === "zh" ? "规则核验" : "Rule checks"}</b>{locale === "zh" ? "检查时间、批次、来源和缺口。" : "Check time, batch, source, and gaps."}</span><span><b>JEV</b>{locale === "zh" ? "决定补资料、复核或继续解释。" : "Routes to evidence, review, or explanation."}</span><span><b>{locale === "zh" ? "模型解释" : "Model"}</b>{locale === "zh" ? "把已有结果讲成人话，不能替代核验。" : "Explains registered results without replacing verification."}</span><span><b>{locale === "zh" ? "数据模式" : "Data mode"}</b>{locale === "zh" ? "当前页面标明演示或真实资料。" : "The page labels demo or external data."}</span></div></div>}
         </section>
 
         <section className="tp-consumer-wallet-strip">

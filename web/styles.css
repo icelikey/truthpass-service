@@ -2506,7 +2506,24 @@ select:focus-visible,
 .chat-sse-state.loading { color: var(--teal-2); }
 .chat-sse-state.fallback { color: var(--amber); }
 .chat-sse-state.unavailable,
-.chat-sse-state.rate-limited { color: #c9d0d6; }
+.chat-sse-state.rate-limited,
+.chat-sse-state.provider-diagnostic { color: #e7c58f; }
+
+.tenant-agent-runtime-notice {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(125, 213, 178, .28);
+  border-radius: 10px;
+  color: #d8e8df;
+  background: rgba(125, 213, 178, .07);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tenant-agent-runtime-notice strong { color: #f0d69c; font-size: 11px; letter-spacing: .04em; }
+.tenant-agent-runtime-notice.attention { border-color: rgba(231, 197, 143, .5); background: rgba(231, 197, 143, .09); }
+.tenant-agent-runtime-notice.model { border-color: rgba(114, 196, 214, .48); background: rgba(114, 196, 214, .08); }
 .chat-handoff {
   display: flex;
   flex-wrap: wrap;

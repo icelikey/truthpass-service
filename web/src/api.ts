@@ -64,7 +64,19 @@ export const fetchJevDetection = (batchId?: string) =>
   getJson<JevDetection>(batchId ? `/api/jev/detection?batchId=${encodeURIComponent(batchId)}` : "/api/jev/detection");
 
 export const fetchChainStatus = () => getJson<ChainStatusData>("/api/chain/status");
-export const fetchAgentStatus = () => getJson<{ status: string; agentMode: string; providerConfigured?: boolean; model?: string | null; dataMode?: string }>("/api/agent/status");
+export const fetchAgentStatus = () => getJson<{
+  status: string;
+  agentMode: string;
+  providerConfigured?: boolean;
+  provider?: string | null;
+  model?: string | null;
+  configuredProvider?: string | null;
+  configuredModel?: string | null;
+  lastSuccessfulProvider?: string | null;
+  lastSuccessfulModel?: string | null;
+  lastModelRuntimeStatus?: string | null;
+  dataMode?: string;
+}>("/api/agent/status");
 export async function requestAgentReport(batchId: string, question = "请汇总当前批次生产、检测和公开证据，并给出下一步上链动作。", tenantId = "demo-tenant") {
   const headers = await merchantRequestHeaders(tenantId, true);
   const res = await fetch("/api/agent/v1/collaborate", {
