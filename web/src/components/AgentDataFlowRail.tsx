@@ -106,6 +106,7 @@ export function AgentDataFlowRail({
     const key = flowStageKey(event, locale);
     if (key) latestByStage.set(key, event);
   }
+  const latestEvent = events.at(-1);
 
   useEffect(() => {
     if (!follow || !logRef.current) return;
@@ -131,6 +132,14 @@ export function AgentDataFlowRail({
         <span>{zh ? "已完成阶段" : "Stages returned"} <b>{latestByStage.size}/5</b></span>
         <span>{zh ? "最新来源" : "Latest source"} <b>{events.at(-1)?.source ?? "—"}</b></span>
         <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? events.at(-1)?.traceId ?? "—"}</code></span>
+      </div>
+      <div className={`agent-data-flow-live ${latestEvent?.status ?? "pending"}`} aria-live="polite">
+        <span className="agent-data-flow-live-dot" aria-hidden="true" />
+        <div>
+          <strong>{zh ? "当前正在发生" : "Happening now"}</strong>
+          <b>{latestEvent?.label ?? (zh ? "等待 Agent 查询" : "Waiting for the Agent query")}</b>
+          <small>{latestEvent?.detail ?? (zh ? "发送一个问题后，这里会按真实 SSE/API 事件更新。" : "Ask a question and this line will update from the live SSE/API events.")}</small>
+        </div>
       </div>
       <div className="agent-data-flow-steps" aria-live="polite">
         {FLOW_STAGES.map((stage, index) => {

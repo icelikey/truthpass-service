@@ -563,8 +563,16 @@ export function ChatPanel({
     const requestKey = `${autoQueryBatch ?? batchId ?? ""}:${autoQueryPrompt ?? "batch"}`;
     if (lastAutoQueryRef.current === requestKey) return;
     lastAutoQueryRef.current = requestKey;
-    void runVerify(autoQueryPrompt ?? `查询批次 ${autoQueryBatch}`, autoQueryBatch ?? batchId ?? undefined);
-  }, [autoQueryBatch, autoQueryPrompt, batchId, busy]);
+    // Deep links should immediately demonstrate the complete read-only
+    // workflow. A bare batch id is valid, but this scoped question makes the
+    // first response useful to a visitor: production, inspection, cold chain,
+    // gaps, and the next owner are all requested in one Agent run.
+    const initialQuestion = autoQueryPrompt
+      ?? (en
+        ? `Inspect batch ${autoQueryBatch}: production, testing, cold chain, gaps, and next owner.`
+        : `请检查批次 ${autoQueryBatch} 的生产、检测、冷链、缺口和下一步责任方。`);
+    void runVerify(initialQuestion, autoQueryBatch ?? batchId ?? undefined);
+  }, [autoQueryBatch, autoQueryPrompt, batchId, busy, en]);
 
   const recommend = async (text: string) => {
     setInput("");

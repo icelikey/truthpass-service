@@ -3825,6 +3825,19 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .agent-data-flow-summary { display: flex; flex-wrap: wrap; gap: 9px 18px; margin-top: 13px; padding: 10px 0; border-top: 1px solid rgba(96,78,47,.14); border-bottom: 1px solid rgba(96,78,47,.14); color: #736b5e; font-size: 11px; }
 .agent-data-flow-summary b, .agent-data-flow-summary code { color: #1b1c1a; font-weight: 600; }
 .agent-data-flow-summary code { overflow-wrap: anywhere; font-size: 10px; }
+.agent-data-flow-live { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 9px; align-items: start; margin-top: 11px; padding: 10px 11px; border-left: 3px solid #b18a45; border-radius: 8px; background: rgba(255,255,255,.52); }
+.agent-data-flow-live-dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: #b18a45; box-shadow: 0 0 0 4px rgba(177,138,69,.12); }
+.agent-data-flow-live > div { display: grid; gap: 3px; min-width: 0; }
+.agent-data-flow-live strong { color: #8e2d23; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.agent-data-flow-live b { color: #1b1c1a; font-size: 12px; line-height: 1.35; }
+.agent-data-flow-live small { color: #736b5e; font-size: 10px; line-height: 1.45; }
+.agent-data-flow-live.active { border-left-color: #b83a2d; }
+.agent-data-flow-live.active .agent-data-flow-live-dot { background: #b83a2d; box-shadow: 0 0 0 4px rgba(184,58,45,.12); animation: agent-flow-pulse 1.3s ease-in-out infinite; }
+.agent-data-flow-live.completed { border-left-color: #2b7d5f; }
+.agent-data-flow-live.completed .agent-data-flow-live-dot { background: #2b7d5f; box-shadow: 0 0 0 4px rgba(43,125,95,.12); }
+.agent-data-flow-live.fallback, .agent-data-flow-live.unavailable { border-left-color: #b56a3b; }
+.agent-data-flow-live.fallback .agent-data-flow-live-dot, .agent-data-flow-live.unavailable .agent-data-flow-live-dot { background: #b56a3b; box-shadow: 0 0 0 4px rgba(181,106,59,.12); }
+@keyframes agent-flow-pulse { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.1); } }
 .agent-data-flow-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
 .agent-flow-step { min-width: 0; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 7px; padding: 10px; border: 1px solid rgba(96,78,47,.15); border-radius: 10px; background: rgba(255,255,255,.42); }
 .agent-flow-step-number { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #736b5e; background: rgba(21,21,19,.08); font: 600 11px/1 monospace; }

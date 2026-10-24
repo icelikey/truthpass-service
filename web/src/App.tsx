@@ -200,6 +200,24 @@ export default function App() {
   // older evidence console remains available through the explicit /web-demo
   // entry point and is not used for the public batch flow.
   if ((pathname === "/" || pathname === "/en") && isConsumerView) {
+    // A batch deep-link is already an Agent request. Render the tenant Agent
+    // surface directly so the visitor sees one conversation and its live
+    // evidence pipeline instead of the older multi-panel observer page. The
+    // platform landing page remains available at `/` without query params.
+    // This also keeps QR links and shared `?batch=` links on the same tenant,
+    // product and batch context as the dedicated site routes.
+    const focusedSite = getTenantSite(batchId?.startsWith("RC-") ? "rice-demo" : "fish-oil-demo");
+    if (focusedSite) {
+      const focusedBatch = batchId ?? focusedSite.batch.defaultBatchId;
+      return (
+        <ModalProvider>
+          <WalletProvider activeBatchId={focusedBatch} onToast={showToast} locale={pathname === "/en" ? "en" : "zh"}>
+            <TenantSitePage site={focusedSite} view="agent" locale={pathname === "/en" ? "en" : "zh"} />
+            {toast && <div className="toast" role="status">{toast}</div>}
+          </WalletProvider>
+        </ModalProvider>
+      );
+    }
     return (
       <ModalProvider>
         <WalletProvider activeBatchId={batchId} onToast={showToast}>
