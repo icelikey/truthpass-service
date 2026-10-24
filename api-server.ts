@@ -2087,26 +2087,10 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     sources,
     safety: { status: "fallback", citations: [], reasons: ["provider_not_configured"] },
   };
+  // Keep the configured provider authoritative. If it fails or returns an
+  // invalid answer, the request falls back to deterministic evidence text
+  // instead of silently switching to a different provider.
   const providers: ResolvedAgentProvider[] = [provider];
-  // OpenCode is the preferred public provider. If its credential is rejected,
-  // use the explicitly configured legacy-compatible Agent provider when one
-  // exists. The UI still reports the provider that actually answered.
-  if (provider.provider === "opencode") {
-    const fallbackKey = process.env.AGENT_API_KEY?.trim();
-    const fallbackModel = process.env.AGENT_MODEL?.trim();
-    if (fallbackKey && fallbackModel) {
-      const fallbackBaseUrl = (process.env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
-      const fallbackProvider = fallbackBaseUrl.toLowerCase().includes("deepseek") ? "deepseek" : "compatible";
-      providers.push({
-        provider: fallbackProvider,
-        apiKey: fallbackKey,
-        baseUrl: fallbackBaseUrl,
-        model: fallbackModel,
-        configured: true,
-        source: "agent",
-      });
-    }
-  }
   const safetyContract = {
     batchId: contract?.batchId,
     dataMode: contract?.dataMode ?? "demo/synthetic",
@@ -2180,8 +2164,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         console.warn(JSON.stringify(diagnostic));
         continue;
       }
-      // A later fallback provider succeeded; do not keep surfacing an older
-      // rejected-provider diagnostic as if the current request had failed.
+      // The configured provider succeeded; clear any prior diagnostic so status
+      // reflects the current successful call.
       lastCustomerModelDiagnostic = null;
       lastCustomerModelRuntime = {
         provider: candidate.provider,
@@ -2203,7 +2187,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString() } as const;
       lastCustomerModelDiagnostic = diagnostic;
       console.warn(JSON.stringify(diagnostic));
-      // Try the next compatible endpoint, then use the deterministic response.
+      // No alternate provider is attempted; the caller receives deterministic
+      // fallback after this configured provider fails.
     }
   }
 
