@@ -106,7 +106,12 @@ export function AgentDataFlowRail({
     const key = flowStageKey(event, locale);
     if (key) latestByStage.set(key, event);
   }
-  const latestEvent = events.at(-1);
+  // Background lifecycle and chain polling can append rows after the Agent
+  // stream has finished. Keep the primary status line scoped to the latest
+  // Agent SSE row so the user sees the actual run stage instead of a later
+  // telemetry refresh.
+  const latestEvent = [...events].reverse().find((event) => event.source === "Agent SSE" || event.source === "Agent stream") ?? events.at(-1);
+  const latestEventIsTerminal = latestEvent?.status === "completed" || latestEvent?.status === "fallback" || latestEvent?.status === "unavailable";
 
   useEffect(() => {
     if (!follow || !logRef.current) return;
@@ -136,7 +141,7 @@ export function AgentDataFlowRail({
       <div className={`agent-data-flow-live ${latestEvent?.status ?? "pending"}`} aria-live="polite">
         <span className="agent-data-flow-live-dot" aria-hidden="true" />
         <div>
-          <strong>{zh ? "当前正在发生" : "Happening now"}</strong>
+          <strong>{latestEventIsTerminal ? (zh ? "最近发生" : "Latest event") : (zh ? "当前正在发生" : "Happening now")}</strong>
           <b>{latestEvent?.label ?? (zh ? "等待 Agent 查询" : "Waiting for the Agent query")}</b>
           <small>{latestEvent?.detail ?? (zh ? "发送一个问题后，这里会按真实 SSE/API 事件更新。" : "Ask a question and this line will update from the live SSE/API events.")}</small>
         </div>
