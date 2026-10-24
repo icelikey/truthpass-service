@@ -258,6 +258,12 @@ test("customer service exposes status and SSE runtime metadata", async () => {
     assert.equal(status.status, "degraded");
     assert.equal(status.agentMode, "deterministic_fallback");
     assert.equal(status.fallbackAvailable, true);
+    assert.equal(status.provider, "deterministic");
+    assert.equal(status.model, "deterministic-fallback");
+    assert.equal(status.configuredProvider, "deterministic");
+    assert.equal(status.configuredModel, "deterministic-fallback");
+    assert.equal(status.lastSuccessfulProvider, null);
+    assert.equal(status.lastSuccessfulModel, null);
 
     const chatResponse = await fetch(baseUrl + "/api/agent/chat", {
       method: "POST",

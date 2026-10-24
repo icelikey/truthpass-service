@@ -137,6 +137,15 @@ const siteStore = new Map<string, { config: Record<string, unknown>; revisions: 
   }],
 ]);
 let lastCustomerModelDiagnostic: { endpointHost: string; status?: number; errorType?: string; event: string; at: string } | null = null;
+
+type CustomerModelRuntime = {
+  provider: string;
+  model: string;
+  status: "completed" | "unavailable";
+  at: string;
+};
+
+let lastCustomerModelRuntime: CustomerModelRuntime | null = null;
 const publicPolicyRegistry = createDefaultProductPolicyRegistry();
 const anonymousConsumers = new AnonymousConsumerRegistry();
 
@@ -1820,12 +1829,21 @@ type ChatMeta = {
 const CUSTOMER_CHAT_PIPELINE = ["verifier", "jev", "deepseek"] as const;
 
 function publicCustomerProvider(): string {
-  const provider = resolveAgentProvider();
-  return provider.configured ? provider.provider : "deterministic";
+  const configured = resolveAgentProvider();
+  // A status probe may run in a fresh serverless invocation, so fall back to
+  // the configured candidate when no successful model call is known locally.
+  return lastCustomerModelRuntime?.status === "completed"
+    ? lastCustomerModelRuntime.provider
+    : configured.configured
+      ? configured.provider
+      : "deterministic";
 }
 
 function publicCustomerModel(): string {
-  return resolveAgentProvider().model;
+  const configured = resolveAgentProvider();
+  return lastCustomerModelRuntime?.status === "completed"
+    ? lastCustomerModelRuntime.model
+    : configured.model;
 }
 
 function streamChat(res: ServerResponse, intent: string, script: Array<{ cls: string; text: string }>, meta?: ChatMeta): void {
@@ -1951,8 +1969,8 @@ async function streamChatWithReply(
     dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
     batchId: baseMeta.batchId,
     traceId: baseMeta.traceId,
-    provider: result.providerUsed ?? publicCustomerProvider(),
-    model: result.modelUsed ?? publicCustomerModel(),
+    provider: result.providerUsed ?? (result.status === "model_assisted" ? publicCustomerProvider() : "deterministic"),
+    model: result.modelUsed ?? (result.status === "model_assisted" ? publicCustomerModel() : "deterministic-fallback"),
     modelAssisted: result.status === "model_assisted",
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
@@ -2165,6 +2183,12 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       // A later fallback provider succeeded; do not keep surfacing an older
       // rejected-provider diagnostic as if the current request had failed.
       lastCustomerModelDiagnostic = null;
+      lastCustomerModelRuntime = {
+        provider: candidate.provider,
+        model: candidate.model,
+        status: "completed",
+        at: new Date().toISOString(),
+      };
       return {
         lines: [{ cls: "plain", text: safety.text }],
         status: "model_assisted",
@@ -2183,6 +2207,12 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     }
   }
 
+  lastCustomerModelRuntime = {
+    provider: provider.provider,
+    model: provider.model,
+    status: "unavailable",
+    at: new Date().toISOString(),
+  };
   return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources, safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] } };
 }
 
@@ -3511,14 +3541,23 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   }
 
   if (p === "/api/agent/status" && req.method === "GET") {
+    const configuredProvider = resolveAgentProvider();
     sendJson(res, 200, {
       schemaVersion: "truthpass.agent.status.v1",
       status: customerServiceStatus(),
       agentMode: agentMode(),
-      providerConfigured: resolveAgentProvider().configured,
+      providerConfigured: configuredProvider.configured,
+      // provider/model describe the last successful model call when this
+      // runtime has one; otherwise they describe the configured candidate.
+      // configuredProvider/configuredModel make that distinction explicit.
       provider: publicCustomerProvider(),
       model: publicCustomerModel(),
-      providerSource: resolveAgentProvider().source,
+      configuredProvider: configuredProvider.configured ? configuredProvider.provider : "deterministic",
+      configuredModel: configuredProvider.model,
+      providerSource: configuredProvider.source,
+      lastSuccessfulProvider: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.provider : null,
+      lastSuccessfulModel: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.model : null,
+      lastModelRuntimeStatus: lastCustomerModelRuntime?.status ?? null,
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",
