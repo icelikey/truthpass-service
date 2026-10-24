@@ -48,6 +48,22 @@ const STATUS_LABELS: Record<AgentFlowStatus, { zh: string; en: string }> = {
   info: { zh: "记录", en: "info" },
 };
 
+const FLOW_STAGES: Array<{ key: string; zh: string; en: string }> = [
+  { key: "reading_batch", zh: "读取这批资料", en: "Read this batch" },
+  { key: "verifier_checked", zh: "Verifier 规则核验", en: "Verifier rule check" },
+  { key: "jev_routed", zh: "JEV 决定下一步", en: "JEV routes next step" },
+  { key: "model_started", zh: "整理解释", en: "Organize explanation" },
+  { key: "model_completed", zh: "返回回答", en: "Return the answer" },
+];
+
+function flowStageKey(event: AgentFlowEvent, locale: "zh" | "en"): string | undefined {
+  const labels = locale === "zh"
+    ? ["读取当前批次", "Verifier 完成规则核验", "JEV 完成分流", "模型开始整理解释", "模型解释完成"]
+    : ["Reading this batch", "Verifier checked rules", "JEV routed next step", "Model started explanation", "Model explanation completed"];
+  const index = labels.indexOf(event.label);
+  return index >= 0 ? FLOW_STAGES[index]?.key : undefined;
+}
+
 export function AgentDataFlowRail({
   events,
   batchId,
@@ -66,6 +82,7 @@ export function AgentDataFlowRail({
   const zh = locale === "zh";
   const logRef = useRef<HTMLDivElement | null>(null);
   const [follow, setFollow] = useState(true);
+  const [showAll, setShowAll] = useState(false);
 
   // Lifecycle polling can append an event after the SSE stream has finished.
   // Derive completion from the current run history instead of only looking at
@@ -84,6 +101,11 @@ export function AgentDataFlowRail({
   const runHeading = runComplete
     ? (zh ? "本次查询已返回" : "This run has returned")
     : (zh ? "正在查这批资料" : "Following this batch");
+  const latestByStage = new Map<string, AgentFlowEvent>();
+  for (const event of events) {
+    const key = flowStageKey(event, locale);
+    if (key) latestByStage.set(key, event);
+  }
 
   useEffect(() => {
     if (!follow || !logRef.current) return;
@@ -106,11 +128,25 @@ export function AgentDataFlowRail({
         </div>
       </div>
       <div className="agent-data-flow-summary" aria-live="polite">
-        <span>{zh ? "事件" : "Events"} <b>{events.length}</b></span>
+        <span>{zh ? "已完成阶段" : "Stages returned"} <b>{latestByStage.size}/5</b></span>
         <span>{zh ? "最新来源" : "Latest source"} <b>{events.at(-1)?.source ?? "—"}</b></span>
         <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? events.at(-1)?.traceId ?? "—"}</code></span>
       </div>
-      <div className="agent-data-flow-log" ref={logRef} aria-live="polite" aria-relevant="additions text">
+      <div className="agent-data-flow-steps" aria-live="polite">
+        {FLOW_STAGES.map((stage, index) => {
+          const event = latestByStage.get(stage.key);
+          const status = event?.status ?? "pending";
+          return <article className={`agent-flow-step ${status}`} key={stage.key}>
+            <span className="agent-flow-step-number">{status === "completed" ? "✓" : index + 1}</span>
+            <div><strong>{zh ? stage.zh : stage.en}</strong><span>{event ? (event.detail || STATUS_LABELS[status][locale]) : (zh ? "等待前一步" : "Waiting")}</span></div>
+            <em>{STATUS_LABELS[status][locale]}</em>
+          </article>;
+        })}
+      </div>
+      <button type="button" className="agent-flow-details-toggle" onClick={() => setShowAll((value) => !value)} aria-expanded={showAll}>
+        {showAll ? (zh ? "收起完整运行记录" : "Hide full run log") : (zh ? `展开完整运行记录（${events.length} 条）` : `Open full run log (${events.length} events)`)}
+      </button>
+      {showAll && <div className="agent-data-flow-log" ref={logRef} aria-live="polite" aria-relevant="additions text">
         {events.length === 0 ? (
           <div className="agent-data-flow-empty">{zh ? "等待查询。发送一个问题后，这里会滚动显示真实运行阶段。" : "Waiting for a query. Send a question to see the live stages here."}</div>
         ) : events.map((event) => (
@@ -133,7 +169,7 @@ export function AgentDataFlowRail({
             </div>
           </article>
         ))}
-      </div>
+      </div>}
       <div className="agent-data-flow-foot">
         <span>{zh ? "数据模式" : "Data mode"}：{dataMode ?? "demo/synthetic"}</span>
         <span>{zh ? "模型不能替代 Verifier、JEV 或钱包确认" : "The model does not replace Verifier, JEV, or wallet confirmation."}</span>

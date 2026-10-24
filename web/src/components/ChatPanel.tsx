@@ -483,6 +483,15 @@ export function ChatPanel({
   const chatLogRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const busy = messages.length > 0 && !messages[messages.length - 1].done;
+  const latestAgentMeta = [...messages].reverse().find((message) => message.role === "agent" && message.meta)?.meta;
+  const runtimeStatus = latestAgentMeta?.serviceStatus ?? latestAgentMeta?.agentMode;
+  const runtimeLabel = runtimeStatus === "model_assisted"
+    ? (en ? "Model explanation active" : "模型已参与解释")
+    : runtimeStatus === "provider_unavailable"
+      ? (en ? "Model unavailable · evidence still readable" : "模型暂不可用 · 基础资料仍可查")
+      : runtimeStatus === "rate_limited"
+        ? (en ? "Rate limited · evidence fallback" : "请求受限 · 使用基础回答")
+        : (en ? "Evidence and next step" : "证据和下一步");
   const batchOptions = productLabel?.includes("米") || productLabel?.toLowerCase().includes("rice") ? RICE_BATCHES : FISH_OIL_BATCHES;
   const lastAutoQueryRef = useRef<string | null>(null);
 
@@ -667,8 +676,8 @@ export function ChatPanel({
         <div className="chat-head-text">
           <strong>{en ? "TruthPass Product Agent" : "TruthPass Agent 客服"}</strong>
           <small>
-            <span className="status-dot" title={en ? "Online" : "在线"} />
-            {en ? "Explains sources · shows uncertainty · gives the next step" : "解释资料来源 · 告诉你不确定的地方 · 给出下一步"}
+            <span className={`status-dot ${runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited" ? "offline" : ""}`} title={runtimeLabel} />
+            {runtimeLabel} · {en ? "shows sources and uncertainty" : "显示来源和不确定性"}
           </small>
         </div>
       </div>
