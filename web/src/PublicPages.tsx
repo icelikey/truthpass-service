@@ -2,16 +2,18 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { DesignPreviewGallery } from "./components/DesignPreviewGallery";
 import { RiceCasePage } from "./components/RiceCasePage";
 
-type PublicRoute = "zh-home" | "zh-developers" | "zh-institution" | "en-home" | "en-merchant" | "en-institution" | "en-developers";
+type PublicRoute = "zh-home" | "zh-product" | "zh-developers" | "zh-institution" | "en-home" | "en-product" | "en-merchant" | "en-institution" | "en-developers";
 
-const routeMap: Record<PublicRoute, { zh: boolean; home: string; developers: string; merchant: string; institution: string }> = {
-  "zh-home": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
-  "zh-developers": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
-  "zh-institution": { zh: true, home: "/", developers: "/developers", merchant: "/merchant", institution: "/institution" },
-  "en-home": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
-  "en-merchant": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
-  "en-institution": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
-  "en-developers": { zh: false, home: "/en", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+const routeMap: Record<PublicRoute, { zh: boolean; home: string; product: string; developers: string; merchant: string; institution: string }> = {
+  "zh-home": { zh: true, home: "/", product: "/product", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "zh-product": { zh: true, home: "/", product: "/product", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "zh-developers": { zh: true, home: "/", product: "/product", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "zh-institution": { zh: true, home: "/", product: "/product", developers: "/developers", merchant: "/merchant", institution: "/institution" },
+  "en-home": { zh: false, home: "/en", product: "/en/product", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-product": { zh: false, home: "/en", product: "/en/product", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-merchant": { zh: false, home: "/en", product: "/en/product", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-institution": { zh: false, home: "/en", product: "/en/product", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
+  "en-developers": { zh: false, home: "/en", product: "/en/product", developers: "/en/developers", merchant: "/en/merchant", institution: "/en/institution" },
 };
 
 function Brand({ route, compact = false }: { route: PublicRoute; compact?: boolean }) {
@@ -24,7 +26,7 @@ function Brand({ route, compact = false }: { route: PublicRoute; compact?: boole
     </a>
   );
 }
-function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | "merchant" | "developers" }) {
+function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | "product" | "merchant" | "developers" }) {
   const links = routeMap[route];
   const zh = links.zh;
   return (
@@ -32,6 +34,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
       <Brand route={route} />
       <nav className="tp-public-nav" aria-label={zh ? "主导航" : "Primary navigation"}>
         <a className={active === "home" ? "active" : ""} href={links.home}>{zh ? "首页" : "Home"}</a>
+        <a className={active === "product" ? "active" : ""} href={links.product}>{zh ? "产品介绍" : "What we build"}</a>
         <a href={zh ? "/?view=consumer#agent" : "/en?view=consumer#agent"}>{zh ? "商品查询" : "Products"}</a>
         <a href={zh ? "/sites/rice-demo" : "/en/sites/rice-demo"}>{zh ? "案例：大米" : "Case: rice"}</a>
         <a href={links.merchant} className={active === "merchant" ? "active" : ""}>{zh ? "解决方案" : "Solutions"}</a>
@@ -42,8 +45,8 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
       <div className="tp-header-actions">
         <span className="tp-search-mark" aria-hidden="true">⌕</span>
         <div className="tp-language-switch" aria-label={zh ? "语言" : "Language"}>
-          <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : route.includes("institution") ? "/institution" : "/"}>中文</a>
-          <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : route.includes("institution") ? "/en/institution" : "/en"}>English</a>
+          <a className={zh ? "selected" : ""} href={active === "developers" ? "/developers" : active === "merchant" ? "/merchant" : active === "product" ? "/product" : route.includes("institution") ? "/institution" : "/"}>中文</a>
+          <a className={!zh ? "selected" : ""} href={active === "developers" ? "/en/developers" : active === "merchant" ? "/en/merchant" : active === "product" ? "/en/product" : route.includes("institution") ? "/en/institution" : "/en"}>English</a>
         </div>
         <a className="tp-outline-btn" href={`${zh ? "/" : "/en"}?view=consumer&auth=1#agent`}>{zh ? "登录" : "Sign in"}</a>
       </div>
@@ -51,7 +54,7 @@ function PublicHeader({ route, active }: { route: PublicRoute; active: "home" | 
   );
 }
 
-function PageFrame({ route, active, children, footer = true }: { route: PublicRoute; active: "home" | "merchant" | "developers"; children: ReactNode; footer?: boolean }) {
+function PageFrame({ route, active, children, footer = true }: { route: PublicRoute; active: "home" | "product" | "merchant" | "developers"; children: ReactNode; footer?: boolean }) {
   const zh = routeMap[route].zh;
   return (
     <div className={`tp-public-page ${zh ? "tp-lang-zh" : "tp-lang-en"}`}>
@@ -405,10 +408,78 @@ function EnglishMerchantPage() {
   </main></PageFrame>;
 }
 
+type ProductIntroRoute = "zh-product" | "en-product";
+
+function ProductIntroPage({ route }: { route: ProductIntroRoute }) {
+  const zh = route === "zh-product";
+  const flow = zh
+    ? [
+        ["01", "把资料放进来", "生产记录、检测报告、运输数据和购买后的反馈，都绑定到同一个批次。"],
+        ["02", "让 Agent 查清楚", "Agent 读取当前批次，展示引用资料，并把缺口和冲突说出来。"],
+        ["03", "让责任人确认", "Verifier 做规则核验，JEV 决定补证或复核；企业和机构钱包确认写入。"],
+        ["04", "让购买继续留下记录", "消费者查询、钱包签名、receipt 和售后反馈，继续回到同一个商品记录。"],
+      ]
+    : [
+        ["01", "Bring the record in", "Production, testing, delivery, and post-purchase feedback stay bound to one batch."],
+        ["02", "Let the Agent inspect", "The Agent reads the current batch, cites its sources, and states gaps and conflicts."],
+        ["03", "Put responsibility in the open", "Verifier runs rules, JEV routes the next step, and business or institution wallets confirm writes."],
+        ["04", "Keep the purchase connected", "Consumer queries, wallet signatures, receipts, and aftercare return to the same product record."],
+      ];
+  const values = zh
+    ? [["消费者", "先看清，再决定", "不再只看一句营销文案，而是看生产、检测、运输和当前缺口。"], ["企业", "把信任做成能力", "把资料、责任和反馈放在一个持续更新的商品官网里。"], ["机构", "每次确认都有边界", "样品、报告、钱包身份和争议记录可以按批次回看。"], ["开发者", "同一份公开记录", "网站、MCP 和 CLI 都读取同一套批次上下文。"]]
+    : [["Consumers", "Check before deciding", "Read production, testing, delivery, and current gaps instead of relying on a single claim."], ["Businesses", "Build trust capability", "Turn records, responsibility, and feedback into a living product site."], ["Institutions", "Confirm within a clear boundary", "Review samples, reports, wallet identity, and disputes by batch."], ["Developers", "One public record", "The site, MCP, and CLI read the same batch context."]];
+  return (
+    <PageFrame route={route} active="product">
+      <main className="tp-product-page">
+        <section className="tp-product-hero">
+          <div className="tp-product-hero-copy">
+            <p className="tp-kicker">{zh ? "产品介绍 · TRUTHPASS" : "PRODUCT · TRUTHPASS"}</p>
+            <span className="tp-demo-ribbon">{zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION"}</span>
+            <h1>{zh ? <>把一件商品的来路<br /><span>交到购买的人手里</span></> : <>Put the product record<br /><span>in the buyer’s hands</span></>}</h1>
+            <p className="tp-product-hero-lead">{zh ? "TruthPass 为企业建设商品官网、Agent 和验证能力，让生产、购买与反馈回到同一条记录。" : "TruthPass builds the product site, Agent, and verification layer that connect production, purchase, and feedback."}</p>
+            <div className="tp-product-hero-actions">
+              <a className="tp-red-btn" href={zh ? "/sites/fish-oil-demo?batch=FO-2026-001" : "/en/sites/fish-oil-demo?batch=FO-2026-001"}>{zh ? "打开鱼油案例" : "Open the fish-oil case"} →</a>
+              <a className="tp-paper-btn" href={zh ? "/merchant" : "/en/merchant"}>{zh ? "为企业建设信任能力" : "Build this for a business"} →</a>
+            </div>
+            <p className="tp-product-hero-note">{zh ? "你可以先只读查看；涉及身份、写入或购买时，才由外部钱包确认。" : "Read-only inspection is open. Identity, writes, and purchases require an external wallet confirmation."}</p>
+          </div>
+          <div className="tp-product-hero-board" aria-label={zh ? "TruthPass 商品记录示意" : "TruthPass product record overview"}>
+            <div className="tp-product-board-head"><span>FO-2026-001</span><b>{zh ? "当前批次" : "CURRENT BATCH"}</b></div>
+            <div className="tp-product-board-product"><img src="/assets/fish-oil-product.png" alt={zh ? "深海鱼油演示商品" : "Deep sea fish oil demo product"} /><div><span>{zh ? "深海鱼油" : "Deep sea fish oil"}</span><strong>{zh ? "生产 → 检测 → 冷链 → 购买" : "Production → Testing → Delivery → Purchase"}</strong><small>DEMO / SYNTHETIC</small></div></div>
+            <div className="tp-product-board-rows"><div><span>{zh ? "证据记录" : "Evidence records"}</span><b>5</b></div><div><span>{zh ? "规则核验" : "Rule check"}</span><b>{zh ? "复核" : "Review"}</b></div><div><span>{zh ? "链状态" : "Chain state"}</span><b>anchor_pending</b></div></div>
+            <div className="tp-product-board-agent"><span className="tp-product-board-dot" /><div><b>{zh ? "Agent 正在查当前批次" : "Agent is inspecting this batch"}</b><small>{zh ? "引用证据 → Verifier → JEV → 解释" : "Citations → Verifier → JEV → explanation"}</small></div></div>
+          </div>
+        </section>
+
+        <section className="tp-product-section tp-product-flow" aria-labelledby="product-flow-title">
+          <div className="tp-product-section-head"><div><p className="tp-kicker">{zh ? "实际怎么运作" : "HOW IT WORKS"}</p><h2 id="product-flow-title">{zh ? "从一份资料，到一次可核验的购买" : "From one record to a verifiable purchase"}</h2></div><span>{zh ? "一个批次 · 一条上下文" : "ONE BATCH · ONE CONTEXT"}</span></div>
+          <div className="tp-product-flow-grid">{flow.map(([number, title, body]) => <article key={number}><span>{number}</span><h3>{title}</h3><p>{body}</p></article>)}</div>
+        </section>
+
+        <section className="tp-product-section tp-product-live" aria-labelledby="product-live-title">
+          <div className="tp-product-section-head"><div><p className="tp-kicker">{zh ? "你在页面上会看到什么" : "WHAT YOU CAN SEE"}</p><h2 id="product-live-title">{zh ? "Agent 不是黑箱，它把查的过程放出来" : "The Agent is not a black box"}</h2></div><a className="tp-text-link" href={zh ? "/sites/fish-oil-demo/agent?batch=FO-2026-001" : "/en/sites/fish-oil-demo/agent?batch=FO-2026-001"}>{zh ? "打开 Agent 现场 →" : "Open the Agent trace →"}</a></div>
+          <div className="tp-product-live-grid"><div className="tp-product-trace"><div><span className="tp-trace-live" />{zh ? "运行现场" : "LIVE TRACE"}<code>trace_fo_2026_001</code></div>{(zh ? [["读取当前批次", "5 条当前批次证据"], ["Verifier 完成核验", "规则结果：review"], ["JEV 完成分流", "下一步：补齐当前缺口"], ["回答已生成", "模型只解释已有结果"]] : [["Read this batch", "5 evidence records in this batch"], ["Verifier checked rules", "Result: review"], ["JEV routed next step", "Next: fill the current gaps"], ["Answer generated", "The model explains existing results"]]).map(([label, detail], index) => <div className="tp-product-trace-row" key={label}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{label}</strong><small>{detail}</small></span><i>✓</i></div>)}</div><div className="tp-product-proof-card"><span className="tp-kicker">{zh ? "回答依据" : "ANSWER BASIS"}</span><h3>{zh ? "每个结论都回到来源" : "Every conclusion returns to a source"}</h3><ul>{(zh ? ["批次：FO-2026-001", "证据：生产、检测、冷链", "数据模式：demo/synthetic", "链状态：没有当前交易 receipt"] : ["Batch: FO-2026-001", "Evidence: production, testing, delivery", "Data mode: demo/synthetic", "Chain: no current transaction receipt"]).map((item) => <li key={item}>{item}</li>)}</ul><a className="tp-paper-btn" href={zh ? "/sites/fish-oil-demo/agent?batch=FO-2026-001" : "/en/sites/fish-oil-demo/agent?batch=FO-2026-001"}>{zh ? "看完整回答依据" : "See the full answer basis"} →</a></div></div>
+        </section>
+
+        <section className="tp-product-section tp-product-cases" aria-labelledby="product-cases-title">
+          <div className="tp-product-section-head"><div><p className="tp-kicker">{zh ? "已经做出的案例" : "CASES WE HAVE BUILT"}</p><h2 id="product-cases-title">{zh ? "不是一张宣传图，是可以走进去的商品站点" : "Not a poster. A product site you can walk through."}</h2></div></div>
+          <div className="tp-product-case-grid"><a className="tp-product-case" href={zh ? "/sites/fish-oil-demo?batch=FO-2026-001" : "/en/sites/fish-oil-demo?batch=FO-2026-001"}><img src="/assets/fish-oil-product.png" alt="" /><div><span className="tp-kicker">{zh ? "鱼油案例" : "FISH OIL"}</span><h3>{zh ? "深海鱼油 · FO-2026-001" : "Deep sea fish oil · FO-2026-001"}</h3><p>{zh ? "从生产记录进入 Agent，再进入钱包、购买和反馈。" : "From the production record to Agent, wallet, purchase, and feedback."}</p><strong>{zh ? "打开商品站点 →" : "Open product site →"}</strong></div></a><a className="tp-product-case" href={zh ? "/sites/rice-demo?batch=RC-2026-001" : "/en/sites/rice-demo?batch=RC-2026-001"}><img src="/design-reference/truthpass-ui-v4/01-platform-home.png" alt="" /><div><span className="tp-kicker">{zh ? "大米案例" : "RICE"}</span><h3>{zh ? "北境稻作 · RC-2026-001" : "Northern rice · RC-2026-001"}</h3><p>{zh ? "产地、天气、土壤、检测和运输按同一个批次串起来。" : "Origin, weather, soil, testing, and delivery in one batch context."}</p><strong>{zh ? "打开商品站点 →" : "Open product site →"}</strong></div></a></div>
+        </section>
+
+        <section className="tp-product-section tp-product-values" aria-labelledby="product-values-title"><div className="tp-product-section-head"><div><p className="tp-kicker">{zh ? "价值怎么传递" : "WHY IT MATTERS"}</p><h2 id="product-values-title">{zh ? "减少信息差，把反馈送回生产" : "Reduce the information gap. Return feedback to production."}</h2></div></div><div className="tp-product-value-grid">{values.map(([title, headline, body]) => <article key={title}><span>{title}</span><h3>{headline}</h3><p>{body}</p></article>)}</div></section>
+
+        <section className="tp-product-boundary"><div><p className="tp-kicker">{zh ? "边界清楚，才能持续使用" : "CLEAR BOUNDARIES"}</p><h2>{zh ? "链上证明记录，不替商品做质量承诺" : "The chain proves a record, not a product promise."}</h2><p>{zh ? "区块链保存摘要、签名、事件和 receipt；Verifier 判断规则，JEV 负责分流，Agent 只解释已登记资料。当前案例为演示资料，真实认证仍需要真实生产方、检测机构和有效链上回执。" : "The chain stores hashes, signatures, events, and receipts. Verifier checks rules, JEV routes the next step, and the Agent explains registered material. These cases are demos; real certification still requires real producers, institutions, and valid receipts."}</p></div><div className="tp-product-boundary-actions"><a className="tp-red-btn" href={zh ? "/sites/fish-oil-demo/agent?batch=FO-2026-001" : "/en/sites/fish-oil-demo/agent?batch=FO-2026-001"}>{zh ? "现在查看一次查询" : "Run one inspection"} →</a><a className="tp-paper-btn" href={zh ? "/developers" : "/en/developers"}>{zh ? "给自己的 Agent 接入" : "Connect your own Agent"} →</a></div></section>
+      </main>
+    </PageFrame>
+  );
+}
+
 export function PublicPageRouter({ pathname }: { pathname: string }) {
   if (pathname === "/design-preview") return <DesignPreviewGallery />;
   if (pathname === "/cases/rice") return <RiceCasePage locale="zh" />;
   if (pathname === "/en/cases/rice") return <RiceCasePage locale="en" />;
+  if (pathname === "/product") return <ProductIntroPage route="zh-product" />;
+  if (pathname === "/en/product") return <ProductIntroPage route="en-product" />;
   if (pathname === "/") return <ChineseLandingPage />;
   if (pathname === "/developers") return <DeveloperPage />;
   if (pathname === "/en/developers") return <DeveloperPage route="en-developers" />;

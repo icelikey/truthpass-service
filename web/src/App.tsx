@@ -65,7 +65,7 @@ export default function App() {
   // internal legacy surface.
   const isConsumerView = queryParams.get("view") === "consumer" || (queryParams.has("batch") && queryParams.get("view") !== "console");
   const authRequested = new URLSearchParams(window.location.search).get("auth") === "1";
-  const isPublicPageRoute = ["/", "/developers", "/en", "/en/developers", "/design-preview", "/cases/rice", "/en/cases/rice"].includes(pathname)
+  const isPublicPageRoute = ["/", "/product", "/developers", "/en", "/en/product", "/en/developers", "/design-preview", "/cases/rice", "/en/cases/rice"].includes(pathname)
     && !authRequested
     && !((pathname === "/" || pathname === "/en") && isConsumerView);
 
