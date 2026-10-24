@@ -261,9 +261,11 @@ export function DeveloperPage({ route = "zh-developers" }: { route?: "zh-develop
     try {
       const response = await fetch("/api/agent/status", { headers: { Accept: "application/json" } });
       const data = await response.json() as { status?: string; agentMode?: string; dataMode?: string; model?: string };
-      if (!response.ok || data.status !== "ready") throw new Error("unavailable");
+      // `degraded` is a healthy public state when the optional model provider
+      // is not configured: deterministic evidence answers are still served.
+      if (!response.ok || !["ready", "degraded"].includes(data.status ?? "")) throw new Error("unavailable");
       setStatus("ready");
-      setStatusText(`${data.agentMode ?? "ready"} · ${data.model ?? data.dataMode ?? "demo/synthetic"}`);
+      setStatusText(`${data.agentMode ?? data.status ?? "ready"} · ${data.model ?? data.dataMode ?? "demo/synthetic"}`);
     } catch {
       setStatus("error");
       setStatusText("");

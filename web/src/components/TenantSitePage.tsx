@@ -85,6 +85,15 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
   const [scanMessage, setScanMessage] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const openBatch = (candidate: string) => {
+    const normalized = candidate.trim().toUpperCase();
+    const scoped = scopedBatch(site, normalized);
+    if (!normalized || scoped !== normalized) {
+      setScanMessage(zh ? `这不是${site.brand.name}站点的批次号，请检查包装或切换企业站点。` : `That batch is not registered for ${site.brand.name}. Check the package or switch sites.`);
+      return;
+    }
+    window.location.href = `${routeFor(site, "agent", locale)}?batch=${encodeURIComponent(scoped)}`;
+  };
   const scanQr = async (file: File) => {
     try {
       const Detector = (window as unknown as { BarcodeDetector?: new (options?: { formats?: string[] }) => { detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
@@ -96,7 +105,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
       const url = new URL(value, window.location.origin);
       const scannedBatch = url.searchParams.get("batch")?.trim().toUpperCase();
       if (!scannedBatch) throw new Error("二维码没有绑定批次号");
-      window.location.href = `${routeFor(site, "agent", locale)}?batch=${encodeURIComponent(scannedBatch)}`;
+      openBatch(scannedBatch);
     } catch (error) {
       setScanMessage(error instanceof Error ? error.message : (zh ? "二维码识别失败" : "Could not read the QR code"));
     }
@@ -123,7 +132,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
             if (value) {
               const url = new URL(value, window.location.origin);
               const scannedBatch = url.searchParams.get("batch")?.trim().toUpperCase();
-              if (scannedBatch) window.location.href = `${routeFor(site, "agent", locale)}?batch=${encodeURIComponent(scannedBatch)}`;
+              if (scannedBatch) openBatch(scannedBatch);
             }
           } catch { /* camera frames can be unavailable while the video initializes */ }
           frame = window.requestAnimationFrame(() => void tick());
@@ -140,7 +149,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
       window.cancelAnimationFrame(frame);
       stream?.getTracks().forEach((track) => track.stop());
     };
-  }, [cameraOpen, locale, site]);
+  }, [cameraOpen, locale, site, zh]);
   return (
     <main className="tenant-site-main">
       <section className="tenant-hero">
@@ -150,11 +159,11 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
           <h1>{site.brand.slogans[locale]}</h1>
           <p className="tenant-lead">{site.product.description}</p>
           <div className="tenant-hero-actions">
-            <a className="tp-red-btn" href={`${base}/agent?batch=${encodeURIComponent(batch)}`}>{zh ? "查看这批依据" : "View this batch"} →</a>
-            <a className="tp-paper-btn" href={localizedSiteRoute(site, "wallet", locale, batch)}>{zh ? "钱包身份" : "Wallet identity"} →</a>
+            <a className="tp-red-btn" href={`${base}/agent?batch=${encodeURIComponent(scopedBatch(site, batch))}`}>{zh ? "查看这批依据" : "View this batch"} →</a>
+            <a className="tp-paper-btn" href={localizedSiteRoute(site, "wallet", locale, scopedBatch(site, batch))}>{zh ? "钱包身份" : "Wallet identity"} →</a>
           </div>
         </div>
-        <form className="tenant-batch-card" onSubmit={(event) => { event.preventDefault(); window.location.href = `${base}/agent?batch=${encodeURIComponent(batch)}`; }}>
+        <form className="tenant-batch-card" onSubmit={(event) => { event.preventDefault(); openBatch(batch); }}>
           <span className="tp-kicker">{zh ? "查一批商品" : "INSPECT A BATCH"}</span>
           <h2>{zh ? "先看清，再下单。" : "Check first. Buy next."}</h2>
           <label htmlFor="tenant-batch">{zh ? "批次号" : "Batch ID"}</label>
@@ -170,9 +179,9 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
         {site.batch.evidenceCategories.slice(0, 3).map((item, index) => <article key={item}><b>0{index + 1}</b><strong>{item}</strong><span>{zh ? "已绑定当前批次" : "Linked to this batch"}</span></article>)}
       </section>
       <section className="tenant-route-grid">
-        <a href={localizedSiteRoute(site, "agent", locale, batch)}><span className="tp-kicker">{zh ? "消费者" : "CONSUMER"}</span><h2>{zh ? "问商品助手" : "Ask the product Agent"}</h2><p>{zh ? "结论、依据、不确定、下一步。" : "Conclusion, sources, uncertainty, next step."}</p></a>
-        <a href={localizedSiteRoute(site, "merchant", locale, batch)}><span className="tp-kicker">{zh ? "企业" : "BUSINESS"}</span><h2>{zh ? "把资料整理清楚" : "Make the record legible"}</h2><p>{zh ? "上传、核验、确认、发布。" : "Collect, verify, confirm, publish."}</p></a>
-        <a href={localizedSiteRoute(site, "institution", locale, batch)}><span className="tp-kicker">{zh ? "机构" : "INSTITUTION"}</span><h2>{zh ? "一批一查" : "Review one batch at a time"}</h2><p>{zh ? "检测、签名、争议都有记录。" : "Testing, signatures, and disputes stay recorded."}</p></a>
+        <a href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "消费者" : "CONSUMER"}</span><h2>{zh ? "问商品助手" : "Ask the product Agent"}</h2><p>{zh ? "结论、依据、不确定、下一步。" : "Conclusion, sources, uncertainty, next step."}</p></a>
+        <a href={localizedSiteRoute(site, "merchant", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "企业" : "BUSINESS"}</span><h2>{zh ? "把资料整理清楚" : "Make the record legible"}</h2><p>{zh ? "上传、核验、确认、发布。" : "Collect, verify, confirm, publish."}</p></a>
+        <a href={localizedSiteRoute(site, "institution", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "机构" : "INSTITUTION"}</span><h2>{zh ? "一批一查" : "Review one batch at a time"}</h2><p>{zh ? "检测、签名、争议都有记录。" : "Testing, signatures, and disputes stay recorded."}</p></a>
       </section>
     </main>
   );
@@ -442,15 +451,27 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           onMeta={setAgentMeta}
           onFlowEvent={handleFlowEvent}
           onBatch={(id) => {
-            setBatchId(id);
-            if (id !== batchId) {
+            const scoped = scopedBatch(site, id);
+            if (scoped !== id.trim().toUpperCase()) {
+              appendFlowEvent({
+                source: overviewSource,
+                label: zh ? "批次不属于当前企业站点" : "Batch is outside this tenant",
+                detail: zh ? `${id} 没有被当前站点允许，已保留 ${batchId}。` : `${id} is not allowed for this site; keeping ${batchId}.`,
+                status: "unavailable",
+                batchId,
+                dataMode: site.product.demoMode,
+              });
+              return;
+            }
+            setBatchId(scoped);
+            if (scoped !== batchId) {
               setFlowEvents([]);
               lifecycleRevisionRef.current = undefined;
             }
             const url = new URL(window.location.href);
-            url.searchParams.set("batch", id);
+            url.searchParams.set("batch", scoped);
             window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-            window.dispatchEvent(new CustomEvent("truthpass:batch-changed", { detail: { batchId: id } }));
+            window.dispatchEvent(new CustomEvent("truthpass:batch-changed", { detail: { batchId: scoped } }));
           }}
           onPurchasePrepared={() => setStage("purchase_prepared")}
           onWalletPending={() => setStage("wallet_pending")}

@@ -111,6 +111,18 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const flowSeqRef = useRef(0);
   const lifecycleRevisionRef = useRef<number | undefined>(undefined);
 
+  const agentBadge = agentStatus.modelAssisted === true
+    ? `${agentStatus.provider ?? (locale === "zh" ? "模型" : "Model")} · ${locale === "zh" ? "已参与解释" : "explanation active"}`
+    : agentStatus.status === "provider_unavailable"
+      ? (locale === "zh" ? "模型暂不可用 · 已安全回退" : "Model unavailable · safe fallback")
+      : agentStatus.status === "rate_limited"
+        ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback")
+        : agentStatus.status === "deterministic_fallback" || agentStatus.status === "degraded"
+          ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Evidence fallback · records available")
+          : agentStatus.status === "ready"
+            ? (locale === "zh" ? "Agent 已就绪" : "Agent ready")
+            : (locale === "zh" ? "Agent 连接中" : "Agent connecting");
+
   useEffect(() => {
     if (batchId) setQuery(batchId);
   }, [batchId]);
@@ -333,7 +345,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
 
         <section className="tp-consumer-workspace" id="agent">
           <div className="tp-consumer-agent-column">
-            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentStatus.modelAssisted === true ? (`${agentStatus.provider ?? "模型"} · ${locale === "zh" ? "已参与解释" : "explanation active"}`) : agentStatus.status === "provider_unavailable" ? (locale === "zh" ? "模型暂不可用 · 已安全回退" : "Model unavailable · safe fallback") : agentStatus.status === "rate_limited" ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback") : agentStatus.status === "deterministic_fallback" || agentStatus.status === "ready" ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Fallback · evidence available") : (locale === "zh" ? "Agent 连接中" : "Agent connecting")}</span></div>
+            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentBadge}</span></div>
             <AgentDataFlowRail
               events={flowEvents}
               batchId={batchId ?? "—"}

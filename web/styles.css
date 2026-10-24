@@ -3680,7 +3680,16 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 
 /* Config driven enterprise sites. The same shell is used by every tenant,
    while brand and evidence context come from TenantSiteConfig. */
-.tenant-site-page { min-height: 100vh; color: #ece5d7; background: radial-gradient(circle at 80% 0%, rgba(121,184,189,.14), transparent 28%), #151513; }
+.tenant-site-page {
+  --tp-ink: #151513;
+  --tp-paper: #f4efe4;
+  --tp-cinnabar: #a71f24;
+  --tp-cinnabar-dark: #74171b;
+  --tp-gold: #b18a45;
+  min-height: 100vh;
+  color: #ece5d7;
+  background: radial-gradient(circle at 80% 0%, rgba(121,184,189,.14), transparent 28%), #151513;
+}
 .tenant-site-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 22px; min-height: 72px; padding: 12px clamp(16px, 4vw, 58px); border-bottom: 1px solid rgba(200,163,106,.25); background: rgba(21,21,19,.94); backdrop-filter: blur(16px); }
 .tenant-site-header .tp-brand { flex: 0 0 auto; color: #f4efe4; }
 .tenant-site-mark { display: inline-grid; place-items: center; width: 27px; height: 27px; margin-left: 7px; border: 1px solid #b18a45; border-radius: 50%; color: #b18a45; font: 600 14px/1 Georgia, serif; }
@@ -3703,6 +3712,7 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-batch-card h2 { margin: 9px 0 20px; font: 500 30px/1.1 Georgia, serif; }
 .tenant-batch-card label { display: block; margin-bottom: 7px; color: #736b5e; font-size: 12px; }
 .tenant-batch-card > div { display: flex; gap: 8px; }
+.tenant-batch-card .tp-red-btn { flex: 0 0 auto; margin-top: 0; }
 .tenant-batch-card input { min-width: 0; flex: 1; border: 1px solid rgba(96,78,47,.35); border-radius: 4px; padding: 11px; color: #1b1c1a; background: rgba(255,255,255,.68); font: 600 14px/1 monospace; }
 .tenant-batch-card small { display: block; margin-top: 13px; color: #736b5e; line-height: 1.5; }
 .tenant-fact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px 0 34px; border-top: 1px solid rgba(200,163,106,.25); }
