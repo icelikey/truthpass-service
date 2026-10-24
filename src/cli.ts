@@ -14,7 +14,7 @@ const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "anchor" | "replay" | "manifest" | "status" | "collaborate" | "register" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "ask" | "search" | "lifecycle" | "watch" | "anchor" | "replay" | "manifest" | "status" | "collaborate" | "register" | "help";
 
 interface NormalizedService {
   serviceId: string;
@@ -62,6 +62,9 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass recommend --batch FO-2026-001 [--json]
   truthpass order --batch FO-2026-001 [--json]
   truthpass inspect --batch FO-2026-001 [--json]
+  truthpass ask "FO-2026-001 的冷链和检测有什么缺口？" --remote https://truthpass-service.vercel.app [--json]
+  truthpass search --batch FO-2026-001 --question "冷链" --remote https://truthpass-service.vercel.app [--json]
+  truthpass lifecycle --batch FO-2026-001 --remote https://truthpass-service.vercel.app [--json]
   truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass collaborate --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass register --remote https://truthpass-service.vercel.app --tenant demo --token <TOKEN> --agent-id my-agent --name "我的 Agent" --capability consumer.inspect [--json]
@@ -132,7 +135,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
       continue;
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
-    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "anchor", "replay", "manifest", "status", "collaborate", "register", "help"].includes(arg);
+    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "ask", "search", "lifecycle", "watch", "anchor", "replay", "manifest", "status", "collaborate", "register", "help"].includes(arg);
     if (knownCommand) {
       if (command) return { error: `只能指定一个命令，收到: ${arg}` };
       command = arg as Command;
@@ -144,10 +147,19 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     const looksLikeBatchId = /^FO-[A-Za-z0-9][A-Za-z0-9-]*$/.test(arg);
     const queryCommands = new Set<Command>(["discover", "verify", "explain", "recommend", "order", "inspect"]);
     if (looksLikeBatchId && !batchArgumentProvided) {
+      if (command === "ask" || command === "search") {
+        batchId = arg;
+        batchArgumentProvided = true;
+        continue;
+      }
       if (!command) command = "inspect";
       if (!queryCommands.has(command)) return { error: `命令 ${command} 不接受位置批次 ID，请使用 --batch` };
       batchId = arg;
       batchArgumentProvided = true;
+      continue;
+    }
+    if (command === "ask" || command === "search") {
+      question = question ? `${question} ${arg}` : arg;
       continue;
     }
     if (command) return { error: `只能指定一个命令，收到: ${arg}` };
@@ -499,6 +511,23 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
       nextAction: verificationStatus === "accepted" ? "查看依据；真实上链仍需用户钱包签名并回读 receipt" : "补齐检测、冷链和来源签名后重新核验",
     };
   }
+  if (command === "ask") {
+    const query = args.question?.trim();
+    if (!query) throw new Error("ask 需要问题文本，可直接写在命令后或使用 --question");
+    return fetchRemoteJson(args, "/api/agent/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ batchId: args.batchId.toUpperCase(), question: query }),
+    });
+  }
+  if (command === "search") {
+    const query = args.question?.trim() ?? "";
+    const suffix = `?batchId=${batchId}&q=${encodeURIComponent(query)}`;
+    return fetchRemoteJson(args, `/api/agent/search${suffix}`);
+  }
+  if (command === "lifecycle" || command === "watch") {
+    return fetchRemoteJson(args, `/api/products/${batchId}/lifecycle`);
+  }
   if (command === "collaborate") {
     return fetchRemoteJson(args, "/api/agent/v1/collaborate", {
       method: "POST",
@@ -795,6 +824,9 @@ export function textFor(result: Record<string, unknown>): string {
   }
   if (result.command === "explain") return String(result.explanation ?? agentTranslation(result));
   if (result.command === "recommend") return `批次 ${result.batchId}：${result.recommendation}\n${result.reason}\n下一步：${result.consumerNextAction}\n`;
+  if (result.schemaVersion === "truthpass.agent.query.v1") return "Agent 查询：" + result.batchId + "\n" + String(result.answer ?? "") + "\n检索命中：" + String(((result.retrieval as Record<string, unknown> | undefined)?.hits as unknown[] | undefined)?.length ?? 0) + "\nTrace ID：" + String(result.traceId ?? "未知") + "\n";
+  if (result.schemaVersion === "truthpass.agent.search.v1") return "检索批次：" + result.batchId + "\n" + (((result.hits as Array<Record<string, unknown>> | undefined) ?? []).map((hit) => "- " + String(hit.title) + "：" + String(hit.snippet)).join("\n")) + "\nTrace ID：" + String(result.traceId ?? "未知") + "\n";
+  if (result.schemaVersion === "truthpass.lifecycle.v1") return "生命周期：" + result.batchId + "\n版本：" + String(result.contextRevision ?? "未知") + "\n下一步：" + String(result.nextAction ?? "未知") + "\n";
   if (result.command === "order") return `批次 ${result.batchId}：${result.orderStatus}\n${result.reason}\n`;
   if (result.command === "inspect") {
     const chain = (result.chain ?? {}) as Record<string, unknown>;
@@ -820,6 +852,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   const parsed = parseArgs(argv);
   if ("error" in parsed) return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "INVALID_INPUT", message: parsed.error } };
   if (parsed.command === "help") return { exitCode: 0, value: HELP };
+  if (!parsed.remoteUrl && ["ask", "search", "lifecycle", "watch"].includes(parsed.command)) {
+    return { exitCode: 40, value: { schemaVersion: "truthpass.cli.error.v1", code: "REMOTE_REQUIRED", message: parsed.command + " 需要 --remote 服务地址" } };
+  }
   if (parsed.remoteUrl) {
     try {
       const result = await remoteCommand(parsed);

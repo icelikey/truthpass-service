@@ -42,14 +42,17 @@ function localizedSiteRoute(site: TenantSiteConfig, view: TenantView, locale: "z
 function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: TenantView; locale: "zh" | "en" }) {
   const zh = locale === "zh";
   const batchId = currentBatch(site);
-  const labels: Array<[TenantView, string, string]> = [
+  const consumerLabels: Array<[TenantView, string, string]> = [
     ["home", zh ? "首页" : "Home", localizedSiteRoute(site, "home", locale, batchId)],
     ["agent", zh ? "商品助手" : "Agent", localizedSiteRoute(site, "agent", locale, batchId)],
     ["wallet", zh ? "钱包身份" : "Wallet", localizedSiteRoute(site, "wallet", locale, batchId)],
+  ];
+  const workspaceLabels: Array<[TenantView, string, string]> = [
     ["merchant", zh ? "企业工作台" : "Merchant", localizedSiteRoute(site, "merchant", locale, batchId)],
     ["institution", zh ? "机构审核" : "Institution", localizedSiteRoute(site, "institution", locale, batchId)],
     ["developers", zh ? "开发者" : "Developers", routeFor(site, "developers", locale)],
   ];
+  const isConsumerView = view === "home" || view === "agent" || view === "wallet";
   const alternateLocale = zh ? "en" : "zh";
   const localeHref = localizedSiteRoute(site, view, alternateLocale, view === "developers" ? undefined : batchId);
   return (
@@ -59,8 +62,16 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
       </a>
       <div className="tenant-site-context"><strong>{site.brand.name}</strong><span>{site.product.name}</span></div>
       <nav aria-label={zh ? "企业站点导航" : "Site navigation"}>
-        {labels.map(([key, label, href]) => <a key={key} className={view === key ? "active" : ""} href={href}>{label}</a>)}
+        {(isConsumerView ? consumerLabels : [...consumerLabels, ...workspaceLabels]).map(([key, label, href]) => <a key={key} className={view === key ? "active" : ""} href={href}>{label}</a>)}
       </nav>
+      {isConsumerView && (
+        <details className="tenant-nav-more">
+          <summary>{zh ? "更多" : "More"}</summary>
+          <div className="tenant-nav-more-menu">
+            {workspaceLabels.map(([key, label, href]) => <a key={key} className={view === key ? "active" : ""} href={href}>{label}</a>)}
+          </div>
+        </details>
+      )}
       {site.locale.supported.includes(alternateLocale) && <a className="tenant-language-link" href={localeHref}>{zh ? "EN" : "中文"}</a>}
       <a className="tenant-back-link" href={`${zh ? "/" : "/en"}?view=consumer&batch=${encodeURIComponent(batchId)}`}>{zh ? "回到 TruthPass" : "Back to TruthPass"}</a>
     </header>
@@ -476,6 +487,13 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           onPurchasePrepared={() => setStage("purchase_prepared")}
           onWalletPending={() => setStage("wallet_pending")}
           onReceiptVerified={() => setStage("receipt_verified")}
+          onNavigate={(nextView) => {
+            const nextRoute = routeFor(site, nextView, locale);
+            const nextUrl = nextView === "developers"
+              ? nextRoute
+              : `${nextRoute}?batch=${encodeURIComponent(batchId)}`;
+            window.location.href = nextUrl;
+          }}
           batchId={batchId}
           autoQueryBatch={query}
           autoQueryPrompt={quickPrompt}

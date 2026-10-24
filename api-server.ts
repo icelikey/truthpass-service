@@ -2272,7 +2272,7 @@ async function freeChatReply(question: string, chainContext?: ChainQueryContext,
   );
 }
 
-async function demoConsumerChat(batchId: string, b: DemoBatch, question: string, chainContext?: ChainQueryContext, locale: "zh" | "en" = "zh"): Promise<ChatReplyResult> {
+async function demoConsumerChat(batchId: string, b: DemoBatch, question: string, chainContext?: ChainQueryContext, locale: "zh" | "en" = "zh", retrievalHits: AgentSearchHit[] = []): Promise<ChatReplyResult> {
   const english = locale === "en";
   let collaboration: Record<string, unknown> | undefined;
   try {
@@ -2356,7 +2356,8 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
         ? { product: b.name, category: "rice", production: productionEvidence.facts, productionStages: productionEvidence.stages }
         : { product: b.name, category: "fish_oil", epaDhaPercent: b.epaDha, peroxideValue: b.peroxide, totox: b.totox, coldChainGapHours: b.coldGap, heavyMetals: b.heavyMetals },
       chainContext: chainContext ?? null,
-      question,
+       retrievalHits,
+       question,
     }),
     [...evidenceIds, "evidence_card", "deterministic_verifier"],
     {
@@ -3165,6 +3166,125 @@ async function mcpInspectBatch(batchId: string, traceId: string) {
   throw new Error("BATCH_NOT_FOUND");
 }
 
+type AgentSearchHit = {
+  hitId: string;
+  title: string;
+  snippet: string;
+  sourceType: "batch" | "parameter" | "production" | "lifecycle" | "chain";
+  evidenceIds: string[];
+  dataMode: "demo/synthetic" | "external";
+  tenantId: string;
+  productId: string;
+  batchId: string;
+  stage?: string;
+};
+
+function searchBatchKnowledge(batchId: string, query = ""): AgentSearchHit[] {
+  const batch = demoBatchFor(batchId);
+  if (!batch) throw new Error("BATCH_NOT_FOUND");
+  const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
+  const productId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil-concentrate";
+  const evidenceIds = evidenceFor(batchId).map((item) => item.evidenceId).filter((item): item is string => typeof item === "string");
+  const parameters = parameterDetailsFor(batchId);
+  const production = productionProcessFor(batchId);
+  const lifecycle = lifecyclePublicView(batchId);
+  const records: AgentSearchHit[] = [
+    {
+      hitId: `${batchId}:batch`,
+      title: `${batch.name} · ${batchId}`,
+      snippet: `批次 ${batchId}，数据模式 demo/synthetic；来源为当前登记批次资料。`,
+      sourceType: "batch",
+      evidenceIds,
+      dataMode: "demo/synthetic",
+      tenantId,
+      productId,
+      batchId,
+    },
+    ...parameters.map((item, index) => ({
+      hitId: `${batchId}:parameter:${index}`,
+      title: item.label,
+      snippet: `${item.label}：${item.observed ?? "未登记"}${item.unit ? ` ${item.unit}` : ""}；状态：${item.status}；规则：${item.rule ?? "确定性规则"}。`,
+      sourceType: "parameter" as const,
+      evidenceIds,
+      dataMode: "demo/synthetic" as const,
+      tenantId,
+      productId,
+      batchId,
+    })),
+    ...production.stages.map((item, index) => ({
+      hitId: `${batchId}:production:${index}`,
+      title: item.label,
+      snippet: `生产阶段“${item.label}”：${item.status}。`,
+      sourceType: "production" as const,
+      evidenceIds,
+      dataMode: "demo/synthetic" as const,
+      tenantId,
+      productId,
+      batchId,
+      stage: item.stage,
+    })),
+    ...lifecycle.events.map((item) => ({
+      hitId: `${batchId}:lifecycle:${item.stage}`,
+      title: item.label,
+      snippet: `${item.label}：${item.status}；${item.detail}`,
+      sourceType: "lifecycle" as const,
+      evidenceIds,
+      dataMode: "demo/synthetic" as const,
+      tenantId,
+      productId,
+      batchId,
+      stage: item.stage,
+    })),
+  ];
+  const normalized = query.trim().toLowerCase();
+  const tokens = [...new Set([
+    ...(normalized.match(/[a-z0-9_+-]+/gi) ?? []),
+    ...(normalized.match(/[\\u4e00-\\u9fff]{2}/g) ?? []),
+  ])];
+  const ranked = records.map((record, index) => {
+    const haystack = (record.title + " " + record.snippet + " " + (record.stage ?? "")).toLowerCase();
+    const score = tokens.length ? tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0) : 0;
+    return { record, score, index };
+  }).sort((a, b) => b.score - a.score || a.index - b.index);
+  const selected = (tokens.length && ranked.some((item) => item.score > 0))
+    ? ranked.filter((item) => item.score > 0).slice(0, 12)
+    : ranked.slice(0, 12);
+  return selected.map((item) => item.record);
+}
+
+async function runUnifiedAgentQuery(batchId: string, question: string, traceId: string, locale: "zh" | "en" = "zh") {
+  const batch = demoBatchFor(batchId);
+  if (!batch) throw new Error("BATCH_NOT_FOUND");
+  const retrieval = searchBatchKnowledge(batchId, question);
+  const chainContext = isChainStatusQuestion(question) ? await buildChainQueryContext(batchId) : undefined;
+  const reply = await demoConsumerChat(batchId, batch, question, chainContext, locale, retrieval);
+  const lifecycle = lifecyclePublicView(batchId);
+  const status = reply.status ?? "deterministic_fallback";
+  return {
+    schemaVersion: "truthpass.agent.query.v1",
+    traceId,
+    batchId,
+    tenantId: retrieval[0]?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
+    productId: retrieval[0]?.productId ?? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil-concentrate"),
+    dataMode: reply.dataMode ?? "demo/synthetic",
+    stages: [
+      { stage: "reading_batch", status: "completed", hitCount: retrieval.length },
+      { stage: "retrieval_completed", status: "completed", hitCount: retrieval.length },
+      { stage: "verifier_checked", status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
+      { stage: "jev_routed", status: reply.verifierStatus === "accepted" ? "route_to_rule" : "request_more_evidence" },
+      { stage: "model_completed", status: status === "model_assisted" ? "completed" : "fallback" },
+    ],
+    retrieval: { query: question, hits: retrieval },
+    answer: reply.lines.map((line) => line.text).join(" "),
+    citations: reply.safety?.citations ?? [],
+    evidenceIds: reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds),
+    model: { status, provider: reply.providerUsed ?? "deterministic", model: reply.modelUsed ?? "deterministic-fallback" },
+    lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction },
+    chainContext: chainContext ?? null,
+    writeBoundary: { walletRequired: true, submitted: false, nextAction: "如需购买、反馈或上链，请调用 prepare 命令并由外部钱包确认。" },
+  };
+}
+
 const mcpHttpHandler = createTruthPassMcpHttpHandler({
   origin: () => "*",
   defaultBatchId: BATCH_ID,
@@ -3176,7 +3296,7 @@ const mcpHttpHandler = createTruthPassMcpHttpHandler({
     origin,
     dataMode: "demo/synthetic",
     readOnly: true,
-    capabilities: ["truthpass.manifest", "truthpass.inspect_batch", "truthpass.explain_batch", "truthpass.lifecycle"],
+    capabilities: ["truthpass.manifest", "truthpass.inspect_batch", "truthpass.explain_batch", "truthpass.lifecycle", "truthpass.search", "truthpass.ask"],
     writeBoundary: "protected_tools_return_pending_confirmation",
   }),
   inspectBatch: mcpInspectBatch,
@@ -3199,6 +3319,8 @@ const mcpHttpHandler = createTruthPassMcpHttpHandler({
     };
   },
   lifecycle: async (batchId, traceId) => ({ ...lifecyclePublicView(batchId), traceId }),
+  searchBatch: async (batchId, query, traceId) => ({ schemaVersion: "truthpass.mcp.search.v1", traceId, batchId, dataMode: "demo/synthetic", hits: searchBatchKnowledge(batchId, query) }),
+  askBatch: async (batchId, question, traceId) => runUnifiedAgentQuery(batchId, question, traceId),
   protectedAuthorized: (request) => agentGatewayAuthorized(request).authorized,
 });
 
@@ -5032,6 +5154,34 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const receiptIndex = await receiptIndexForVerification();
     const chain = receiptIndex.filter((item) => item.batchId === batchId && (item.action === "purchase" || item.action === "recordPurchase")).map((item) => ({ txHash: item.txHash, status: item.receiptStatus === "0x1" || item.receiptStatus === "1" ? "mainnet_receipt_verified" : "review_required", eventVerified: item.eventVerified, createdAt: item.createdAt, explorerUrl: item.explorerUrl }));
     sendJson(res, 200, { schemaVersion: "truthpass.purchase.status.v1", batchId, payments: payment, chain, purchaseConfirmed: chain.some((item) => item.status === "mainnet_receipt_verified"), dataMode: "demo/synthetic" });
+    return true;
+  }
+
+  if (p === "/api/agent/search" && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") ?? BATCH_ID).trim().toUpperCase();
+    const query = url.searchParams.get("q") ?? "";
+    const traceId = requestTraceId(req);
+    try {
+      sendJson(res, 200, { schemaVersion: "truthpass.agent.search.v1", traceId, batchId, dataMode: "demo/synthetic", hits: searchBatchKnowledge(batchId, query) });
+    } catch (error) {
+      sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), traceId, batchId });
+    }
+    return true;
+  }
+
+  if (p === "/api/agent/query" && req.method === "POST") {
+    const body = await readBody(req);
+    const batchId = (typeof body.batchId === "string" ? body.batchId : BATCH_ID).trim().toUpperCase();
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    const locale = body.locale === "en" ? "en" : "zh";
+    const traceId = requestTraceId(req);
+    if (!question) { sendJson(res, 400, { error: "question_required", traceId, batchId }); return true; }
+    try {
+      sendJson(res, 200, await runUnifiedAgentQuery(batchId, question, traceId, locale));
+    } catch (error) {
+      const status = error instanceof Error && error.message === "BATCH_NOT_FOUND" ? 404 : 500;
+      sendJson(res, status, { error: error instanceof Error ? error.message : String(error), traceId, batchId });
+    }
     return true;
   }
 

@@ -11,6 +11,8 @@ export type TruthPassMcpDependencies = {
   inspectBatch: (batchId: string, traceId: string) => Promise<unknown>;
   explainBatch: (batchId: string, question: string | undefined, traceId: string) => Promise<unknown>;
   lifecycle: (batchId: string, traceId: string) => Promise<unknown>;
+  searchBatch: (batchId: string, query: string | undefined, traceId: string) => Promise<unknown>;
+  askBatch: (batchId: string, question: string, traceId: string) => Promise<unknown>;
   protectedAuthorized?: (req: IncomingMessage) => boolean;
 };
 
@@ -61,6 +63,26 @@ const READ_ONLY_TOOLS = [
       type: "object",
       properties: { batchId: { type: "string", minLength: 1 } },
       required: ["batchId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "truthpass.search",
+    description: "按当前批次检索公开资料、参数、生产阶段和生命周期。只读。",
+    inputSchema: {
+      type: "object",
+      properties: { batchId: { type: "string", minLength: 1 }, query: { type: "string", maxLength: 1000 } },
+      required: ["batchId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "truthpass.ask",
+    description: "检索当前批次并生成带引用的 Agent 解释。只读；不代替钱包签名。",
+    inputSchema: {
+      type: "object",
+      properties: { batchId: { type: "string", minLength: 1 }, question: { type: "string", minLength: 1, maxLength: 1000 } },
+      required: ["batchId", "question"],
       additionalProperties: false,
     },
   },
@@ -184,6 +206,12 @@ async function invokeTool(name: string, args: Record<string, unknown>, deps: Tru
   if (name === "truthpass.inspect_batch") return deps.inspectBatch(batchId, traceId);
   if (name === "truthpass.explain_batch") return deps.explainBatch(batchId, typeof args.question === "string" ? args.question : undefined, traceId);
   if (name === "truthpass.lifecycle") return deps.lifecycle(batchId, traceId);
+  if (name === "truthpass.search") return deps.searchBatch(batchId, typeof args.query === "string" ? args.query : undefined, traceId);
+  if (name === "truthpass.ask") {
+    const question = typeof args.question === "string" ? args.question.trim() : "";
+    if (!question) throw new Error("params.question 必须是非空字符串");
+    return deps.askBatch(batchId, question, traceId);
+  }
   throw new Error("工具不存在: " + name);
 }
 

@@ -77,3 +77,29 @@ test("MCP keeps protected operations pending confirmation and rejects invalid ba
     assert.equal(cors.headers.get("access-control-allow-methods"), "POST, OPTIONS");
   });
 });
+
+test("MCP exposes scoped retrieval and unified Agent ask", async () => {
+  await withServer(async (baseUrl) => {
+    const search = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "mcp-search-001" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "truthpass.search", arguments: { batchId: "FO-2026-001", query: "冷链" } } }),
+    });
+    const searchBody = await search.json() as Record<string, any>;
+    assert.equal(searchBody.result.structuredContent.batchId, "FO-2026-001");
+    assert.ok(searchBody.result.structuredContent.hits.length > 0);
+    assert.ok(searchBody.result.structuredContent.hits.every((hit: any) => hit.batchId === "FO-2026-001"));
+
+    const asked = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "mcp-ask-001" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "truthpass.ask", arguments: { batchId: "FO-2026-001", question: "请解释冷链资料和下一步。" } } }),
+    });
+    const askedBody = await asked.json() as Record<string, any>;
+    assert.equal(askedBody.result.structuredContent.schemaVersion, "truthpass.agent.query.v1");
+    assert.equal(askedBody.result.structuredContent.batchId, "FO-2026-001");
+    assert.equal(askedBody.result.structuredContent.model.status, "deterministic_fallback");
+    assert.ok(askedBody.result.structuredContent.traceId);
+    assert.ok(askedBody.result.structuredContent.retrieval.hits.length > 0);
+  });
+});

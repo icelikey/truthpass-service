@@ -248,6 +248,38 @@ test("Agent manifest and collaboration expose explicit runtime mode", async () =
   });
 });
 
+test("unified Agent query returns retrieval hits and one batch-scoped trace", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/agent/query`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-request-id": "agent-query-001" },
+      body: JSON.stringify({ batchId: "FO-2026-001", question: "检测、冷链和当前缺口是什么？" }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as Record<string, any>;
+    assert.equal(body.schemaVersion, "truthpass.agent.query.v1");
+    assert.equal(body.batchId, "FO-2026-001");
+    assert.equal(body.traceId, "agent-query-001");
+    assert.equal(body.dataMode, "demo/synthetic");
+    assert.ok(body.retrieval.hits.length > 0);
+    assert.ok(body.retrieval.hits.every((hit: any) => hit.batchId === "FO-2026-001"));
+    assert.equal(body.writeBoundary.submitted, false);
+    assert.ok(Array.isArray(body.stages));
+  });
+});
+
+test("public Agent search rejects unknown batch instead of falling through", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/agent/search?batchId=FO-9999-999&q=冷链`, {
+      headers: { "x-truthpass-request-id": "agent-search-unknown" },
+    });
+    assert.equal(response.status, 404);
+    const body = await response.json() as Record<string, any>;
+    assert.equal(body.batchId, "FO-9999-999");
+    assert.equal(body.error, "BATCH_NOT_FOUND");
+  });
+});
+
 
 test("customer service exposes status and SSE runtime metadata", async () => {
   await withServer(async (baseUrl) => {

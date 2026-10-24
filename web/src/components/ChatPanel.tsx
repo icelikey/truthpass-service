@@ -469,6 +469,7 @@ export function ChatPanel({
   onPurchasePrepared,
   onWalletPending,
   onReceiptVerified,
+  onNavigate,
   afterSalesPrompt,
   onPromptConsumed,
   batchId,
@@ -486,6 +487,8 @@ export function ChatPanel({
   onPurchasePrepared?: () => void;
   onWalletPending?: () => void;
   onReceiptVerified?: () => void;
+  /** Agent-controlled route transition. The callback keeps tenant and batch scope in the parent. */
+  onNavigate?: (view: "home" | "wallet" | "merchant" | "institution" | "developers") => void;
   afterSalesPrompt?: string;
   onPromptConsumed?: () => void;
   batchId: string | null;
@@ -627,6 +630,51 @@ export function ChatPanel({
     }
   };
 
+  const preparePurchaseFromAgent = async (text: string) => {
+    if (busy) return;
+    pushUser(text);
+    if (!batchId) {
+      pushAgent([{ cls: "disclaimer", text: en ? "Choose a batch first. I will not prepare a purchase without a batch context." : "请先确定批次。我不会在没有批次上下文时准备购买。" }]);
+      return;
+    }
+    pushAgent([{ cls: "cmd", text: en ? `I am checking whether ${batchId} is eligible before preparing checkout.` : `我先核对 ${batchId} 是否满足当前规则，再准备购买。` }]);
+    try {
+      const items = await fetchRecommend(batchId);
+      // Never fall back to another batch: checkout is scoped to the active tenant/product/batch context.
+      const current = items.find((item) => item.batchId === batchId);
+      if (!current) {
+        pushAgent([{ cls: "disclaimer", text: en ? "No scoped recommendation is available, so checkout was not prepared." : "当前没有带证据范围的推荐，因此没有准备购买。" }]);
+        return;
+      }
+      if (current.recommendationStatus !== "recommend_with_scope") {
+        pushAgent([
+          { cls: "conclusion", text: en ? `I will not prepare checkout for ${current.batchId} yet.` : `当前不会为 ${current.batchId} 准备购买。` },
+          { cls: "plain", text: en ? (current.reason ?? "The batch needs review before recommendation.") : (current.reason ?? "这批资料需要先复核，再决定是否推荐。") },
+          { cls: "cmd", text: en ? "Next: open the evidence and resolve the listed gaps." : "下一步：打开证据并补齐当前列出的缺口。" },
+        ]);
+        return;
+      }
+      await handleOrder(current);
+    } catch {
+      pushAgent([{ cls: "disclaimer", text: en ? "The recommendation check failed, so no purchase was prepared." : "推荐核验失败，因此没有准备购买。" }]);
+    }
+  };
+
+  const routeFromAgent = (text: string): boolean => {
+    if (!onNavigate) return false;
+    const lower = text.toLowerCase();
+    const view = /钱包|签名|支付|wallet|sign|payment/.test(text) ? "wallet"
+      : /企业|生产方|上传资料|merchant|producer/.test(text) ? "merchant"
+        : /检测机构|审核|复核|institution|review/.test(text) ? "institution"
+          : /开发者|mcp|cli|developers?/.test(lower) ? "developers"
+            : null;
+    if (!view) return false;
+    pushUser(text);
+    pushAgent([{ cls: "cmd", text: en ? `I am opening the ${view} step while keeping batch ${batchId ?? "current"}.` : `我正在打开${view === "wallet" ? "钱包确认" : view === "merchant" ? "企业资料" : view === "institution" ? "机构审核" : "开发者接入"}，并保持当前批次 ${batchId ?? "不变"}。` }]);
+    onNavigate(view);
+    return true;
+  };
+
   const handleAnchorOrder = async (order: OrderCard) => {
     try {
       onWalletPending?.();
@@ -676,6 +724,11 @@ export function ChatPanel({
     e.preventDefault();
     const text = input.trim();
     if (!text || busy) return;
+    if (routeFromAgent(text)) return;
+    if (/(购买|下单|支付|结账|checkout|buy|purchase)/i.test(text)) {
+      void preparePurchaseFromAgent(text);
+      return;
+    }
     if (/(推荐|补货|快吃完|复购|再买|帮我选)/.test(text)) {
       recommend(text);
     } else {
