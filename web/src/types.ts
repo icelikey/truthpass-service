@@ -152,6 +152,8 @@ export interface ChatEvent {
   traceId?: string;
   provider?: string;
   model?: string;
+  /** Safe public classification of a provider failure; never includes the provider response or credentials. */
+  providerIssue?: "unauthorized" | "rate_limited" | "invalid_response" | "unavailable";
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];

@@ -17,6 +17,7 @@ export interface ChatMessage {
     | "dataMode"
     | "provider"
     | "model"
+    | "providerIssue"
     | "modelAssisted"
     | "fallbackApplied"
     | "evidenceIds"

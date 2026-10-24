@@ -3407,6 +3407,11 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tp-consumer-page .consumer-action-dock { margin-top: 22px; border-color: rgba(211,184,132,.35); background: rgba(248,239,220,.06); }
 .tp-consumer-workspace { display: grid; grid-template-columns: minmax(0,.95fr) minmax(0,1.05fr); gap: 20px; width: min(1250px, calc(100% - 72px)); margin: 0 auto; align-items: start; }
 .tp-consumer-agent-column, .tp-consumer-evidence-column { min-width: 0; }
+.tp-consumer-record-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 88px; padding: 18px 20px; border: 1px solid rgba(200,163,106,.3); border-radius: 14px; color: var(--consumer-paper); background: rgba(25,29,30,.72); text-align: left; cursor: pointer; }
+.tp-consumer-record-toggle:hover { border-color: rgba(200,163,106,.62); background: rgba(34,38,38,.9); }
+.tp-consumer-record-toggle > span:first-child { display: grid; gap: 6px; }
+.tp-consumer-record-toggle strong { font: 400 22px/1.2 Georgia, "Songti SC", serif; }
+.tp-consumer-record-toggle > span:last-child { color: #c8a36a; font-size: 24px; }
 .tp-consumer-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin: 0 0 13px; }
 .tp-consumer-section-heading h2 { margin: 6px 0 5px; color: var(--consumer-paper); font: 400 clamp(25px, 3vw, 38px) Georgia, "Songti SC", serif; }
 .tp-consumer-section-heading p { margin: 0; color: #aaa89f; font-size: 13px; line-height: 1.55; }

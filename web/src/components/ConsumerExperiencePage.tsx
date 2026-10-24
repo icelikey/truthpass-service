@@ -102,11 +102,12 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const [query, setQuery] = useState(batchId ?? "");
   const [autoQueryBatch, setAutoQueryBatch] = useState<string | null>(batchId);
   const [showHow, setShowHow] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; status?: string }>({});
+  const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; provider?: string; providerIssue?: string; modelAssisted?: boolean; status?: string }>({});
   const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
   const [flowDataMode, setFlowDataMode] = useState("demo/synthetic");
   const [recommendation, setRecommendation] = useState<RecommendItem | null>(null);
   const [recommendationState, setRecommendationState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
+  const [showEvidence, setShowEvidence] = useState(false);
   const flowSeqRef = useRef(0);
   const lifecycleRevisionRef = useRef<number | undefined>(undefined);
 
@@ -161,6 +162,13 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
       source: "Agent SSE",
       label: stageLabels[stage] ?? stage,
       detail: event.detail
+        ?? (event.providerIssue === "unauthorized"
+          ? (locale === "zh" ? "模型接口认证失败，已安全回退到当前批次的确定性资料回答。" : "Model authentication failed; safely fell back to the deterministic batch answer.")
+          : event.providerIssue === "rate_limited"
+            ? (locale === "zh" ? "模型接口请求受限，已安全回退到当前批次的确定性资料回答。" : "The model provider rate-limited this request; safely fell back to the deterministic batch answer.")
+            : event.providerIssue === "invalid_response"
+              ? (locale === "zh" ? "模型回答未通过格式或引用校验，原文未展示。" : "The model response failed format or citation checks and was not shown.")
+              : undefined)
         ?? (event.pipelineDetail ? `Verifier ${event.pipelineDetail.verifier.status} · JEV ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "模型" : "model"} ${event.pipelineDetail.deepseek.status}` : event.text ?? ""),
       status,
       at: new Date().toISOString(),
@@ -325,7 +333,15 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
 
         <section className="tp-consumer-workspace" id="agent">
           <div className="tp-consumer-agent-column">
-            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentStatus.agentMode === "model_assisted" ? (locale === "zh" ? "DeepSeek · 已参与解释" : "DeepSeek · explanation active") : agentStatus.status === "ready" ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Fallback · evidence available") : (locale === "zh" ? "Agent 连接中" : "Agent connecting")}</span></div>
+            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentStatus.modelAssisted === true ? (locale === "zh" ? "DeepSeek · 已参与解释" : "DeepSeek · explanation active") : agentStatus.status === "provider_unavailable" ? (locale === "zh" ? "模型认证失败 · 已安全回退" : "Model auth failed · safe fallback") : agentStatus.status === "rate_limited" ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback") : agentStatus.status === "deterministic_fallback" || agentStatus.status === "ready" ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Fallback · evidence available") : (locale === "zh" ? "Agent 连接中" : "Agent connecting")}</span></div>
+            <AgentDataFlowRail
+              events={flowEvents}
+              batchId={batchId ?? "—"}
+              dataMode={flowDataMode}
+              traceId={flowTraceId ?? flowEvents.at(-1)?.traceId}
+              locale={locale}
+              onClear={() => setFlowEvents([])}
+            />
             <ChatPanel
               onStart={props.onStart}
               onDone={props.onDone}
@@ -334,20 +350,21 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
                 props.onBatch(id);
               }}
               onFlowEvent={appendFlowEvent}
+              onMeta={(meta) => setAgentStatus({
+                agentMode: meta?.agentMode,
+                model: meta?.model,
+                provider: meta?.provider,
+                providerIssue: meta?.providerIssue,
+                modelAssisted: meta?.modelAssisted,
+                status: meta?.serviceStatus,
+              })}
               onPurchasePrepared={props.onPurchasePrepared}
               onWalletPending={props.onWalletPending}
               onReceiptVerified={props.onReceiptVerified}
               batchId={batchId}
               autoQueryBatch={autoQueryBatch}
               locale={locale}
-            />
-            <AgentDataFlowRail
-              events={flowEvents}
-              batchId={batchId ?? "—"}
-              dataMode={flowDataMode}
-              traceId={flowTraceId ?? flowEvents.at(-1)?.traceId}
-              locale={locale}
-              onClear={() => setFlowEvents([])}
+              minimal
             />
             <section className="consumer-auto-recommendation" aria-label={locale === "zh" ? "Agent 推荐结果" : "Agent recommendation"}>
               <div className="consumer-auto-recommendation-head">
@@ -374,9 +391,14 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
             </section>
           </div>
           <div className="tp-consumer-evidence-column" id="evidence">
-            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "证据卡" : "EVIDENCE CARD"}</span><h2>{t.evidenceTitle}</h2></div>{batchId && <code>{batchId}</code>}</div>
-            <ProductPanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
-            <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
+            <button type="button" className="tp-consumer-record-toggle" onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}>
+              <span><span className="tp-kicker">{locale === "zh" ? "按需打开" : "OPEN WHEN NEEDED"}</span><strong>{showEvidence ? (locale === "zh" ? "收起这批资料" : "Hide this batch record") : (locale === "zh" ? "查看这批资料和依据" : "View this batch record and sources")}</strong></span><span aria-hidden="true">{showEvidence ? "⌃" : "⌄"}</span>
+            </button>
+            {showEvidence && <>
+              <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "证据卡" : "EVIDENCE CARD"}</span><h2>{t.evidenceTitle}</h2></div>{batchId && <code>{batchId}</code>}</div>
+              <ProductPanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
+              <EvidencePanel state={verifyState} batchId={batchId ?? "FO-2026-001"} locale={locale} />
+            </>}
           </div>
         </section>
 

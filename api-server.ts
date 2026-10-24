@@ -1775,6 +1775,8 @@ type ChatReplyResult = {
   verifierReasons?: string[];
   providerUsed?: string;
   modelUsed?: string;
+  /** Safe public classification only; provider response bodies and credentials stay server-side. */
+  providerIssue?: "unauthorized" | "rate_limited" | "invalid_response" | "unavailable";
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
@@ -1804,6 +1806,7 @@ type ChatMeta = {
   provider?: string;
   /** Public model identifier only; never expose credentials or prompt text. */
   model?: string;
+  providerIssue?: "unauthorized" | "rate_limited" | "invalid_response" | "unavailable";
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];
@@ -1971,6 +1974,7 @@ async function streamChatWithReply(
     traceId: baseMeta.traceId,
     provider: result.providerUsed ?? (result.status === "model_assisted" ? publicCustomerProvider() : "deterministic"),
     model: result.modelUsed ?? (result.status === "model_assisted" ? publicCustomerModel() : "deterministic-fallback"),
+    ...(result.providerIssue ? { providerIssue: result.providerIssue } : {}),
     modelAssisted: result.status === "model_assisted",
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
@@ -2091,6 +2095,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   // invalid answer, the request falls back to deterministic evidence text
   // instead of silently switching to a different provider.
   const providers: ResolvedAgentProvider[] = [provider];
+  let providerIssue: ChatReplyResult["providerIssue"] = "unavailable";
   const safetyContract = {
     batchId: contract?.batchId,
     dataMode: contract?.dataMode ?? "demo/synthetic",
@@ -2137,6 +2142,11 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         }),
       });
       if (!res.ok) {
+        providerIssue = res.status === 401 || res.status === 403
+          ? "unauthorized"
+          : res.status === 429
+            ? "rate_limited"
+            : "unavailable";
         const diagnostic = { event: "customer_service_provider_unavailable", endpointHost: new URL(endpoint).host, status: res.status, at: new Date().toISOString() } as const;
         lastCustomerModelDiagnostic = diagnostic;
         console.warn(JSON.stringify(diagnostic));
@@ -2146,6 +2156,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       const content = data.choices?.[0]?.message?.content;
       const safety = typeof content === "string" ? validateConsumerModelOutput(content, safetyContract) : { status: "rejected" as const, citations: [], reasons: ["model_content_missing"] };
       if (safety.status !== "accepted" || !safety.text) {
+        providerIssue = "invalid_response";
         const text = typeof content === "string" ? content.trim() : "";
         const diagnostic = {
           event: "customer_service_provider_invalid_response",
@@ -2198,7 +2209,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     status: "unavailable",
     at: new Date().toISOString(),
   };
-  return { lines: [], status: "provider_unavailable", dataMode: "demo/synthetic", sources, safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] } };
+  return { lines: [], status: providerIssue === "rate_limited" ? "rate_limited" : "provider_unavailable", providerIssue, dataMode: "demo/synthetic", sources, safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] } };
 }
 
 function isChainStatusQuestion(question: string): boolean {
