@@ -102,7 +102,10 @@ export function AgentDataFlowRail({
     ? (zh ? "本次查询已返回" : "This run has returned")
     : (zh ? "正在查这批资料" : "Following this batch");
   const latestByStage = new Map<string, AgentFlowEvent>();
-  for (const event of events) {
+  // Keep the five-step summary scoped to the current SSE run. Background
+  // lifecycle polling is useful in the full log, but it must not make a new
+  // question inherit an earlier run's stage status.
+  for (const event of currentRunEvents) {
     const key = flowStageKey(event, locale);
     if (key) latestByStage.set(key, event);
   }
@@ -135,8 +138,8 @@ export function AgentDataFlowRail({
       </div>
       <div className="agent-data-flow-summary" aria-live="polite">
         <span>{zh ? "已完成阶段" : "Stages returned"} <b>{latestByStage.size}/5</b></span>
-        <span>{zh ? "最新来源" : "Latest source"} <b>{events.at(-1)?.source ?? "—"}</b></span>
-        <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? events.at(-1)?.traceId ?? "—"}</code></span>
+        <span>{zh ? "最新来源" : "Latest source"} <b>{latestEvent?.source ?? "—"}</b></span>
+        <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? latestEvent?.traceId ?? "—"}</code></span>
       </div>
       <div className={`agent-data-flow-live ${latestEvent?.status ?? "pending"}`} aria-live="polite">
         <span className="agent-data-flow-live-dot" aria-hidden="true" />

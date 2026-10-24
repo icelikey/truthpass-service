@@ -2812,6 +2812,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .merchant-access-state { width: min(640px, calc(100% - 32px)); margin: 15vh auto; padding: 38px; border: 1px solid rgba(173, 134, 73, .45); border-radius: 18px; background: rgba(14, 23, 36, .92); box-shadow: 0 24px 80px rgba(0, 0, 0, .28); }
 .merchant-access-state h1 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .merchant-access-state p:not(.eyebrow) { margin: 0 0 22px; color: var(--muted); line-height: 1.75; }
+.merchant-access-steps { display: grid; gap: 8px; margin: 0 0 22px; color: #dce8ed; font-size: 13px; line-height: 1.55; }
+.merchant-access-steps span { display: block; padding: 10px 12px; border: 1px solid rgba(125,232,232,.16); border-radius: 10px; background: rgba(93,213,213,.05); }
+.merchant-access-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.merchant-access-actions .merchant-secondary, .merchant-access-state > .merchant-secondary { display: inline-flex; align-items: center; text-decoration: none; }
 .merchant-app-frame { display: grid; grid-template-columns: 190px minmax(0, 1fr) 370px; min-height: 770px; max-width: 1600px; margin: 0 auto; border-bottom: 1px solid rgba(125,232,232,.12); background: linear-gradient(135deg, rgba(7,29,55,.98), rgba(5,19,38,.98)); }
 .merchant-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 18px 10px; border-right: 1px solid rgba(125,232,232,.14); background: linear-gradient(180deg, rgba(11,42,79,.9), rgba(5,24,49,.94)); }
 .merchant-sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 0 10px 22px; color: var(--text); text-decoration: none; font-weight: 800; }

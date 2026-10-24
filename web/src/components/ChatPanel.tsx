@@ -221,6 +221,7 @@ function MessageView({
   txBusy,
   walletReady,
   locale = "zh",
+  minimal = false,
 }: {
   message: ChatMessage;
   onOrder: (item: RecommendItem) => void;
@@ -229,6 +230,7 @@ function MessageView({
   txBusy: boolean;
   walletReady: boolean;
   locale?: "zh" | "en";
+  minimal?: boolean;
 }) {
   if (message.role === "user") {
     return (
@@ -301,7 +303,7 @@ function MessageView({
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
-      {stream.history.length > 0 && (
+      {!minimal && stream.history.length > 0 && (
         <details className={`chat-stage-details${message.done ? " is-complete" : ""}`} open>
           <summary>{en ? "Live data flow" : "数据流过程"} · {message.done ? (en ? "completed" : "已完成") : (en ? "running" : "运行中")}</summary>
           <div className="chat-stage-rail" role="status" aria-live="polite">
@@ -747,6 +749,7 @@ export function ChatPanel({
             txBusy={txBusy}
             walletReady={walletReady}
             locale={locale}
+            minimal={minimal}
           />
         ))}
       </div>
