@@ -159,6 +159,23 @@ export default function App() {
         </ModalProvider>
       );
     }
+    // The public root is the direct Agent entry. A visitor should be able to ask one
+    // question and see the scoped record without first learning the platform navigation.
+    // Marketing and integration pages remain available at /product and /developers.
+    if (pathname === "/" || pathname === "/en") {
+      const focusedSite = getTenantSite(batchId?.startsWith("RC-") ? "rice-demo" : "fish-oil-demo");
+      if (focusedSite) {
+        const focusedBatch = batchId ?? focusedSite.batch.defaultBatchId;
+        return (
+          <ModalProvider>
+            <WalletProvider activeBatchId={focusedBatch} onToast={showToast} locale={pathname === "/en" ? "en" : "zh"}>
+              <TenantSitePage site={focusedSite} view="agent" locale={pathname === "/en" ? "en" : "zh"} />
+              {toast && <div className="toast" role="status">{toast}</div>}
+            </WalletProvider>
+          </ModalProvider>
+        );
+      }
+    }
     return <PublicPageRouter pathname={pathname} />;
   }
 
