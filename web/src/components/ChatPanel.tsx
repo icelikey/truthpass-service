@@ -663,9 +663,9 @@ export function ChatPanel({
   const routeFromAgent = (text: string): boolean => {
     if (!onNavigate) return false;
     const lower = text.toLowerCase();
-    const view = /钱包|签名|支付|wallet|sign|payment/.test(text) ? "wallet"
-      : /企业|生产方|上传资料|merchant|producer/.test(text) ? "merchant"
-        : /检测机构|审核|复核|institution|review/.test(text) ? "institution"
+    const view = /钱包|签名|支付|wallet|sign|payment/.test(lower) ? "wallet"
+      : /企业|生产方|上传资料|merchant|producer/.test(lower) ? "merchant"
+        : /检测机构|审核|复核|institution|review/.test(lower) ? "institution"
           : /开发者|mcp|cli|developers?/.test(lower) ? "developers"
             : null;
     if (!view) return false;
