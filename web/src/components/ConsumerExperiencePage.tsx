@@ -114,7 +114,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const agentBadge = agentStatus.modelAssisted === true
     ? `${agentStatus.provider ?? (locale === "zh" ? "模型" : "Model")} · ${locale === "zh" ? "已参与解释" : "explanation active"}`
     : agentStatus.status === "provider_unavailable"
-      ? (locale === "zh" ? "模型暂不可用 · 已安全回退" : "Model unavailable · safe fallback")
+      ? (locale === "zh" ? "模型解释暂不可用 · 资料仍可查" : "Model explanation unavailable · evidence readable")
       : agentStatus.status === "rate_limited"
         ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback")
         : agentStatus.status === "deterministic_fallback" || agentStatus.status === "degraded"
