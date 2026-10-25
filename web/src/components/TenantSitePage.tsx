@@ -396,8 +396,8 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     ? (zh ? `${agentMeta?.provider ?? "DeepSeek"} · 已参与解释` : `${agentMeta?.provider ?? "DeepSeek"} · explanation active`)
     : requestStatus === "provider_unavailable"
       ? (agentMeta?.providerIssue === "billing_required"
-        ? (zh ? "模型额度未满足 · 基础资料仍可查" : "Model credits unavailable · evidence remains available")
-        : (zh ? "模型暂不可用 · 基础资料仍可查" : "Model unavailable · evidence remains available"))
+        ? (zh ? "模型解释暂时不可用 · 我仍可查证据" : "Model explanation unavailable · evidence still readable")
+        : (zh ? "模型暂时不可用 · 我仍可查证据" : "Model unavailable · evidence still readable"))
       : requestStatus === "rate_limited"
         ? (zh ? "请求受限 · 使用基础回答" : "Rate limited · fallback answer")
         : requestStatus === "maintenance"
@@ -406,7 +406,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
             ? (zh ? "基础回答 · 模型未参与" : "Evidence fallback · model not used")
             : (zh ? "等待真实 Agent 查询" : "Waiting for an Agent query");
   const runtimeNotice = agentMeta?.providerIssue === "billing_required"
-    ? (zh ? "模型账户额度未满足，已安全回退；批次读取、Verifier 和 JEV 仍已运行。" : "Model billing or credits are unavailable; the evidence fallback is active. Batch reading, Verifier, and JEV still ran.")
+    ? (zh ? "模型服务暂时没有可用额度，所以我先用有来源的基础回答；批次读取、规则核验和 JEV 仍已运行。" : "The model service has no available credits right now, so I am using sourced evidence fallback; batch reading, rule checks, and JEV still ran.")
     : modelActuallyUsed
       ? (zh ? `${agentMeta?.provider ?? "模型"} 已参与本次解释；回答仍受当前批次引用校验。` : `${agentMeta?.provider ?? "Model"} explained this run; citations remain scoped to this batch.`)
       : agentMeta
@@ -441,7 +441,8 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }, [appendFlowEvent, batchId, locale, site.product.demoMode]);
   return (
     <main className="tenant-site-main tenant-agent-main">
-      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "商品 Agent" : "PRODUCT AGENT"}</p><h1>{zh ? "你问什么，我查什么。" : "Ask once. Get the record."}</h1><p>{zh ? "所有流程从对话开始。需要时，我会把证据、生命周期、钱包和下一步打开给你。" : "Start with a question. I will open the evidence, lifecycle, wallet step, or next action when you need it."}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "商品核验助手" : "PRODUCT CHECK"}</p><h1>{zh ? "先问清楚，再决定要不要买。" : "Ask first. Decide after."}</h1><p>{zh ? `我会直接查 ${site.product.name} 这批商品的生产、检测、运输和反馈，用大白话告诉你：查到了什么、还缺什么、下一步怎么办。` : `I will read the production, testing, delivery, and feedback record for this ${site.product.name} batch, then explain what is known, missing, and next.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-agent-howto" aria-label={zh ? "Agent 使用方法" : "How to use the Agent"}><div className="tenant-agent-howto-title"><strong>{zh ? "普通人这样用" : "How to use it"}</strong><span>{zh ? "不用看技术页面" : "No technical pages needed"}</span></div><div className="tenant-agent-howto-steps"><article><b>1</b><strong>{zh ? "扫码或输入批次" : "Scan or enter a batch"}</strong><span>{zh ? "先确定你正在看的哪一批商品" : "Choose the exact product batch"}</span></article><article><b>2</b><strong>{zh ? "直接问我" : "Ask directly"}</strong><span>{zh ? "例如：检测通过了吗？冷链有记录吗？" : "For example: did testing pass? Is cold chain covered?"}</span></article><article><b>3</b><strong>{zh ? "看依据再决定" : "Decide with evidence"}</strong><span>{zh ? "我会列出已查到、缺少和下一步责任方" : "I show what was found, what is missing, and who acts next"}</span></article></div></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "和商品助手对话" : "Talk to the product Agent"}</strong><span>{batchId}</span></div>
         <div className={`tenant-agent-runtime-notice ${agentMeta?.providerIssue ? "attention" : modelActuallyUsed ? "model" : ""}`} role="status">

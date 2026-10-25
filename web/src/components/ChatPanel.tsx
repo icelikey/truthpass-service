@@ -920,7 +920,7 @@ export function ChatPanel({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? `Ask about ${productLabel ?? "a product"} or batch` : `输入${productLabel ?? "商品"}或批次号`)}
+          placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? `Ask: did ${productLabel ?? "this product"} pass testing?` : `例如：这批${productLabel ?? "商品"}检测通过了吗？`)}
           autoComplete="off"
           disabled={busy}
           aria-label={en ? "Agent question" : "Agent 问题输入框"}

@@ -3741,7 +3741,18 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-section-heading h1 { font-size: clamp(42px, 6vw, 72px); }
 .tenant-section-heading > .tp-demo-ribbon { flex: 0 0 auto; margin-top: 12px; }
 .tenant-agent-grid, .tenant-wallet-grid, .tenant-dev-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 16px; margin-top: 24px; }
-.tenant-agent-heading { max-width: 860px; margin-inline: auto; }
+.tenant-agent-heading { max-width: 960px; margin-inline: auto; }
+.tenant-agent-heading h1 { max-width: 720px; font-size: clamp(38px, 5vw, 62px); line-height: 1.05; }
+.tenant-agent-heading p { max-width: 700px; }
+.tenant-agent-howto { max-width: 960px; margin: 16px auto 0; padding: 15px 17px; border: 1px solid rgba(200,163,106,.28); border-radius: 12px; background: rgba(244,239,228,.06); }
+.tenant-agent-howto-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #f4efe4; }
+.tenant-agent-howto-title strong { font: 600 15px/1.2 Georgia, serif; }
+.tenant-agent-howto-title span { color: #9e998e; font-size: 11px; }
+.tenant-agent-howto-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 13px; }
+.tenant-agent-howto-steps article { display: grid; grid-template-columns: 25px 1fr; column-gap: 9px; row-gap: 3px; align-items: start; }
+.tenant-agent-howto-steps b { grid-row: span 2; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: #171715; background: #d5b879; font: 700 12px/1 Arial, sans-serif; }
+.tenant-agent-howto-steps strong { color: #f4efe4; font-size: 12px; }
+.tenant-agent-howto-steps span { color: #aaa49a; font-size: 11px; line-height: 1.4; }
 .tenant-agent-single { max-width: 900px; margin: 0 auto; }
 .tenant-agent-single .chat-panel { border: 0; box-shadow: none; background: transparent; }
 .tenant-agent-single .chat-quick-minimal { padding-top: 8px; }
@@ -3800,7 +3811,7 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-lifecycle-mini-item small { margin-top: 7px; color: #555750; font-size: 10px; line-height: 1.4; }
 .tenant-lifecycle-mini-item.synced, .tenant-lifecycle-mini-item.verified { border-color: rgba(43,125,95,.42); }
 .tenant-lifecycle-mini-item.awaiting_user, .tenant-lifecycle-mini-item.pending { border-color: rgba(177,138,69,.52); }
-@media (max-width: 720px) { .tenant-usage-grid { grid-template-columns: 1fr; } .tenant-usage-panel, .tenant-lifecycle-strip { padding: 13px; } }
+@media (max-width: 720px) { .tenant-usage-grid { grid-template-columns: 1fr; } .tenant-usage-panel, .tenant-lifecycle-strip { padding: 13px; } .tenant-agent-howto { padding: 13px; } .tenant-agent-howto-steps { grid-template-columns: 1fr; gap: 10px; } }
 @media (max-width: 820px) { .tenant-context-drawer { grid-template-columns: 1fr; } .tenant-agent-actions { align-items: flex-start; flex-direction: column; } }
 .tp-platform-visual { display: block; width: min(100%, 300px); margin: 0 auto 14px; border: 1px solid rgba(200,163,106,.35); border-radius: 6px; opacity: .88; }
 .tp-route-missing { min-height: 100vh; display: grid; place-content: center; gap: 12px; padding: 24px; color: #f4efe4; background: #151513; text-align: center; }
