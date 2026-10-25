@@ -469,7 +469,6 @@ export function ChatPanel({
   onPurchasePrepared,
   onWalletPending,
   onReceiptVerified,
-  onNavigate,
   afterSalesPrompt,
   onPromptConsumed,
   batchId,
@@ -487,8 +486,6 @@ export function ChatPanel({
   onPurchasePrepared?: () => void;
   onWalletPending?: () => void;
   onReceiptVerified?: () => void;
-  /** Agent-controlled route transition. The callback keeps tenant and batch scope in the parent. */
-  onNavigate?: (view: "home" | "wallet" | "merchant" | "institution" | "developers") => void;
   afterSalesPrompt?: string;
   onPromptConsumed?: () => void;
   batchId: string | null;
@@ -660,18 +657,46 @@ export function ChatPanel({
     }
   };
 
-  const routeFromAgent = (text: string): boolean => {
-    if (!onNavigate) return false;
+  const runAgentOperation = async (text: string): Promise<boolean> => {
     const lower = text.toLowerCase();
-    const view = /钱包|签名|支付|wallet|sign|payment/.test(lower) ? "wallet"
+    const operation = /钱包|签名|wallet|sign/.test(lower) ? "wallet"
       : /企业|生产方|上传资料|merchant|producer/.test(lower) ? "merchant"
         : /检测机构|审核|复核|institution|review/.test(lower) ? "institution"
           : /开发者|mcp|cli|developers?/.test(lower) ? "developers"
             : null;
-    if (!view) return false;
+    if (!operation) return false;
+
+    setInput("");
     pushUser(text);
-    pushAgent([{ cls: "cmd", text: en ? `I am opening the ${view} step while keeping batch ${batchId ?? "current"}.` : `我正在打开${view === "wallet" ? "钱包确认" : view === "merchant" ? "企业资料" : view === "institution" ? "机构审核" : "开发者接入"}，并保持当前批次 ${batchId ?? "不变"}。` }]);
-    onNavigate(view);
+    if (!batchId) {
+      pushAgent([{ cls: "disclaimer", text: en ? "Choose a batch first. I will read the scoped record in this conversation." : "请先确定批次，我才能在当前对话里读取对应资料。" }]);
+      return true;
+    }
+
+    const operationQuestion = operation === "wallet"
+      ? (en
+        ? `Read batch ${batchId}'s purchase quote, wallet and Chain 677 state, signing boundary, and next step. Do not sign or pay.`
+        : `请读取批次 ${batchId} 的购买报价、钱包和 Chain 677 状态、签名边界和下一步。不要代替用户签名或付款。`)
+      : operation === "merchant"
+        ? (en
+          ? `Read batch ${batchId}'s production records, missing items, conflicts, and the producer's next responsibility.`
+          : `请读取批次 ${batchId} 的生产资料、缺口、冲突和生产方下一步责任。`)
+        : operation === "institution"
+          ? (en
+            ? `Read batch ${batchId}'s inspection report, deterministic checks, institution review status, and pending signing actions.`
+            : `请读取批次 ${batchId} 的检测报告、确定性检查、机构审核状态和待签名操作。`)
+          : (en
+            ? `Read what an external Agent, MCP, or CLI can query for batch ${batchId}, plus the protected-operation boundary.`
+            : `请读取批次 ${batchId} 可以通过外部 Agent、MCP 或 CLI 查询的资料，以及受保护操作边界。`);
+
+    pushAgent([{ cls: "cmd", text: en ? "I am reading the current record here and will explain the result in this chat." : "我直接在当前对话读取这批资料，再把结果讲清楚。" }]);
+    onStart();
+    onBatch(batchId);
+    try {
+      await ask(operationQuestion, batchId, onFlowEvent, locale);
+    } finally {
+      onDone();
+    }
     return true;
   };
 
@@ -724,9 +749,12 @@ export function ChatPanel({
     e.preventDefault();
     const text = input.trim();
     if (!text || busy) return;
-    if (routeFromAgent(text)) return;
     if (/(购买|下单|支付|结账|checkout|buy|purchase)/i.test(text)) {
       void preparePurchaseFromAgent(text);
+      return;
+    }
+    if (/(钱包|签名|wallet|sign|企业|生产方|上传资料|merchant|producer|检测机构|审核|复核|institution|review|开发者|mcp|cli|developers?)/i.test(text)) {
+      void runAgentOperation(text);
       return;
     }
     if (/(推荐|补货|快吃完|复购|再买|帮我选)/.test(text)) {

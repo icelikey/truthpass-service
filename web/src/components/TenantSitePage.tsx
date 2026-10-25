@@ -487,13 +487,6 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           onPurchasePrepared={() => setStage("purchase_prepared")}
           onWalletPending={() => setStage("wallet_pending")}
           onReceiptVerified={() => setStage("receipt_verified")}
-          onNavigate={(nextView) => {
-            const nextRoute = routeFor(site, nextView, locale);
-            const nextUrl = nextView === "developers"
-              ? nextRoute
-              : `${nextRoute}?batch=${encodeURIComponent(batchId)}`;
-            window.location.href = nextUrl;
-          }}
           batchId={batchId}
           autoQueryBatch={query}
           autoQueryPrompt={quickPrompt}
