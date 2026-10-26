@@ -1780,6 +1780,7 @@ type ChatReplyResult = {
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
+  retrieval?: { query: string; hitCount: number; hitIds: string[] };
   chainContext?: ChainQueryContext;
   safety?: Pick<ConsumerSafetyResult, "status" | "reasons" | "citations">;
 };
@@ -1827,6 +1828,7 @@ type ChatMeta = {
   validationStatus?: ConsumerSafetyResult["status"];
   validationReasons?: string[];
   citedEvidenceIds?: string[];
+  retrieval?: { query: string; hitCount: number; hitIds: string[] };
 };
 
 const CUSTOMER_CHAT_PIPELINE = ["verifier", "jev", "deepseek"] as const;
@@ -1988,6 +1990,7 @@ async function streamChatWithReply(
     validationStatus: result.safety?.status ?? (result.status === "model_assisted" ? "accepted" : "fallback"),
     validationReasons: result.safety?.reasons ?? [],
     citedEvidenceIds: result.safety?.citations ?? [],
+    ...(result.retrieval ? { retrieval: result.retrieval } : {}),
     fallbackApplied: result.fallbackApplied === true,
     ...(baseMeta.contextMode ? { contextMode: baseMeta.contextMode } : {}),
     ...(baseMeta.contextSource ? { contextSource: baseMeta.contextSource } : {}),
@@ -2338,6 +2341,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     ...b.productionDate.split(/[^0-9]+/).filter(Boolean),
     ...Object.values(b.heavyMetals).flatMap((value) => [String(value)]),
   ];
+  const retrievalMeta = { query: question, hitCount: retrievalHits.length, hitIds: retrievalHits.map((hit) => hit.hitId) };
   const modelResult = await callCustomerModel(
     english
       ? "You are the TruthPass product assistant. Use plain language and output exactly four short sections: “Conclusion: … Evidence: … Uncertainty: … Next step: …”. Name the source in Evidence. Use only the current batch's deterministic verification result and evidence card; never combine batches. Do not invent metrics, efficacy, diagnoses, orders, payments, or transaction hashes. Say when information is missing. Do not turn “within current rules” into “safe” or “officially certified”. Chain content may cite only chainContext; without a transaction, do not claim a confirmed transaction or receipt."
@@ -2386,6 +2390,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
       evidenceIds,
       verifierStatus,
       verifierReasons,
+      retrieval: retrievalMeta,
       ...(chainContext ? { chainContext } : {}),
     };
   }
@@ -2407,6 +2412,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     evidenceIds,
     verifierStatus,
     verifierReasons,
+    retrieval: retrievalMeta,
     safety: {
       status: "fallback",
       citations: fallbackCitations,
@@ -2522,7 +2528,8 @@ async function consumerChatWithSlot(req: IncomingMessage, batchId: string, quest
     return;
   }
 
-  const reply = demoConsumerChat(batchId, b, question, chainContext, locale);
+  const retrieval = searchBatchKnowledge(batchId, question);
+  const reply = demoConsumerChat(batchId, b, question, chainContext, locale, retrieval);
   const lifecycle = lifecyclePublicView(batchId);
   await streamChatWithReply(res, "consumer_evidence", [], reply, {
     batchId,
@@ -3279,6 +3286,14 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
     citations: reply.safety?.citations ?? [],
     evidenceIds: reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds),
     model: { status, provider: reply.providerUsed ?? "deterministic", model: reply.modelUsed ?? "deterministic-fallback" },
+    modelAssisted: status === "model_assisted",
+    validationStatus: reply.safety?.status ?? (status === "model_assisted" ? "accepted" : "fallback"),
+    validationReasons: reply.safety?.reasons ?? [],
+    pipelineDetail: {
+      verifier: { status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
+      jev: { decision: reply.verifierStatus === "accepted" ? "route_to_rule" : "request_more_evidence", confidence: 0.94 },
+      deepseek: { status: status === "model_assisted" ? "completed" : status === "deterministic_fallback" ? "fallback" : "unavailable" },
+    },
     lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction },
     chainContext: chainContext ?? null,
     writeBoundary: { walletRequired: true, submitted: false, nextAction: "如需购买、反馈或上链，请调用 prepare 命令并由外部钱包确认。" },
@@ -5165,6 +5180,54 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       sendJson(res, 200, { schemaVersion: "truthpass.agent.search.v1", traceId, batchId, dataMode: "demo/synthetic", hits: searchBatchKnowledge(batchId, query) });
     } catch (error) {
       sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), traceId, batchId });
+    }
+    return true;
+  }
+
+  if (p === "/api/agent/query/stream" && req.method === "POST") {
+    const body = await readBody(req);
+    const batchId = (typeof body.batchId === "string" ? body.batchId : BATCH_ID).trim().toUpperCase();
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    const locale = body.locale === "en" ? "en" : "zh";
+    const traceId = requestTraceId(req);
+    if (!question) { sendJson(res, 400, { error: "question_required", traceId, batchId }); return true; }
+    const slot = tryAcquireAgentSlot();
+    if (!slot.allowed) {
+      res.writeHead(429, { "Content-Type": "application/json; charset=utf-8", "Retry-After": String(slot.retryAfterSeconds), "Cache-Control": "no-store", "X-TruthPass-Agent-Limit": String(AGENT_MAX_CONCURRENCY) });
+      res.end(JSON.stringify({ error: "AGENT_CONCURRENCY_LIMITED", status: "rate_limited", traceId, active: slot.active, limit: AGENT_MAX_CONCURRENCY, retryAfterSeconds: slot.retryAfterSeconds }));
+      return true;
+    }
+    try {
+      res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-TruthPass-Trace-Id": traceId });
+      const send = (event: unknown) => {
+        if (!res.writableEnded && !res.destroyed) res.write("data: " + JSON.stringify(event) + "\n\n");
+      };
+      const base = { traceId, batchId, dataMode: "demo/synthetic" as const };
+      send({ kind: "begin", intent: "agent_query", ...base });
+      send({ kind: "stage", stage: "reading_batch", status: "active", detail: "读取当前批次和公开资料", ...base });
+      const retrieval = searchBatchKnowledge(batchId, question);
+      send({ kind: "stage", stage: "reading_batch", status: "completed", detail: `检索到 ${retrieval.length} 条当前批次资料`, evidenceIds: retrieval.flatMap((hit) => hit.evidenceIds), ...base });
+      send({ kind: "stage", stage: "verifier_checked", status: "active", ...base });
+      send({ kind: "stage", stage: "jev_routed", status: "active", ...base });
+      send({ kind: "stage", stage: "model_started", status: "active", ...base });
+      const result = await runUnifiedAgentQuery(batchId, question, traceId, locale);
+      send({ kind: "stage", stage: "verifier_checked", status: "completed", detail: result.stages.find((stage) => stage.stage === "verifier_checked")?.status, evidenceIds: result.evidenceIds, ...base });
+      send({ kind: "stage", stage: "jev_routed", status: "completed", detail: result.stages.find((stage) => stage.stage === "jev_routed")?.status, evidenceIds: result.evidenceIds, ...base });
+      send({ kind: "stage", stage: "model_completed", status: result.model.status === "model_assisted" ? "completed" : "fallback", evidenceIds: result.evidenceIds, ...base });
+      send({ kind: "meta", ...result, agentMode: result.model.status === "model_assisted" ? "model_assisted" : "deterministic_fallback", serviceStatus: result.model.status, modelAssisted: result.model.status === "model_assisted", validationStatus: result.model.status === "model_assisted" ? "accepted" : "fallback", validationReasons: [], pipeline: ["verifier", "jev", "deepseek"], pipelineDetail: { verifier: { status: result.stages.find((stage) => stage.stage === "verifier_checked")?.status ?? "checked" }, jev: { decision: result.stages.find((stage) => stage.stage === "jev_routed")?.status ?? "request_more_evidence" }, deepseek: { status: result.model.status } } });
+      send({ kind: "answer", cls: "plain", text: result.answer, ...base, evidenceIds: result.evidenceIds });
+      send({ kind: "done", ...base, evidenceIds: result.evidenceIds });
+      res.end();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!res.headersSent) {
+        sendJson(res, message === "BATCH_NOT_FOUND" ? 404 : 500, { error: message, traceId, batchId });
+      } else {
+        res.write("data: " + JSON.stringify({ kind: "error", error: message, traceId, batchId }) + "\n\n");
+        res.end();
+      }
+    } finally {
+      releaseAgentSlot();
     }
     return true;
   }

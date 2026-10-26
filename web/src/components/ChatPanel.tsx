@@ -292,6 +292,7 @@ function MessageView({
             <span><b>{en ? "Pipeline" : "流程"}</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? (en ? "Rule checks" : "规则核验") : stage === "jev" ? "JEV" + (en ? " routing" : " 分流") : stage === "deepseek" ? (en ? `${message.meta?.provider ?? "Model"} explanation` : `${message.meta?.provider ?? "模型"} 解释`) : stage).join(" → ")}</span>
             {message.meta.pipelineDetail && <span><b>{en ? "Result" : "结果"}</b>Verifier: {message.meta.pipelineDetail.verifier.status} · JEV: {message.meta.pipelineDetail.jev.decision} · Model: {message.meta.pipelineDetail.deepseek.status}</span>}
             <span><b>{en ? "Citations" : "引用"}</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : (en ? "No additional evidence IDs" : "当前回答没有额外证据 ID")}</span>
+            {message.meta.retrieval && <span><b>{en ? "Retrieval" : "检索"}</b>{message.meta.retrieval.hitCount} {en ? "hits" : "条"} · {message.meta.retrieval.hitIds.join(" · ")}</span>}
             <span><b>Trace ID</b><code>{message.meta.traceId ?? "—"}</code></span>
           </div>
         </details>

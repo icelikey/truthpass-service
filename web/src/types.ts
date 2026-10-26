@@ -157,6 +157,7 @@ export interface ChatEvent {
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];
+  retrieval?: { query?: string; hitCount: number; hitIds: string[] };
   pipeline?: string[];
   pipelineDetail?: {
     verifier: { status: string; reasons?: string[] };

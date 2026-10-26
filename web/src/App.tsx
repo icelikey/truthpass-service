@@ -163,9 +163,9 @@ export default function App() {
     // question and see the scoped record without first learning the platform navigation.
     // Marketing and integration pages remain available at /product and /developers.
     if (pathname === "/" || pathname === "/en") {
-      const focusedSite = getTenantSite(batchId?.startsWith("RC-") ? "rice-demo" : "fish-oil-demo");
+      const focusedSite = getTenantSite("fish-oil-demo");
       if (focusedSite) {
-        const focusedBatch = batchId ?? focusedSite.batch.defaultBatchId;
+        const focusedBatch = focusedSite.batch.defaultBatchId;
         return (
           <ModalProvider>
             <WalletProvider activeBatchId={focusedBatch} onToast={showToast} locale={pathname === "/en" ? "en" : "zh"}>
