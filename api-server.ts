@@ -70,7 +70,9 @@ import {
   DISPUTE_RAISED_TOPIC,
   keccak256Hex,
 } from "./src/chain.js";
-import { buildJevContext, buildJevRoleView } from "./src/jev/context.js";
+import { buildJevContext, buildJevRoleView, SafeJevDecisionGate } from "./src/jev/context.js";
+import { providerFromEnv } from "./src/jev/http-provider.js";
+import type { JevDecision, JevState } from "./src/jev/model.js";
 import type { ServiceAdapter, ServiceCard, TaskRequest } from "./src/types.js";
 import {
   AnonymousConsumerRegistry,
@@ -585,8 +587,45 @@ function lifecycleStateFor(batchId: string) {
   return created;
 }
 
+/**
+ * Demo-only heartbeat used by the public Agent view. It produces a new,
+ * explicitly synthetic sensor observation on every polling interval without
+ * pretending that a real device or production record wrote it. The actual
+ * lifecycle state remains the source of truth for manual/user actions.
+ */
+function continuousDemoLifecycleView(batchId: string, state: { revision: number; syncedAt: string; events: LifecycleEvent[] }) {
+  const enabled = process.env.TRUTHPASS_DEMO_CONTINUOUS !== "false" && process.env.TRUTHPASS_DEMO_CONTINUOUS !== "0";
+  if (!enabled || !demoBatchFor(batchId)) return { ...state, simulation: undefined };
+  const intervalMs = 10_000;
+  const tick = Math.floor(Date.now() / intervalMs);
+  const generatedAt = new Date(tick * intervalMs).toISOString();
+  const temperature = (3.5 + ((tick * 13) % 18) / 10).toFixed(1);
+  const humidity = (61 + ((tick * 7) % 17)).toFixed(0);
+  const events = state.events.map((event) => event.stage === "cold_chain"
+    ? {
+        ...event,
+        updatedAt: generatedAt,
+        detail: `演示设备同步 #${tick}：温度 ${temperature}℃、湿度 ${humidity}%（仅用于持续演示）`,
+      }
+    : event);
+  return {
+    revision: state.revision + tick,
+    syncedAt: generatedAt,
+    events,
+    simulation: {
+      mode: "continuous_demo",
+      intervalMs,
+      tick,
+      generatedEvidenceId: `${batchId}:demo-sensor:${tick}`,
+      sourceKind: "platform_device",
+      dataMode: "demo/synthetic" as const,
+      note: "这是按时间生成的演示传感器数据，不代表真实设备上报。",
+    },
+  };
+}
+
 function lifecyclePublicView(batchId: string) {
-  const state = lifecycleStateFor(batchId);
+  const state = continuousDemoLifecycleView(batchId, lifecycleStateFor(batchId));
   return {
     schemaVersion: "truthpass.lifecycle.v1",
     batchId,
@@ -596,6 +635,7 @@ function lifecyclePublicView(batchId: string) {
     syncedAt: state.syncedAt,
     dataMode: "demo/synthetic" as const,
     events: state.events,
+    simulation: state.simulation,
     nextAction: state.events.find((event) => event.status === "pending" || event.status === "awaiting_user")?.stage ?? "complete",
     walletRoles: state.events.filter((event) => event.walletAction).map((event) => ({ stage: event.stage, label: event.label, role: event.role, action: event.walletAction, requiredRole: event.requiredRole })),
   };
@@ -1782,6 +1822,8 @@ type ChatReplyResult = {
   evidenceIds?: string[];
   retrieval?: { query: string; hitCount: number; hitIds: string[] };
   chainContext?: ChainQueryContext;
+  /** JEV routing result after provider validation or deterministic fallback. */
+  jev?: { decision: JevDecision; provider: string; model: string; live: boolean };
   safety?: Pick<ConsumerSafetyResult, "status" | "reasons" | "citations">;
 };
 
@@ -1930,9 +1972,8 @@ async function streamChatWithReply(
     ? "fallback"
     : (result.verifierStatus ?? (baseMeta.batchId ? "checked" : "not_run"));
   const verifierStageStatus = !baseMeta.batchId || result.verifierStatus === "not_run" ? "fallback" : "completed";
-  const jevDecision = !baseMeta.batchId || (result.verifierStatus && result.verifierStatus !== "accepted")
-    ? "request_more_evidence"
-    : "route_to_rule";
+  const jevDecision = result.jev?.decision.decision
+    ?? (!baseMeta.batchId || (result.verifierStatus && result.verifierStatus !== "accepted") ? "request_more_evidence" : "route_to_rule");
   const modelStatus = result.status === "model_assisted" ? "completed" : "fallback";
   send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
   send({ kind: "stage", stage: "verifier_checked", status: verifierStageStatus, detail: result.verifierStatus ?? "checked", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
@@ -1956,6 +1997,7 @@ async function streamChatWithReply(
       inputEvidenceIds: result.evidenceIds ?? [],
       citedEvidenceIds: result.safety?.citations ?? [],
       chainContext: baseMeta.chainContext ?? result.chainContext ?? null,
+      jev: result.jev ? { decision: result.jev.decision, provider: result.jev.provider, model: result.jev.model, live: result.jev.live } : null,
       verificationStatus: result.status === "model_assisted" ? "model_assisted" : "deterministic_fallback",
       createdAt: new Date().toISOString(),
     };
@@ -1982,7 +2024,16 @@ async function streamChatWithReply(
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
     pipelineDetail: {
       verifier: { status: result.verifierStatus ?? (baseMeta.batchId ? "checked" : "not_run"), reasons: result.verifierReasons },
-      jev: { decision: jevDecision, confidence: 0.94 },
+      jev: {
+        decision: jevDecision,
+        confidence: result.jev?.decision.confidence ?? 0.94,
+        status: result.jev?.live ? "live" : "fallback",
+        provider: result.jev?.provider ?? "deterministic",
+        model: result.jev?.model ?? "deterministic-fallback",
+        nextAction: result.jev?.decision.nextAction,
+        missingEvidenceCodes: result.jev?.decision.missingEvidenceCodes ?? [],
+        conflictCodes: result.jev?.decision.conflictCodes ?? [],
+      },
       deepseek: { status: result.status === "model_assisted" ? "completed" : result.status === "deterministic_fallback" ? "fallback" : "unavailable" },
     },
     promptPolicyVersion: CONSUMER_PROMPT_POLICY_VERSION,
@@ -2015,7 +2066,7 @@ type ConsumerModelContract = {
   dataMode: "demo/synthetic" | "external";
   chainContext?: ChainQueryContext;
   verifier?: { status: string; reasons?: string[] };
-  jev?: { decision: string; confidence?: number };
+  jev?: { decision: string; confidence?: number; nextAction?: string; missingEvidenceCodes?: string[]; conflictCodes?: string[]; modelAssisted?: boolean; provider?: string; model?: string };
   evidenceIds?: string[];
   allowedCitations?: string[];
   allowedNumbers?: string[];
@@ -2275,6 +2326,63 @@ async function freeChatReply(question: string, chainContext?: ChainQueryContext,
   );
 }
 
+async function routeBatchWithJev(
+  batchId: string,
+  batch: DemoBatch,
+  retrievalHits: AgentSearchHit[],
+  verificationStatus: string,
+): Promise<{ decision: JevDecision; provider: string; model: string; live: boolean }> {
+  const providerConfig = providerFromEnv();
+  const requestedChecks = isRiceBatch(batchId) ? ["batch_identity"] : ["epa_dha", "oxidation", "totox", "cold_chain"];
+  const evidenceRefs = retrievalHits.flatMap((hit, index) => {
+    const ids = hit.evidenceIds.length ? hit.evidenceIds : [hit.hitId];
+    return ids.map((evidenceId, refIndex) => ({
+      eventId: evidenceId,
+      kind: hit.sourceType || `retrieval-${index + 1}`,
+      payloadHash: evidenceHash(`${batchId}:${evidenceId}:${refIndex}`),
+    }));
+  });
+  const state: JevState = {
+    taskId: `consumer-agent-${batchId}`,
+    batchId,
+    policyId: isRiceBatch(batchId) ? "rice-origin-policy" : "fish-oil-quality",
+    requestedChecks,
+    evidenceRefs,
+    stateSummary: {
+      reportBatchMatches: retrievalHits.every((hit) => hit.batchId === batchId),
+      epaDhaPresent: isRiceBatch(batchId) || Number.isFinite(batch.epaDha),
+      peroxidePresent: isRiceBatch(batchId) || Number.isFinite(batch.peroxide),
+      totoxPresent: isRiceBatch(batchId) || Number.isFinite(batch.totox),
+      coldChainPresent: isRiceBatch(batchId) || (verificationStatus === "accepted" && Number.isFinite(batch.coldGap)),
+      heavyMetalsPresent: true,
+      serviceOnline: true,
+      signatureValid: true,
+      conflictCodes: [],
+    },
+    inputHash: evidenceHash(JSON.stringify({
+      batchId,
+      requestedChecks,
+      evidenceRefs,
+      verificationStatus,
+    })),
+    schemaVersion: "jev-truthpass-state-v1",
+    createdAt: new Date().toISOString(),
+  };
+  const gate = new SafeJevDecisionGate({
+    provider: providerConfig.provider,
+    modelId: providerConfig.source === "none" ? "deterministic-fallback" : providerConfig.source,
+    modelVersion: providerConfig.source === "none" ? "rules-v1" : `${providerConfig.source}-live`,
+  });
+  const decision = await gate.decide(state);
+  const live = providerConfig.enabled && decision.modelAssisted === true;
+  return {
+    decision,
+    provider: live ? providerConfig.source : "deterministic",
+    model: decision.modelId,
+    live,
+  };
+}
+
 async function demoConsumerChat(batchId: string, b: DemoBatch, question: string, chainContext?: ChainQueryContext, locale: "zh" | "en" = "zh", retrievalHits: AgentSearchHit[] = []): Promise<ChatReplyResult> {
   const english = locale === "en";
   let collaboration: Record<string, unknown> | undefined;
@@ -2294,9 +2402,18 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
   // repository-backed collaboration path. They still expose stable,
   // batch-scoped public evidence references so the Agent trace can show what
   // was read without inventing a database evidence record.
-  const evidenceIds = evidenceIdsFromCard.length
-    ? evidenceIdsFromCard
-    : evidenceFor(batchId).map((item) => item.evidenceId).filter((item): item is string => typeof item === "string");
+  // The collaboration store still contains legacy `ev-*` identifiers. The
+  // public Agent contract uses the batch-scoped IDs from evidenceFor so the
+  // retrieval result, model citations, audit record and UI all refer to the
+  // same evidence namespace. Never expose a legacy ID as a citation for a
+  // different batch.
+  const canonicalEvidenceIds = evidenceFor(batchId)
+    .map((item) => item.evidenceId)
+    .filter((item): item is string => typeof item === "string");
+  const evidenceIds = canonicalEvidenceIds.length ? canonicalEvidenceIds : evidenceIdsFromCard;
+  const evidenceCardForModel = collaboration?.evidenceCard && typeof collaboration.evidenceCard === "object"
+    ? { ...(collaboration.evidenceCard as Record<string, unknown>), evidenceIds }
+    : null;
   const productionEvidence = productionProcessFor(batchId);
   const selectedFactsForOutput = selectedFacts.map((fact) => publicFactForLocale(fact, locale));
   const missingStagesForOutput = productionEvidence.missingStages.map((stage) => publicFactForLocale(stage, locale));
@@ -2317,6 +2434,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     ...productionEvidence.missingStages.map((stage) => `生产阶段“${stage}”资料未覆盖`),
   ];
   const overallVerificationReasonsForOutput = overallVerificationReasons.map((reason) => publicFactForLocale(reason, locale));
+  const jev = await routeBatchWithJev(batchId, b, retrievalHits, overallVerificationStatus);
   const sourceText = selectedFacts.length
     ? (english ? "Source: the current batch evidence card and deterministic verifier" : "来源：当前批次 evidence_card 与 deterministic_verifier")
     : (english ? "Source: the current batch record" : "来源：当前批次登记信息");
@@ -2349,7 +2467,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     JSON.stringify({
       batchId,
       dataMode: "demo/synthetic",
-      evidenceCard: collaboration?.evidenceCard ?? null,
+      evidenceCard: evidenceCardForModel,
       selectedFacts: selectedFactsForOutput,
       verification: { status: overallVerificationStatus, reasons: overallVerificationReasonsForOutput },
       productionEvidence: {
@@ -2373,8 +2491,14 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
         reasons: overallVerificationReasonsForOutput,
       },
       jev: {
-        decision: overallVerificationStatus === "accepted" ? "route_to_rule" : "request_more_evidence",
-        confidence: 0.94,
+        decision: jev.decision.decision,
+        confidence: jev.decision.confidence,
+        nextAction: jev.decision.nextAction,
+        missingEvidenceCodes: jev.decision.missingEvidenceCodes,
+        conflictCodes: jev.decision.conflictCodes,
+        modelAssisted: jev.decision.modelAssisted === true,
+        provider: jev.provider,
+        model: jev.model,
       },
       evidenceIds,
       allowedCitations: [...new Set([...evidenceIds, "evidence_card", "deterministic_verifier", "product_policy", ...(chainContext ? ["chain_status"] : [])])],
@@ -2391,6 +2515,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
       verifierStatus,
       verifierReasons,
       retrieval: retrievalMeta,
+      jev,
       ...(chainContext ? { chainContext } : {}),
     };
   }
@@ -2413,6 +2538,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     verifierStatus,
     verifierReasons,
     retrieval: retrievalMeta,
+    jev,
     safety: {
       status: "fallback",
       citations: fallbackCitations,
@@ -3278,7 +3404,7 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
       { stage: "reading_batch", status: "completed", hitCount: retrieval.length },
       { stage: "retrieval_completed", status: "completed", hitCount: retrieval.length },
       { stage: "verifier_checked", status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
-      { stage: "jev_routed", status: reply.verifierStatus === "accepted" ? "route_to_rule" : "request_more_evidence" },
+      { stage: "jev_routed", status: reply.jev?.decision.decision ?? (reply.verifierStatus === "accepted" ? "route_to_rule_verifier" : "request_more_evidence"), source: reply.jev?.provider ?? "deterministic", model: reply.jev?.model ?? "deterministic-fallback", live: reply.jev?.live === true },
       { stage: "model_completed", status: status === "model_assisted" ? "completed" : "fallback" },
     ],
     retrieval: { query: question, hits: retrieval },
@@ -3291,7 +3417,16 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
     validationReasons: reply.safety?.reasons ?? [],
     pipelineDetail: {
       verifier: { status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
-      jev: { decision: reply.verifierStatus === "accepted" ? "route_to_rule" : "request_more_evidence", confidence: 0.94 },
+      jev: {
+        decision: reply.jev?.decision.decision ?? (reply.verifierStatus === "accepted" ? "route_to_rule_verifier" : "request_more_evidence"),
+        confidence: reply.jev?.decision.confidence ?? 0.94,
+        status: reply.jev?.live ? "live" : "fallback",
+        provider: reply.jev?.provider ?? "deterministic",
+        model: reply.jev?.model ?? "deterministic-fallback",
+        nextAction: reply.jev?.decision.nextAction,
+        missingEvidenceCodes: reply.jev?.decision.missingEvidenceCodes ?? [],
+        conflictCodes: reply.jev?.decision.conflictCodes ?? [],
+      },
       deepseek: { status: status === "model_assisted" ? "completed" : status === "deterministic_fallback" ? "fallback" : "unavailable" },
     },
     lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction },
@@ -3677,6 +3812,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/agent/status" && req.method === "GET") {
     const configuredProvider = resolveAgentProvider();
+    const jevProviderConfig = providerFromEnv();
     sendJson(res, 200, {
       schemaVersion: "truthpass.agent.status.v1",
       status: customerServiceStatus(),
@@ -3690,12 +3826,19 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       configuredProvider: configuredProvider.configured ? configuredProvider.provider : "deterministic",
       configuredModel: configuredProvider.model,
       providerSource: configuredProvider.source,
+      jevProviderConfigured: jevProviderConfig.enabled,
+      jevProvider: jevProviderConfig.source,
+      jevModel: jevProviderConfig.source === "deepseek" ? (process.env.DEEPSEEK_MODEL ?? "deepseek-chat") : jevProviderConfig.source === "jev" ? (process.env.JEV_MODEL ?? "jev") : null,
+      jevFallbackReason: jevProviderConfig.reason ?? null,
       lastSuccessfulProvider: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.provider : null,
       lastSuccessfulModel: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.model : null,
       lastModelRuntimeStatus: lastCustomerModelRuntime?.status ?? null,
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",
+      queryEndpoint: "/api/agent/query",
+      queryStreamEndpoint: "/api/agent/query/stream",
+      searchEndpoint: "/api/agent/search",
       ...(url.searchParams.get("diagnostics") === "true" ? { providerDiagnostic: lastCustomerModelDiagnostic } : {}),
     });
     return true;
@@ -3714,7 +3857,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.feedback.prepare", "consumer.feedback.confirm", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
+      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.feedback.prepare", "consumer.feedback.confirm", "agent.search", "agent.query", "agent.query.stream", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
       endpoints: {
         sites: `${origin}/api/sites`,
         site: `${origin}/api/sites/{slug}`,
@@ -5206,7 +5349,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       send({ kind: "begin", intent: "agent_query", ...base });
       send({ kind: "stage", stage: "reading_batch", status: "active", detail: "读取当前批次和公开资料", ...base });
       const retrieval = searchBatchKnowledge(batchId, question);
-      send({ kind: "stage", stage: "reading_batch", status: "completed", detail: `检索到 ${retrieval.length} 条当前批次资料`, evidenceIds: retrieval.flatMap((hit) => hit.evidenceIds), ...base });
+      send({ kind: "stage", stage: "reading_batch", status: "completed", detail: `检索到 ${retrieval.length} 条当前批次资料`, evidenceIds: [...new Set(retrieval.flatMap((hit) => hit.evidenceIds))], ...base });
+      send({ kind: "stage", stage: "retrieval_completed", status: "completed", detail: `已完成当前批次检索：${retrieval.length} 条命中`, evidenceIds: [...new Set(retrieval.flatMap((hit) => hit.evidenceIds))], ...base });
       send({ kind: "stage", stage: "verifier_checked", status: "active", ...base });
       send({ kind: "stage", stage: "jev_routed", status: "active", ...base });
       send({ kind: "stage", stage: "model_started", status: "active", ...base });
@@ -5214,7 +5358,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       send({ kind: "stage", stage: "verifier_checked", status: "completed", detail: result.stages.find((stage) => stage.stage === "verifier_checked")?.status, evidenceIds: result.evidenceIds, ...base });
       send({ kind: "stage", stage: "jev_routed", status: "completed", detail: result.stages.find((stage) => stage.stage === "jev_routed")?.status, evidenceIds: result.evidenceIds, ...base });
       send({ kind: "stage", stage: "model_completed", status: result.model.status === "model_assisted" ? "completed" : "fallback", evidenceIds: result.evidenceIds, ...base });
-      send({ kind: "meta", ...result, agentMode: result.model.status === "model_assisted" ? "model_assisted" : "deterministic_fallback", serviceStatus: result.model.status, modelAssisted: result.model.status === "model_assisted", validationStatus: result.model.status === "model_assisted" ? "accepted" : "fallback", validationReasons: [], pipeline: ["verifier", "jev", "deepseek"], pipelineDetail: { verifier: { status: result.stages.find((stage) => stage.stage === "verifier_checked")?.status ?? "checked" }, jev: { decision: result.stages.find((stage) => stage.stage === "jev_routed")?.status ?? "request_more_evidence" }, deepseek: { status: result.model.status } } });
+      send({ ...result, kind: "meta", agentMode: result.model.status === "model_assisted" ? "model_assisted" : "deterministic_fallback", serviceStatus: result.model.status, modelAssisted: result.model.status === "model_assisted", validationStatus: result.validationStatus ?? (result.model.status === "model_assisted" ? "accepted" : "fallback"), validationReasons: result.validationReasons ?? [], pipeline: ["verifier", "jev", "deepseek"], pipelineDetail: result.pipelineDetail });
       send({ kind: "answer", cls: "plain", text: result.answer, ...base, evidenceIds: result.evidenceIds });
       send({ kind: "done", ...base, evidenceIds: result.evidenceIds });
       res.end();
@@ -5239,11 +5383,32 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const locale = body.locale === "en" ? "en" : "zh";
     const traceId = requestTraceId(req);
     if (!question) { sendJson(res, 400, { error: "question_required", traceId, batchId }); return true; }
+    const slot = tryAcquireAgentSlot();
+    if (!slot.allowed) {
+      res.writeHead(429, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Retry-After": String(slot.retryAfterSeconds),
+        "Cache-Control": "no-store",
+        "X-TruthPass-Agent-Limit": String(AGENT_MAX_CONCURRENCY),
+      });
+      res.end(JSON.stringify({
+        error: "AGENT_CONCURRENCY_LIMITED",
+        status: "rate_limited",
+        reason: "agent_concurrency_limit",
+        traceId,
+        active: slot.active,
+        limit: AGENT_MAX_CONCURRENCY,
+        retryAfterSeconds: slot.retryAfterSeconds,
+      }));
+      return true;
+    }
     try {
       sendJson(res, 200, await runUnifiedAgentQuery(batchId, question, traceId, locale));
     } catch (error) {
       const status = error instanceof Error && error.message === "BATCH_NOT_FOUND" ? 404 : 500;
       sendJson(res, status, { error: error instanceof Error ? error.message : String(error), traceId, batchId });
+    } finally {
+      releaseAgentSlot();
     }
     return true;
   }

@@ -3848,6 +3848,26 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .agent-data-flow-summary { display: flex; flex-wrap: wrap; gap: 9px 18px; margin-top: 13px; padding: 10px 0; border-top: 1px solid rgba(96,78,47,.14); border-bottom: 1px solid rgba(96,78,47,.14); color: #736b5e; font-size: 11px; }
 .agent-data-flow-summary b, .agent-data-flow-summary code { color: #1b1c1a; font-weight: 600; }
 .agent-data-flow-summary code { overflow-wrap: anywhere; font-size: 10px; }
+.agent-chain-run { margin-top: 12px; padding: 11px 12px; border: 1px solid rgba(43,125,95,.24); border-radius: 10px; background: rgba(223,234,211,.32); }
+.agent-chain-run-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-chain-run-head > div:first-child { display: grid; gap: 5px; min-width: 0; }
+.agent-chain-run-head strong { color: #1b1c1a; font-size: 13px; line-height: 1.35; }
+.agent-chain-run-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.agent-chain-run-chips span { padding: 4px 7px; border-radius: 999px; color: #625b4e; background: rgba(21,21,19,.08); font: 10px/1.2 monospace; }
+.agent-chain-run-chips span.live { color: #286449; background: #dfead3; }
+.agent-chain-run-chips span.offline { color: #8a4b32; background: #f1d8c8; }
+.agent-chain-run-summary { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: 10px; color: #736b5e; font-size: 10px; }
+.agent-chain-run-summary b { color: #1b1c1a; }
+.agent-chain-run-events { display: grid; gap: 6px; margin-top: 9px; }
+.agent-chain-run-events article { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid rgba(96,78,47,.12); border-radius: 8px; background: rgba(255,255,255,.56); }
+.agent-chain-run-events article > div { min-width: 0; display: grid; gap: 3px; }
+.agent-chain-run-events strong { color: #1b1c1a; font-size: 10px; line-height: 1.35; }
+.agent-chain-run-events small { color: #736b5e; font-size: 9px; }
+.agent-chain-run-events code { color: #665f53; font-size: 9px; }
+.agent-chain-run-events article > span { padding: 3px 6px; border-radius: 999px; color: #8a4b32; background: #f1d8c8; font-size: 9px; }
+.agent-chain-run-events > p { margin: 0; color: #736b5e; font-size: 10px; }
+.agent-chain-run-boundary { margin: 9px 0 0; color: #8a4b32; font-size: 10px; line-height: 1.45; }
+@media (max-width: 680px) { .agent-chain-run-head { flex-direction: column; } .agent-chain-run-chips { justify-content: flex-start; } .agent-chain-run-events article { grid-template-columns: minmax(0,1fr); } .agent-chain-run-events code { overflow-wrap: anywhere; } }
 .agent-data-flow-live { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 9px; align-items: start; margin-top: 11px; padding: 10px 11px; border-left: 3px solid #b18a45; border-radius: 8px; background: rgba(255,255,255,.52); }
 .agent-data-flow-live-dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: #b18a45; box-shadow: 0 0 0 4px rgba(177,138,69,.12); }
 .agent-data-flow-live > div { display: grid; gap: 3px; min-width: 0; }

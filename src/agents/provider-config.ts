@@ -40,6 +40,23 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
     };
   }
 
+  // A direct DeepSeek deployment is the preferred public configuration when
+  // DEEPSEEK_API_KEY is present. Keep the generic `agent` source label for
+  // backwards-compatible status payloads while exposing provider=deepseek.
+  if (requestedProvider === "deepseek") {
+    const deepSeekKey = env.DEEPSEEK_API_KEY?.trim() || env.AGENT_API_KEY?.trim();
+    if (deepSeekKey) {
+      return {
+        provider: "deepseek",
+        apiKey: deepSeekKey,
+        baseUrl: (env.DEEPSEEK_BASE_URL?.trim() || env.AGENT_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, ""),
+        model: env.DEEPSEEK_MODEL?.trim() || env.AGENT_MODEL?.trim() || "deepseek-chat",
+        configured: true,
+        source: "agent",
+      };
+    }
+  }
+
   const agentKey = env.AGENT_API_KEY?.trim();
   const agentModel = env.AGENT_MODEL?.trim();
   if (agentKey && agentModel) {
@@ -49,6 +66,18 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
       apiKey: agentKey,
       baseUrl,
       model: agentModel,
+      configured: true,
+      source: "agent",
+    };
+  }
+
+  const deepSeekKey = env.DEEPSEEK_API_KEY?.trim();
+  if (deepSeekKey) {
+    return {
+      provider: "deepseek",
+      apiKey: deepSeekKey,
+      baseUrl: (env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, ""),
+      model: env.DEEPSEEK_MODEL?.trim() || "deepseek-chat",
       configured: true,
       source: "agent",
     };

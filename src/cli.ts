@@ -45,6 +45,9 @@ interface ParsedArgs {
   capabilities: string[];
   publicKey?: string;
   question?: string;
+  intervalMs: number;
+  count: number;
+  stream: boolean;
 }
 
 export interface CliResult {
@@ -62,9 +65,10 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass recommend --batch FO-2026-001 [--json]
   truthpass order --batch FO-2026-001 [--json]
   truthpass inspect --batch FO-2026-001 [--json]
-  truthpass ask "FO-2026-001 的冷链和检测有什么缺口？" --remote https://truthpass-service.vercel.app [--json]
+  truthpass ask "FO-2026-001 的冷链和检测有什么缺口？" --remote https://truthpass-service.vercel.app [--json] [--stream]
   truthpass search --batch FO-2026-001 --question "冷链" --remote https://truthpass-service.vercel.app [--json]
   truthpass lifecycle --batch FO-2026-001 --remote https://truthpass-service.vercel.app [--json]
+  truthpass watch --batch FO-2026-001 --remote https://truthpass-service.vercel.app --interval 10000 --count 3 [--json]
   truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass collaborate --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass register --remote https://truthpass-service.vercel.app --tenant demo --token <TOKEN> --agent-id my-agent --name "我的 Agent" --capability consumer.inspect [--json]
@@ -94,13 +98,24 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
   let agentName: string | undefined;
   let publicKey: string | undefined;
   let question: string | undefined;
+  let intervalMs = 10_000;
+  let count = 3;
+  let stream = false;
   const capabilities: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--json") { json = true; continue; }
     if (arg === "--dry-run") { dryRun = true; continue; }
+    if (arg === "--stream") { stream = true; continue; }
     if (arg === "--help" || arg === "-h") { help = true; continue; }
+    if (arg === "--interval" || arg === "--count") {
+      const value = Number.parseInt(argv[++index] ?? "", 10);
+      if (!Number.isFinite(value) || value <= 0) return { error: `${arg} 必须是正整数` };
+      if (arg === "--interval") intervalMs = Math.min(value, 300_000);
+      else count = Math.min(value, 100);
+      continue;
+    }
     if (["--remote", "--token", "--tenant", "--request-id", "--agent-id", "--name", "--public-key", "--question"].includes(arg)) {
       const value = argv[++index];
       if (!value) return { error: `${arg} 需要一个值` };
@@ -166,7 +181,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
     return { error: `未知命令: ${arg}` };
   }
 
-  return { command: help ? "help" : command ?? "help", json, batchId, network, dryRun, help, remoteUrl, token, tenantId, requestId, agentId, agentName, capabilities, publicKey, question };
+  return { command: help ? "help" : command ?? "help", json, batchId, network, dryRun, help, remoteUrl, token, tenantId, requestId, agentId, agentName, capabilities, publicKey, question, intervalMs, count, stream };
 }
 
 function makeTask(batchId: string): Record<string, unknown> {
@@ -462,6 +477,45 @@ async function fetchRemoteJson(args: ParsedArgs, path: string, init: RequestInit
   return body;
 }
 
+async function fetchRemoteSse(args: ParsedArgs, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!args.remoteUrl) throw new Error("该命令需要 --remote 服务地址");
+  const url = new URL(path, normalizeRemoteUrl(args.remoteUrl) + "/");
+  const headers = { ...remoteHeaders(args), "content-type": "application/json", accept: "text/event-stream" };
+  const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  if (!response.ok || !response.body) throw new Error(`远程 Agent 流请求失败：HTTP ${response.status}`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const events: Array<Record<string, unknown>> = [];
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const line = chunk.split("\n").find((item) => item.startsWith("data:"));
+      if (!line) continue;
+      const raw = line.slice(5).trim();
+      if (!raw) continue;
+      try {
+        const event = JSON.parse(raw) as Record<string, unknown>;
+        events.push(event);
+      } catch {
+        // Keep malformed provider data out of the public CLI result.
+      }
+    }
+  }
+  const last = events[events.length - 1] ?? {};
+  return {
+    schemaVersion: "truthpass.agent.query.stream.v1",
+    batchId: body.batchId,
+    traceId: last.traceId ?? ensureRequestId(args),
+    events,
+    completed: events.some((event) => event.kind === "done"),
+  };
+}
+
 async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>> {
   const command = args.command;
   if (command === "manifest") return fetchRemoteJson(args, "/api/agent/manifest");
@@ -514,10 +568,12 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
   if (command === "ask") {
     const query = args.question?.trim();
     if (!query) throw new Error("ask 需要问题文本，可直接写在命令后或使用 --question");
+    const body = { batchId: args.batchId.toUpperCase(), question: query };
+    if (args.stream) return fetchRemoteSse(args, "/api/agent/query/stream", body);
     return fetchRemoteJson(args, "/api/agent/query", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ batchId: args.batchId.toUpperCase(), question: query }),
+      body: JSON.stringify(body),
     });
   }
   if (command === "search") {
@@ -525,8 +581,26 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
     const suffix = `?batchId=${batchId}&q=${encodeURIComponent(query)}`;
     return fetchRemoteJson(args, `/api/agent/search${suffix}`);
   }
-  if (command === "lifecycle" || command === "watch") {
+  if (command === "lifecycle") {
     return fetchRemoteJson(args, `/api/products/${batchId}/lifecycle`);
+  }
+  if (command === "watch") {
+    const samples: Array<Record<string, unknown>> = [];
+    for (let index = 0; index < args.count; index += 1) {
+      const sample = await fetchRemoteJson(args, `/api/products/${batchId}/lifecycle`);
+      samples.push({ observedAt: new Date().toISOString(), ...sample });
+      if (index + 1 < args.count) await new Promise((resolve) => setTimeout(resolve, args.intervalMs));
+    }
+    const revisions = samples.map((sample) => sample.contextRevision).filter((value) => value !== undefined);
+    return {
+      schemaVersion: "truthpass.agent.watch.v1",
+      command: "watch",
+      batchId: args.batchId.toUpperCase(),
+      intervalMs: args.intervalMs,
+      count: args.count,
+      changed: new Set(revisions.map(String)).size > 1,
+      samples,
+    };
   }
   if (command === "collaborate") {
     return fetchRemoteJson(args, "/api/agent/v1/collaborate", {
@@ -825,8 +899,16 @@ export function textFor(result: Record<string, unknown>): string {
   if (result.command === "explain") return String(result.explanation ?? agentTranslation(result));
   if (result.command === "recommend") return `批次 ${result.batchId}：${result.recommendation}\n${result.reason}\n下一步：${result.consumerNextAction}\n`;
   if (result.schemaVersion === "truthpass.agent.query.v1") return "Agent 查询：" + result.batchId + "\n" + String(result.answer ?? "") + "\n检索命中：" + String(((result.retrieval as Record<string, unknown> | undefined)?.hits as unknown[] | undefined)?.length ?? 0) + "\nTrace ID：" + String(result.traceId ?? "未知") + "\n";
+  if (result.schemaVersion === "truthpass.agent.query.stream.v1") {
+    const events = (result.events as Array<Record<string, unknown>> | undefined) ?? [];
+    return `Agent 流式查询：${result.batchId}\n${events.filter((event) => event.kind === "stage").map((event) => `· ${event.stage} ${event.status}${event.detail ? `：${event.detail}` : ""}`).join("\n")}\nTrace ID：${result.traceId ?? "未知"}\n完成：${result.completed ? "是" : "否"}\n`;
+  }
   if (result.schemaVersion === "truthpass.agent.search.v1") return "检索批次：" + result.batchId + "\n" + (((result.hits as Array<Record<string, unknown>> | undefined) ?? []).map((hit) => "- " + String(hit.title) + "：" + String(hit.snippet)).join("\n")) + "\nTrace ID：" + String(result.traceId ?? "未知") + "\n";
   if (result.schemaVersion === "truthpass.lifecycle.v1") return "生命周期：" + result.batchId + "\n版本：" + String(result.contextRevision ?? "未知") + "\n下一步：" + String(result.nextAction ?? "未知") + "\n";
+  if (result.schemaVersion === "truthpass.agent.watch.v1") {
+    const samples = (result.samples as Array<Record<string, unknown>> | undefined) ?? [];
+    return `持续观察：${result.batchId}\n样本：${samples.length} · 间隔：${result.intervalMs}ms · 是否变化：${result.changed ? "是" : "否"}\n${samples.map((sample, index) => `#${index + 1} ${sample.observedAt ?? "未知时间"} · v${sample.contextRevision ?? "未知"} · ${sample.nextAction ?? "无下一步"}`).join("\n")}\n`;
+  }
   if (result.command === "order") return `批次 ${result.batchId}：${result.orderStatus}\n${result.reason}\n`;
   if (result.command === "inspect") {
     const chain = (result.chain ?? {}) as Record<string, unknown>;

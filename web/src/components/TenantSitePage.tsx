@@ -6,10 +6,10 @@ import { ProductPanel } from "./ProductPanel";
 import { MerchantApp } from "./MerchantApp";
 import { InstitutionReviewPanel } from "./InstitutionReviewPanel";
 import { useWallet, WALLET_ROLE_LABELS, type WalletRole } from "./WalletContext";
-import type { ChatEvent, VerifyState, LifecycleView, PublicBatchOverview } from "../types";
+import type { ChatEvent, VerifyState, LifecycleView, LifecycleStage, PublicBatchOverview, ChainStatusData } from "../types";
 import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
-import { fetchAgentStatus, fetchBatchOverview, fetchLifecycle } from "../api";
+import { fetchAgentStatus, fetchBatchOverview, fetchChainStatus, fetchLifecycle, simulateLifecycleStage } from "../api";
 
 type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
@@ -242,6 +242,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }>();
   const [lifecycle, setLifecycle] = useState<LifecycleView | null>(null);
   const [overview, setOverview] = useState<PublicBatchOverview | null>(null);
+  const [chainStatus, setChainStatus] = useState<ChainStatusData | null>(null);
   const [agentService, setAgentService] = useState<{
     providerConfigured?: boolean;
     configuredProvider?: string | null;
@@ -253,6 +254,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
   const [lifecycleUpdated, setLifecycleUpdated] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  const [demoRunning, setDemoRunning] = useState(false);
   const lifecycleRevisionRef = useRef<number | undefined>(undefined);
   const flowSeqRef = useRef(0);
   const zh = locale === "zh";
@@ -282,6 +284,11 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       if (active) setAgentService(next);
     }).catch(() => {
       if (active) setAgentService(null);
+    });
+    void fetchChainStatus().then((next) => {
+      if (active) setChainStatus(next);
+    }).catch(() => {
+      if (active) setChainStatus(null);
     });
     return () => { active = false; };
   }, []);
@@ -390,6 +397,79 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     const timer = window.setInterval(() => { if (site.product.demoMode === "demo/synthetic") void refresh(); }, 10000);
     return () => { active = false; window.clearInterval(timer); };
   }, [appendFlowEvent, batchId, site.product.demoMode, zh]);
+  const runFishOilDemo = useCallback(async () => {
+    if (demoRunning || site.product.demoMode !== "demo/synthetic") return;
+    setDemoRunning(true);
+    appendFlowEvent({
+      source: lifecycleSource,
+      label: zh ? "完整检测演示开始" : "Full inspection demo started",
+      detail: zh ? "按生产、检测、冷链和出货顺序读取演示资料；购买和签名仍需要用户钱包确认。" : "Reading demo records in production, inspection, cold-chain, and shipment order; purchase and signing still require the user wallet.",
+      status: "active",
+      batchId,
+      dataMode: site.product.demoMode,
+    });
+    const stages: LifecycleStage[] = ["production", "inspection", "cold_chain", "shipment"];
+    try {
+      for (const stage of stages) {
+        const view = await simulateLifecycleStage(batchId, stage);
+        const event = view.events.find((item) => item.stage === stage);
+        setLifecycle(view);
+        lifecycleRevisionRef.current = view.contextRevision;
+        appendFlowEvent({
+          source: lifecycleSource,
+          label: event?.label ?? stage,
+          detail: event?.detail ?? (zh ? "阶段资料已写入演示状态。" : "Stage data was written to the demo state."),
+          status: "completed",
+          batchId,
+          dataMode: view.dataMode,
+        });
+      }
+      const [nextOverview, chain] = await Promise.all([fetchBatchOverview(batchId), fetchChainStatus()]);
+      setOverview(nextOverview);
+      setChainStatus(chain);
+      appendFlowEvent({
+        source: overviewSource,
+        label: zh ? "检测结果已重新核对" : "Inspection result rechecked",
+        detail: zh
+          ? `确定性状态：${nextOverview.verification?.status ?? nextOverview.batch?.status ?? "待核验"}；参数和缺口已按当前批次重新读取。`
+          : `Deterministic status: ${nextOverview.verification?.status ?? nextOverview.batch?.status ?? "pending"}; parameters and gaps were reread for this batch.`,
+        status: "completed",
+        batchId,
+        evidenceCount: nextOverview.evidence?.length ?? 0,
+        dataMode: nextOverview.dataMode ?? site.product.demoMode,
+      });
+      const replayCount = chain.verifiedTransactions.filter((item) => item.batchId === batchId).length;
+      appendFlowEvent({
+        source: chainSource,
+        label: zh ? "Chain 677 状态已核对" : "Chain 677 status checked",
+        detail: chain.liveRpc.reachable
+          ? (zh ? `RPC 可达；当前批次有 ${replayCount} 条已登记链上记录，仍需区分真实 receipt。` : `RPC reachable; ${replayCount} registered chain records exist for this batch, still distinct from a current receipt.`)
+          : (zh ? `RPC 当前不可达；可展示 ${replayCount} 条历史回放记录，但不能把它们当作本次交易 receipt。` : `RPC is currently unavailable; ${replayCount} historical replay records can be shown, but they are not a receipt for this run.`),
+        status: chain.liveRpc.reachable ? "completed" : "info",
+        batchId,
+        dataMode: chain.liveRpc.reachable ? site.product.demoMode : "replay_verified",
+      });
+      appendFlowEvent({
+        source: lifecycleSource,
+        label: zh ? "完整检测演示完成" : "Full inspection demo completed",
+        detail: zh ? "生产→检测→冷链→出货已经跑过一遍；下一步是由用户钱包确认购买，系统再读取真实 receipt。" : "Production → inspection → cold chain → shipment completed once; the next step is wallet-confirmed purchase followed by a real receipt read.",
+        status: "completed",
+        batchId,
+        dataMode: site.product.demoMode,
+      });
+    } catch (error: unknown) {
+      appendFlowEvent({
+        source: lifecycleSource,
+        label: zh ? "完整检测演示中断" : "Full inspection demo interrupted",
+        detail: error instanceof Error ? error.message : (zh ? "演示接口未返回完整状态。" : "The demo API did not return a complete state."),
+        status: "unavailable",
+        batchId,
+        dataMode: site.product.demoMode,
+      });
+    } finally {
+      setDemoRunning(false);
+    }
+  }, [appendFlowEvent, batchId, chainSource, demoRunning, lifecycleSource, overviewSource, site.product.demoMode, zh]);
   const requestStatus = agentMeta?.serviceStatus ?? agentMeta?.agentMode;
   const modelActuallyUsed = agentMeta?.modelAssisted === true && requestStatus === "model_assisted";
   const agentRibbon = modelActuallyUsed
@@ -449,12 +529,21 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           <strong>{zh ? "你现在看到的是一次真实查询" : "This is a live scoped query"}</strong>
           <span>{runtimeNotice}</span>
         </div>
+        {site.product.demoMode === "demo/synthetic" && (
+          <div className="tenant-agent-actions">
+            <button type="button" className="tp-red-btn" onClick={() => void runFishOilDemo()} disabled={demoRunning}>
+              {demoRunning ? (zh ? "正在跑完整检测…" : "Running inspection…") : (zh ? "运行一次完整鱼油检测演示" : "Run full fish-oil inspection demo")} →
+            </button>
+            <span>{zh ? "会滚动生产、检测、冷链和出货；购买仍需外部钱包签名。" : "Runs production, inspection, cold-chain, and shipment; purchase still needs an external wallet signature."}</span>
+          </div>
+        )}
         <AgentDataFlowRail
           events={flowEvents}
           batchId={batchId}
           dataMode={overview?.dataMode ?? lifecycle?.dataMode ?? site.product.demoMode}
           traceId={agentMeta?.traceId}
           locale={locale}
+          chainStatus={chainStatus}
           onClear={() => setFlowEvents([])}
         />
         <ChatPanel
@@ -497,7 +586,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         />
         <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起资料" : "Hide record") : (zh ? "打开这批资料" : "Open this record")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "只在你需要时展开详细资料" : "Open details only when needed")}</span></div>
       </section>
-      {showContext && <section className="tenant-context-drawer"><div className="tenant-context-column"><div className="tenant-panel-head"><strong>{zh ? "证据和当前状态" : "Evidence and status"}</strong><span>{site.product.demoMode}</span></div><ProductPanel state={verifyState} batchId={batchId} locale={locale} /><EvidencePanel state={verifyState} batchId={batchId} locale={locale} /></div><div className="tenant-context-column"><section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}><div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div><div className="tenant-usage-grid"><div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div><div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div></div></section>{lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div><div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}</div></section>}
+      {showContext && <section className="tenant-context-drawer"><div className="tenant-context-column"><div className="tenant-panel-head"><strong>{zh ? "证据和当前状态" : "Evidence and status"}</strong><span>{site.product.demoMode}</span></div><ProductPanel state={verifyState} batchId={batchId} locale={locale} /><EvidencePanel state={verifyState} batchId={batchId} locale={locale} /></div><div className="tenant-context-column"><section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}><div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div><div className="tenant-usage-grid"><div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div><div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div></div></section>{lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div>{lifecycle.simulation && <p className="tenant-lifecycle-simulation" role="status">{zh ? `演示数据每 ${Math.round(lifecycle.simulation.intervalMs / 1000)} 秒刷新 · tick ${lifecycle.simulation.tick} · 新证据 ${lifecycle.simulation.generatedEvidenceId}` : `Demo data refreshes every ${Math.round(lifecycle.simulation.intervalMs / 1000)}s · tick ${lifecycle.simulation.tick} · evidence ${lifecycle.simulation.generatedEvidenceId}`}</p>}<div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}</div></section>}
     </main>
   );
 }

@@ -333,6 +333,12 @@ export interface ChainStatusData {
     error?: string;
   };
   sessionTransactions: SessionChainTx[];
+  /** Server truth labels; replay_verified is historical evidence only. */
+  status?: string;
+  deploymentStatus?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified" | string;
+  businessStatus?: "replay_verified" | "anchor_pending" | "mainnet_receipt_verified" | string;
+  anchored?: boolean;
+  replayVerified?: boolean;
 }
 
 export type WalletActionKind = "purchase" | "contribution" | "dispute" | "evidence" | "verification" | "audit_finding" | "audit_approval" | "resolve_challenge";
@@ -358,6 +364,15 @@ export interface LifecycleView {
   syncedAt: string;
   dataMode: "demo/synthetic" | "external";
   events: LifecycleEvent[];
+  simulation?: {
+    mode: "continuous_demo";
+    intervalMs: number;
+    tick: number;
+    generatedEvidenceId: string;
+    sourceKind: string;
+    dataMode: "demo/synthetic";
+    note: string;
+  };
   nextAction: LifecycleStage | "complete";
   walletRoles: Array<{ stage: LifecycleStage; label: string; role: string; action: WalletActionKind; requiredRole?: string }>;
 }

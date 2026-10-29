@@ -53,6 +53,14 @@ export interface MediaPresignResponse {
   traceId: string;
 }
 
+export interface MediaRecognitionDraft {
+  status: "provider_unconfigured" | "needs_confirmation" | "ready_for_review";
+  provider: string;
+  kind: "ocr" | "asr" | "none";
+  fields: Array<{ name: string; value: string | null; confidence: number | null }>;
+  note: string;
+}
+
 export interface MediaIntakePreview {
   schemaVersion: "truthpass.enterprise.media-intake.v1";
   tenantId: string;
@@ -60,6 +68,7 @@ export interface MediaIntakePreview {
   traceId: string;
   status: "awaiting_confirmation";
   nextAction: string;
+  recognition?: MediaRecognitionDraft;
   evidence: {
     evidenceId: string;
     batchId: string;

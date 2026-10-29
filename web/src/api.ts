@@ -220,7 +220,8 @@ export async function postChat(
   signal?: AbortSignal,
   locale: "zh" | "en" = "zh",
 ): Promise<void> {
-  const res = await fetch("/api/agent/chat", {
+  // Use the canonical batch-scoped query stream shared with CLI and MCP.
+  const res = await fetch("/api/agent/query/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ batchId, locale, messages: [{ role: "user", content: question }] }),

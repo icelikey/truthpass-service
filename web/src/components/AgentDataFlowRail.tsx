@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ChainStatusData } from "../types";
 
 /**
  * Sources are rendered in the user's locale. Keep the well-known Chinese
@@ -70,6 +71,7 @@ export function AgentDataFlowRail({
   dataMode,
   traceId,
   locale = "zh",
+  chainStatus,
   onClear,
 }: {
   events: AgentFlowEvent[];
@@ -77,6 +79,7 @@ export function AgentDataFlowRail({
   dataMode?: string;
   traceId?: string;
   locale?: "zh" | "en";
+  chainStatus?: ChainStatusData | null;
   onClear?: () => void;
 }) {
   const zh = locale === "zh";
@@ -121,6 +124,12 @@ export function AgentDataFlowRail({
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [events, follow]);
 
+  const chainEvents = (chainStatus?.verifiedTransactions ?? []).filter((item) => item.batchId === batchId);
+  const sessionEvents = (chainStatus?.sessionTransactions ?? []).filter((item) => item.batchId === batchId);
+  const chainStatusLabel = chainStatus?.liveRpc.reachable
+    ? (zh ? "RPC 可达" : "RPC reachable")
+    : (zh ? "RPC 不可达" : "RPC unavailable");
+
   return (
     <section className="agent-data-flow-rail" aria-label={zh ? "Agent 数据流" : "Agent data flow"}>
       <div className="agent-data-flow-head">
@@ -141,6 +150,20 @@ export function AgentDataFlowRail({
         <span>{zh ? "最新来源" : "Latest source"} <b>{latestEvent?.source ?? "—"}</b></span>
         <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? latestEvent?.traceId ?? "—"}</code></span>
       </div>
+      {chainStatus && <section className="agent-chain-run" aria-label={zh ? "区块链运行状态" : "Blockchain run status"}>
+        <div className="agent-chain-run-head">
+          <div>
+            <span className="tp-kicker">{zh ? "链上运行 · 只读核对" : "CHAIN RUN · READ-ONLY CHECK"}</span>
+            <strong>{zh ? `Chain ${chainStatus.chainId} · ${chainStatus.chainName}` : `Chain ${chainStatus.chainId} · ${chainStatus.chainName}`}</strong>
+          </div>
+          <div className="agent-chain-run-chips"><span className={chainStatus.liveRpc.reachable ? "live" : "offline"}>{chainStatusLabel}</span><span>{chainStatus.deploymentStatus ?? (chainStatus.replayVerified ? "replay_verified" : "anchor_pending")}</span></div>
+        </div>
+        <div className="agent-chain-run-summary"><span>{zh ? "当前批次历史事件" : "Historical events for this batch"} <b>{chainEvents.length}</b></span><span>{zh ? "本次会话 receipt" : "Current-session receipts"} <b>{sessionEvents.length}</b></span><span>{zh ? "状态" : "State"} <b>{chainStatus.businessStatus ?? (chainStatus.replayVerified ? "replay_verified" : "anchor_pending")}</b></span></div>
+        <div className="agent-chain-run-events">
+          {chainEvents.length > 0 ? chainEvents.map((item) => <article key={`${item.event}-${item.txHash}`}><div><strong>{item.label || item.event}</strong><small>{item.event} · block {item.blockNumber}</small></div><code>{item.txHash.slice(0, 12)}…{item.txHash.slice(-8)}</code><span>{zh ? "历史回放" : "historical replay"}</span></article>) : <p>{zh ? "当前批次还没有可展示的链上事件。" : "No chain events are registered for this batch."}</p>}
+        </div>
+        <p className="agent-chain-run-boundary">{sessionEvents.length > 0 ? (zh ? "本次会话 receipt 已返回，仍需检查业务事件和 batchId。" : "A current-session receipt is present; the business event and batchId still require validation.") : (zh ? "当前没有本次会话真实 receipt。上面的 txHash 仅用于展示历史事件结构，不代表本次购买或反馈已完成。" : "There is no current-session receipt. The tx hashes above show historical event structure and do not confirm this purchase or feedback run.")}</p>
+      </section>}
       <div className={`agent-data-flow-live ${latestEvent?.status ?? "pending"}`} aria-live="polite">
         <span className="agent-data-flow-live-dot" aria-hidden="true" />
         <div>

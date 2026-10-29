@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "truthpass.demo.evidence.v1",
+  "generatedAt": "2026-10-28T15:46:35.7105467Z",
+  "batchId": "FO-2026-001",
+  "tenantId": "tenant-fish-oil-demo",
+  "productId": "fish-oil",
+  "dataMode": "demo/synthetic",
+  "inspection": {
+    "verificationStatus": "review",
+    "parameterStatus": "accepted",
+    "parameterDetails": [
+      {
+        "key": "epa-dha",
+        "label": "EPA+DHA",
+        "observed": 78,
+        "unit": "%",
+        "rule": "≥ 70%",
+        "status": "within_range",
+        "difference": 8
+      },
+      {
+        "key": "peroxide",
+        "label": "过氧化值",
+        "observed": 2.1,
+        "unit": "meq/kg",
+        "rule": "≤ 5 meq/kg",
+        "status": "within_range",
+        "difference": 2.9
+      },
+      {
+        "key": "totox",
+        "label": "TOTOX",
+        "observed": 11,
+        "unit": "指数",
+        "rule": "≤ 20",
+        "status": "within_range",
+        "difference": 9
+      },
+      {
+        "key": "cold-chain",
+        "label": "冷链异常时长",
+        "observed": 2,
+        "unit": "小时",
+        "rule": "≤ 6 小时",
+        "status": "within_range",
+        "difference": 4
+      },
+      {
+        "key": "heavy-metal-pb",
+        "label": "铅 Pb",
+        "observed": 0.02,
+        "unit": "mg/kg",
+        "rule": "≤ 0.5 mg/kg",
+        "status": "within_range",
+        "difference": 0.48
+      },
+      {
+        "key": "heavy-metal-hg",
+        "label": "汞 Hg",
+        "observed": 0.01,
+        "unit": "mg/kg",
+        "rule": "≤ 0.1 mg/kg",
+        "status": "within_range",
+        "difference": 0.09000000000000001
+      },
+      {
+        "key": "heavy-metal-cd",
+        "label": "镉 Cd",
+        "observed": 0.03,
+        "unit": "mg/kg",
+        "rule": "≤ 0.1 mg/kg",
+        "status": "within_range",
+        "difference": 0.07
+      },
+      {
+        "key": "heavy-metal-as",
+        "label": "砷 As",
+        "observed": 0.1,
+        "unit": "mg/kg",
+        "rule": "≤ 1 mg/kg",
+        "status": "within_range",
+        "difference": 0.9
+      }
+    ],
+    "missingItems": [
+      "生产阶段“浓缩”资料未覆盖",
+      "生产阶段“脱臭”资料未覆盖",
+      "生产阶段“灌装”资料未覆盖",
+      "生产阶段“包装”资料未覆盖",
+      "生产阶段“仓储”资料未覆盖"
+    ]
+  },
+  "lifecycle": {
+    "stages": [
+      {
+        "stage": "production",
+        "status": "verified",
+        "detail": "生产记录已同步，已完成机构或监管签名锚定。",
+        "revision": 179320245,
+        "dataMode": "demo/synthetic"
+      },
+      {
+        "stage": "inspection",
+        "status": "verified",
+        "detail": "检测报告已关联 batchId / sampleId，签名状态可继续核验。",
+        "revision": 179320246,
+        "dataMode": "demo/synthetic"
+      },
+      {
+        "stage": "cold_chain",
+        "status": "verified",
+        "detail": "演示设备同步 #179320239：温度 4.4℃、湿度 69%（仅用于持续演示）",
+        "revision": 179320247,
+        "dataMode": "demo/synthetic"
+      },
+      {
+        "stage": "shipment",
+        "status": "verified",
+        "detail": "已完成物流回调绑定订单和批次。",
+        "revision": 179320248,
+        "dataMode": "demo/synthetic"
+      }
+    ],
+    "continuousSimulation": {
+      "mode": "continuous_demo",
+      "intervalMs": 10000,
+      "tick": 179320239,
+      "generatedEvidenceId": "FO-2026-001:demo-sensor:179320239",
+      "sourceKind": "platform_device",
+      "dataMode": "demo/synthetic",
+      "note": "这是按时间生成的演示传感器数据，不代表真实设备上报。"
+    }
+  },
+  "agent": {
+    "traceId": "0xfdbbabb4f971998886998338fce16cbc81243926ef0a3334b719ead8b18cd52d",
+    "stageSequence": [
+      "reading_batch:active",
+      "reading_batch:completed",
+      "verifier_checked:active",
+      "jev_routed:active",
+      "model_started:active",
+      "verifier_checked:completed",
+      "jev_routed:completed",
+      "model_completed:fallback"
+    ],
+    "serviceStatus": "deterministic_fallback",
+    "agentMode": "deterministic_fallback",
+    "modelAssisted": false,
+    "validationStatus": "fallback",
+    "dataMode": "demo/synthetic"
+  },
+  "chain": {
+    "chainId": 677,
+    "chainName": "BOT Chain Mainnet",
+    "rpcReachable": false,
+    "status": "unavailable",
+    "deploymentStatus": "replay_verified",
+    "replayVerified": true,
+    "currentSessionTransactions": [],
+    "historicalReplayTransactions": [
+      {
+        "event": "EvidenceAnchored",
+        "txHash": "0x3ff591a82f012eb05f9f6994aff2af0415c718097587654ebfe4f5c3382b4052",
+        "blockNumber": 25873873,
+        "explorerUrl": "https://scan.botchain.ai/tx/0x3ff591a82f012eb05f9f6994aff2af0415c718097587654ebfe4f5c3382b4052"
+      },
+      {
+        "event": "VerificationRecorded",
+        "txHash": "0x30736a25b354536354b0c7f318a47ed271a0ced6ebc5f4d201bc5990c2377144",
+        "blockNumber": 25873892,
+        "explorerUrl": "https://scan.botchain.ai/tx/0x30736a25b354536354b0c7f318a47ed271a0ced6ebc5f4d201bc5990c2377144"
+      },
+      {
+        "event": "PurchaseRecorded",
+        "txHash": "0xad9ce28b3942b6f4257a2d0ee3bb74ce692916fa9d3ac782c2d2d875e7db6aca",
+        "blockNumber": 25873910,
+        "explorerUrl": "https://scan.botchain.ai/tx/0xad9ce28b3942b6f4257a2d0ee3bb74ce692916fa9d3ac782c2d2d875e7db6aca"
+      },
+      {
+        "event": "ContributionRecorded",
+        "txHash": "0x3514623a2b24374ed8a4589a387745fbb15c4945e641daef52ffa1c7b5d89a8d",
+        "blockNumber": 25873923,
+        "explorerUrl": "https://scan.botchain.ai/tx/0x3514623a2b24374ed8a4589a387745fbb15c4945e641daef52ffa1c7b5d89a8d"
+      }
+    ],
+    "note": "历史回放记录用于展示合约事件结构；没有当前会话真实 receipt 时，不标记本次购买已确认。"
+  }
+}

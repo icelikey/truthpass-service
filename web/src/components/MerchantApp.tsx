@@ -32,6 +32,37 @@ function StatusPill({ status, en = false }: { status: keyof typeof statusLabel; 
   return <span className={`merchant-status-pill ${status}`}>{en ? statusLabelEn[status] : statusLabel[status]}</span>;
 }
 
+function buildRecognitionDraft(mediaKind: string, configuredProvider: string | undefined, en: boolean) {
+  const isImage = mediaKind === "photo";
+  const isAudio = mediaKind === "voice";
+  const provider = configuredProvider?.trim() || "unconfigured";
+  if (!isImage && !isAudio) {
+    return {
+      status: "needs_confirmation" as const,
+      provider: "none",
+      kind: "none" as const,
+      fields: [],
+      note: en ? "This media type is hashed and bound to the batch; no OCR/ASR result is claimed." : "该媒体只完成哈希和批次绑定，不宣称已完成 OCR/ASR 识别。",
+    };
+  }
+  if (!configuredProvider?.trim()) {
+    return {
+      status: "provider_unconfigured" as const,
+      provider,
+      kind: isImage ? ("ocr" as const) : ("asr" as const),
+      fields: [],
+      note: en ? "Recognition provider is not configured. Please confirm the source manually." : "识别服务尚未配置，请人工确认原始资料；系统不会伪造识别结果。",
+    };
+  }
+  return {
+    status: "needs_confirmation" as const,
+    provider,
+    kind: isImage ? ("ocr" as const) : ("asr" as const),
+    fields: [],
+    note: en ? "A provider is configured, but no server-side result has been verified yet." : "识别服务已配置，但服务端尚未返回可核验结果，仍需人工确认。",
+  };
+}
+
 export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConfig; locale?: "zh" | "en" } = {}) {
   const en = locale === "en";
   const merchantTenantId = tenant?.tenantId ?? "demo-tenant";
@@ -69,6 +100,7 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
   const [sensorDemo, setSensorDemo] = useState<Awaited<ReturnType<typeof postIotSimulation>> | null>(null);
   const [sensorMode, setSensorMode] = useState<IotSimulationMode | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaPresign, setMediaPresign] = useState<MediaPresignResponse | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaIntakePreview | null>(null);
@@ -76,7 +108,18 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
   const [authOpen, setAuthOpen] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const merchantApiEnabled = import.meta.env.VITE_TRUTHPASS_MERCHANT_API_ENABLED === "true";
+  const recognitionProvider = import.meta.env.VITE_TRUTHPASS_RECOGNITION_PROVIDER as string | undefined;
   const activeBatchId = selectedBatch?.batchId ?? requestedBatchId;
+
+  useEffect(() => {
+    if (!selectedMedia || !selectedMedia.type.startsWith("image/")) {
+      setMediaPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(selectedMedia);
+    setMediaPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedMedia]);
   const siteConsumer = tenant ? `${siteHome}/agent?batch=${encodeURIComponent(activeBatchId)}` : "/";
 
   useEffect(() => {
@@ -241,6 +284,7 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
           traceId: "demo-media-trace",
           status: "awaiting_confirmation",
           nextAction: "演示模式只展示 Hash 和批次绑定；接入企业凭证后再上传到对象存储。",
+          recognition: buildRecognitionDraft(selectedMedia.type.startsWith("image/") ? "photo" : selectedMedia.type.startsWith("audio/") ? "voice" : "other", recognitionProvider, en),
           evidence: {
             evidenceId: `media-${hash.slice(2, 18)}`,
             batchId: selectedBatch?.batchId ?? defaultBatchId,
@@ -272,7 +316,10 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
         rawObjectRef: presign.rawObjectRef,
         dataMode: presign.dataMode,
       });
-      setMediaPreview(preview);
+      setMediaPreview({
+        ...preview,
+        recognition: buildRecognitionDraft(preview.evidence.payload.mediaKind, recognitionProvider, en),
+      });
       setMessage("文件上传准备完成；请先确认批次和来源，再提交证据。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "文件 Hash 或上传准备失败。");
@@ -512,7 +559,18 @@ export function MerchantApp({ tenant, locale = "zh" }: { tenant?: TenantSiteConf
               <div className="merchant-import-card">
                 <span className="eyebrow">{en ? "IMPORT EVIDENCE" : "资料导入"}</span><h2>{en ? "Import batch evidence" : "导入批次资料"}</h2>
                 <p>{en ? "CSV, Excel mapping, and API intake are supported. The browser demo uses an explicit fixture and stores no enterprise token." : "首期支持 CSV、Excel 映射和 API 接入。当前浏览器演示使用明确的 Demo fixture，不保存企业 Token。"}</p>
-                <div className="merchant-dropzone"><span>⇧</span><strong>{selectedMedia ? selectedMedia.name : (en ? "Drop a file or choose a source" : "拖入文件或选择数据源")}</strong><small>{en ? "Photo / video / PDF / audio / sensor · raw media stays off-chain" : "照片 / 视频 / PDF / 语音 / 传感器 · 原始媒体保留在链下"}</small><input className="merchant-file-input" type="file" accept="image/*,video/*,audio/*,.pdf,.csv,.json" onChange={(event) => setSelectedMedia(event.target.files?.[0] ?? null)} aria-label={en ? "Choose batch evidence file" : "选择批次资料文件"} /><button type="button" className="merchant-secondary" onClick={() => void prepareSelectedMedia()} disabled={!selectedMedia || mediaBusy}>{mediaBusy ? (en ? "Computing hash…" : "正在计算 Hash…") : (en ? "Prepare upload" : "生成上传准备")}</button>{mediaPreview && <div className="merchant-media-preview" role="status"><strong>{en ? "Evidence ready for confirmation" : "已生成待确认证据"}</strong><small>{mediaPreview.evidence.evidenceId} · {mediaPreview.evidence.dataMode}</small><small>Hash：{mediaPreview.evidence.payload.contentHash}</small><em>{mediaPreview.nextAction}</em></div>}{mediaPresign && <small className="merchant-presign-note">{en ? "Storage: " : "存储："}{mediaPresign.storageMode} · {en ? "Upload URL valid for 15 minutes" : "上传地址已生成，15 分钟内有效"}</small>}</div>
+                <div className="merchant-dropzone"><span>⇧</span><strong>{selectedMedia ? selectedMedia.name : (en ? "Drop a file or choose a source" : "拖入文件或选择数据源")}</strong><small>{en ? "Photo / video / PDF / audio / sensor · raw media stays off-chain" : "照片 / 视频 / PDF / 语音 / 传感器 · 原始媒体保留在链下"}</small><input className="merchant-file-input" type="file" accept="image/*,video/*,audio/*,.pdf,.csv,.json" onChange={(event) => setSelectedMedia(event.target.files?.[0] ?? null)} aria-label={en ? "Choose batch evidence file" : "选择批次资料文件"} /><button type="button" className="merchant-secondary" onClick={() => void prepareSelectedMedia()} disabled={!selectedMedia || mediaBusy}>{mediaBusy ? (en ? "Computing hash…" : "正在计算 Hash…") : (en ? "Prepare upload" : "生成上传准备")}</button>{mediaPreview && <div className="merchant-media-preview" role="status">
+                  {mediaPreviewUrl && <img className="merchant-media-thumb" src={mediaPreviewUrl} alt={en ? "Selected evidence preview" : "已选择的资料预览"} />}
+                  <strong>{en ? "Evidence ready for confirmation" : "已生成待确认证据"}</strong>
+                  <small>{mediaPreview.evidence.evidenceId} · {mediaPreview.evidence.dataMode} · {mediaPreview.evidence.batchId}</small>
+                  <small>Hash：{mediaPreview.evidence.payload.contentHash}</small>
+                  {mediaPreview.recognition && <div className={`merchant-recognition-status ${mediaPreview.recognition.status}`}>
+                    <b>{en ? "Recognition" : "识别状态"}：{mediaPreview.recognition.status === "provider_unconfigured" ? (en ? "provider unconfigured" : "服务未配置") : (en ? "needs human confirmation" : "待人工确认")}</b>
+                    <small>{mediaPreview.recognition.note}</small>
+                    {mediaPreview.recognition.fields.length > 0 && <ul>{mediaPreview.recognition.fields.map((field) => <li key={field.name}>{field.name}：{field.value ?? "—"}</li>)}</ul>}
+                  </div>}
+                  <em>{mediaPreview.nextAction}</em>
+                </div>}{mediaPresign && <small className="merchant-presign-note">{en ? "Storage: " : "存储："}{mediaPresign.storageMode} · {en ? "Upload URL valid for 15 minutes" : "上传地址已生成，15 分钟内有效"}</small>}</div>
                 <div className="merchant-import-actions">{([["production", "生产记录"], ["inspection", "检测报告"], ["cold_chain", "冷链记录"], ["shipment", "出货记录"]] as const).map(([kind, label]) => <button type="button" key={kind} onClick={() => void importEvidence(kind)}>导入 Demo · {label}</button>)}</div>
               </div>
               <div className="merchant-mapping-card"><span className="eyebrow">资料对应</span><h3>首期必需信息</h3>{["企业和品牌", "商品和批次", "样品和资料编号", "资料提供方", "发生时间和更新时间"].map((field) => <div className="merchant-field-row" key={field}><span>{field}</span><b>待对应</b></div>)}<small>真实企业接入需要先固定批次号和样品号，避免检测报告放错批次。</small></div>

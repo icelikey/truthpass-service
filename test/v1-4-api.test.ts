@@ -48,6 +48,21 @@ test("integrated API exposes a grounded CLI explanation endpoint", async () => {
   });
 });
 
+test("demo lifecycle exposes an explicit continuous synthetic heartbeat", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/products/FO-2026-001/lifecycle`);
+    const lifecycle = await response.json() as Record<string, any>;
+    assert.equal(response.status, 200);
+    assert.equal(lifecycle.batchId, "FO-2026-001");
+    assert.equal(lifecycle.contextMode, "production_sync_simulation");
+    assert.equal(lifecycle.dataMode, "demo/synthetic");
+    assert.equal(lifecycle.simulation.mode, "continuous_demo");
+    assert.equal(lifecycle.simulation.intervalMs, 10_000);
+    assert.match(lifecycle.simulation.generatedEvidenceId, /^FO-2026-001:demo-sensor:\d+$/);
+    assert.match(lifecycle.events.find((item: Record<string, any>) => item.stage === "cold_chain").detail, /演示设备同步/);
+  });
+});
+
 test("public product views expose parameter values and rule ranges instead of a single quality verdict", async () => {
   await withServer(async (baseUrl) => {
     const productResponse = await fetch(`${baseUrl}/api/products/FO-2026-009`);

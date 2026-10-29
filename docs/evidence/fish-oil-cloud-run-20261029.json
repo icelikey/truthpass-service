@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "truthpass.cloud.demo.evidence.v1",
+  "recordedAt": "2026-10-29T04:32:40.000Z",
+  "deployment": {
+    "host": "106.52.107.169",
+    "service": "truthpass.service",
+    "version": "20261029115000",
+    "localBaseUrl": "http://127.0.0.1:4173",
+    "status": "active",
+    "buildChecks": {
+      "typecheck": "passed",
+      "build": "passed",
+      "webBuildVerification": "passed"
+    }
+  },
+  "batch": {
+    "tenantId": "tenant-fish-oil-demo",
+    "productId": "fish-oil",
+    "batchId": "FO-2026-001",
+    "dataMode": "demo/synthetic",
+    "verificationStatus": "review",
+    "parameterStatus": "accepted",
+    "missingProductionStages": ["浓缩", "脱臭", "灌装", "包装", "仓储"]
+  },
+  "simulation": {
+    "lifecycleStages": ["production", "inspection", "cold_chain", "shipment"],
+    "stageEndpoint": "/api/simulator/lifecycle",
+    "iotEndpoint": "/api/simulator/iot",
+    "normalRun": {
+      "mode": "normal",
+      "verification": "accepted",
+      "dataMode": "demo/synthetic"
+    },
+    "coldChainGapRun": {
+      "mode": "cold_chain_gap",
+      "verification": "rejected",
+      "reason": "模拟温控中断 6 小时，超过当前批次冷链规则",
+      "dataMode": "demo/synthetic"
+    },
+    "continuousRefresh": {
+      "intervalMs": 10000,
+      "sourceKind": "platform_device",
+      "isRealDevice": false
+    }
+  },
+  "agent": {
+    "endpoint": "/api/agent/chat",
+    "traceId": "0x74c757663cfd7e7e22b87805514dd1dbddbb340b2500400e4430704fe4ab3d14",
+    "stageSequence": [
+      "begin",
+      "reading_batch",
+      "verifier_checked",
+      "jev_routed",
+      "model_started",
+      "model_completed",
+      "meta",
+      "answer",
+      "done"
+    ],
+    "agentMode": "deterministic_fallback",
+    "modelAssisted": false,
+    "validationStatus": "fallback",
+    "promptPolicyVersion": "truthpass.consumer.v2",
+    "modelContractVersion": "truthpass.consumer.v2",
+    "verifier": "review",
+    "jevDecision": "request_more_evidence",
+    "citedEvidenceIds": [
+      "FO-2026-001:evidence:1",
+      "FO-2026-001:evidence:2",
+      "FO-2026-001:evidence:3",
+      "FO-2026-001:evidence:4",
+      "FO-2026-001:evidence:5",
+      "evidence_card",
+      "deterministic_verifier"
+    ]
+  },
+  "chain": {
+    "chainId": 677,
+    "chainName": "BOT Chain Mainnet",
+    "rpcReachable": false,
+    "deploymentStatus": "replay_verified",
+    "currentSessionTransactions": [],
+    "historicalReplayEvents": [
+      "EvidenceAnchored",
+      "VerificationRecorded",
+      "PurchaseRecorded",
+      "ContributionRecorded"
+    ],
+    "boundary": "历史回放用于展示事件结构；没有当前会话真实 receipt 时，不标记本次购买已确认。"
+  },
+  "knownBoundaries": [
+    "当前服务器没有 DeepSeek/JEV 凭据，Agent 使用确定性基础回答。",
+    "模拟生命周期和 IoT 数据明确标记为 demo/synthetic。",
+    "BOT Chain RPC 当前不可达，历史回放不能作为本次交易 receipt。",
+    "本次演示未执行真实钱包签名、支付或购买写回。"
+  ]
+}
