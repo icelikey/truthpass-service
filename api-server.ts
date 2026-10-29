@@ -3477,7 +3477,7 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
       { stage: "jev_routed", status: reply.jev?.decision.decision ?? (reply.verifierStatus === "accepted" ? "route_to_rule_verifier" : "request_more_evidence"), source: reply.jev?.provider ?? "deterministic", model: reply.jev?.model ?? "deterministic-fallback", live: reply.jev?.live === true },
       { stage: "model_completed", status: modelCompletedStatus, providerIssue: reply.providerIssue ?? null, providerResponseStatus: reply.providerResponseStatus ?? null },
     ],
-    retrieval: { query: question, hits: retrieval },
+    retrieval: { query: question, hitCount: retrieval.length, hitIds: retrieval.map((hit) => hit.hitId), hits: retrieval },
     answer: reply.lines.map((line) => line.text).join(" "),
     citations: reply.safety?.citations ?? [],
     evidenceIds: reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds),
