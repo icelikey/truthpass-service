@@ -392,6 +392,7 @@ export interface LifecycleView {
 /** Public, read-only overview used to keep the consumer UI on one batch scope. */
 export interface PublicBatchOverview {
   schemaVersion?: string;
+  batchId?: string;
   tenant?: { tenantId?: string; slug?: string; brand?: { name?: string } | null };
   product?: { productId?: string; name?: string; category?: string; dataMode?: "demo/synthetic" | "external" };
   batch?: { batchId?: string; dataMode?: "demo/synthetic" | "external"; status?: string; parameterStatus?: string };

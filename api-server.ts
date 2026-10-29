@@ -5336,6 +5336,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         note: "购买准备不等于支付成功；只有外部钱包签名并回读真实 receipt 后才会写入购买记录。",
       },
       purchaseQuote: purchaseQuote(batchId),
+      batchId,
       tenantId: tenant?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
       productId: product.productId,
       feedbackSummary: await feedbackSummaryFor(batchId),

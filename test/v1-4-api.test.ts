@@ -79,6 +79,7 @@ test("public product views expose parameter values and rule ranges instead of a 
     const overviewResponse = await fetch(`${baseUrl}/api/public/batches/FO-2026-009/overview`);
     const overview = await overviewResponse.json() as Record<string, any>;
     assert.equal(overviewResponse.status, 200);
+    assert.equal(overview.batchId, "FO-2026-009");
     assert.equal(overview.batch.batchId, "FO-2026-009");
     assert.ok(Array.isArray(overview.parameterDetails));
     assert.equal(overview.parameterDetails.find((item: Record<string, unknown>) => item.key === "peroxide").observed, 2.5);
