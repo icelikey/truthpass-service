@@ -18,6 +18,10 @@ export interface ChatMessage {
     | "provider"
     | "model"
     | "providerIssue"
+    | "providerResponseStatus"
+    | "runtimeStatus"
+    | "validationStatus"
+    | "validationReasons"
     | "modelAssisted"
     | "fallbackApplied"
     | "evidenceIds"
@@ -42,6 +46,7 @@ export interface ChatMessage {
 const STREAM_STAGES: AgentStreamStage[] = [
   "begin",
   "reading_batch",
+  "retrieval_completed",
   "verifier_checked",
   "jev_routed",
   "model_started",

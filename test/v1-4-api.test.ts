@@ -283,6 +283,26 @@ test("unified Agent query returns retrieval hits and one batch-scoped trace", as
   });
 });
 
+test("unified Agent query stream exposes retrieval completion before verification", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/agent/query/stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-truthpass-request-id": "agent-stream-retrieval-001" },
+      body: JSON.stringify({ batchId: "FO-2026-001", question: "冷链和检测有什么缺口？", locale: "zh" }),
+    });
+    const stream = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(stream, /"kind":"stage","stage":"reading_batch","status":"active"/);
+    assert.match(stream, /"kind":"stage","stage":"retrieval_completed","status":"completed"/);
+    assert.match(stream, /"kind":"stage","stage":"verifier_checked","status":"completed"/);
+    assert.match(stream, /"kind":"answer"/);
+    assert.match(stream, /"kind":"done"/);
+    const traceIds = [...stream.matchAll(/"traceId":"([^"]+)"/g)].map((match) => match[1]);
+    assert.ok(traceIds.length > 3);
+    assert.ok(traceIds.every((traceId) => traceId === "agent-stream-retrieval-001"));
+  });
+});
+
 test("public Agent search rejects unknown batch instead of falling through", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/agent/search?batchId=FO-9999-999&q=冷链`, {
@@ -311,6 +331,10 @@ test("customer service exposes status and SSE runtime metadata", async () => {
     assert.equal(status.configuredModel, "deterministic-fallback");
     assert.equal(status.lastSuccessfulProvider, null);
     assert.equal(status.lastSuccessfulModel, null);
+    assert.equal(status.configured, false);
+    assert.equal(status.lastRequestVerified, false);
+    assert.equal(status.lastRequestFallback, false);
+    assert.equal(status.runtimeStatus, "runtime_unknown");
 
     const chatResponse = await fetch(baseUrl + "/api/agent/chat", {
       method: "POST",
@@ -336,6 +360,124 @@ test("customer service exposes status and SSE runtime metadata", async () => {
     assert.match(stream, /"stage":"model_completed"/);
     assert.match(stream, /"kind":"done"/);
   });
+});
+
+test("OpenCode billing failures stay visible and fall back safely", async () => {
+  const previous = {
+    provider: process.env.AGENT_PROVIDER,
+    key: process.env.OPENCODE_API_KEY,
+    baseUrl: process.env.OPENCODE_BASE_URL,
+    model: process.env.OPENCODE_MODEL,
+  };
+  const originalFetch = globalThis.fetch;
+  process.env.AGENT_PROVIDER = "opencode";
+  process.env.OPENCODE_API_KEY = "test-opencode-key";
+  process.env.OPENCODE_BASE_URL = "https://opencode.ai/inference/openai/v1";
+  process.env.OPENCODE_MODEL = "deepseek-v4.1-flash";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (target.startsWith("https://opencode.ai/")) {
+      return new Response(JSON.stringify({ error: { message: "billing required" } }), {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  try {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/agent/query/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-truthpass-request-id": "opencode-billing-001" },
+        body: JSON.stringify({ batchId: "FO-2026-001", question: "请解释检测和冷链", locale: "zh" }),
+      });
+      const stream = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(stream, /"provider":"opencode"/);
+      assert.match(stream, /"model":"deepseek-v4\.1-flash"/);
+      assert.match(stream, /"providerIssue":"billing_required"/);
+      assert.match(stream, /"providerResponseStatus":402/);
+      assert.match(stream, /"runtimeStatus":"billing_required"/);
+      assert.match(stream, /"stage":"model_completed","status":"billing_required"/);
+      assert.match(stream, /"modelAssisted":false/);
+      assert.match(stream, /"validationStatus":"fallback"/);
+      assert.match(stream, /"kind":"done"/);
+      const statusResponse = await fetch(`${baseUrl}/api/agent/status?diagnostics=true`);
+      const status = await statusResponse.json() as Record<string, any>;
+      assert.equal(status.configured, true);
+      assert.equal(status.lastRequestVerified, false);
+      assert.equal(status.lastRequestFallback, true);
+      assert.equal(status.runtimeStatus, "billing_required");
+      assert.equal(status.lastProviderResponseStatus, 402);
+      assert.equal(status.lastProviderIssue, "billing_required");
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = previous.provider;
+    if (previous.key === undefined) delete process.env.OPENCODE_API_KEY; else process.env.OPENCODE_API_KEY = previous.key;
+    if (previous.baseUrl === undefined) delete process.env.OPENCODE_BASE_URL; else process.env.OPENCODE_BASE_URL = previous.baseUrl;
+    if (previous.model === undefined) delete process.env.OPENCODE_MODEL; else process.env.OPENCODE_MODEL = previous.model;
+  }
+});
+
+test("OpenCode HTTP 200 is published only after contract validation", async () => {
+  const previous = {
+    provider: process.env.AGENT_PROVIDER,
+    key: process.env.OPENCODE_API_KEY,
+    baseUrl: process.env.OPENCODE_BASE_URL,
+    model: process.env.OPENCODE_MODEL,
+  };
+  const originalFetch = globalThis.fetch;
+  process.env.AGENT_PROVIDER = "opencode";
+  process.env.OPENCODE_API_KEY = "test-opencode-key";
+  process.env.OPENCODE_BASE_URL = "https://opencode.ai/inference/openai/v1";
+  process.env.OPENCODE_MODEL = "deepseek-v4.1-flash";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (target.startsWith("https://opencode.ai/")) {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              conclusion: "这批资料可以继续了解",
+              evidence: "依据来自当前批次 evidence_card",
+              uncertainty: "当前资料是演示数据，不能替代真实商品认证",
+              nextAction: "打开证据卡核对来源",
+              citations: ["evidence_card"],
+            }),
+          },
+        }],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  try {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/agent/query/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-truthpass-request-id": "opencode-success-001" },
+        body: JSON.stringify({ batchId: "FO-2026-001", question: "请解释这批资料", locale: "zh" }),
+      });
+      const stream = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(stream, /"provider":"opencode"/);
+      assert.match(stream, /"model":"deepseek-v4\.1-flash"/);
+      assert.match(stream, /"modelAssisted":true/);
+      assert.match(stream, /"validationStatus":"accepted"/);
+      assert.match(stream, /"providerResponseStatus":200/);
+      assert.match(stream, /"runtimeStatus":"completed"/);
+      assert.match(stream, /"stage":"model_completed","status":"completed"/);
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.provider === undefined) delete process.env.AGENT_PROVIDER; else process.env.AGENT_PROVIDER = previous.provider;
+    if (previous.key === undefined) delete process.env.OPENCODE_API_KEY; else process.env.OPENCODE_API_KEY = previous.key;
+    if (previous.baseUrl === undefined) delete process.env.OPENCODE_BASE_URL; else process.env.OPENCODE_BASE_URL = previous.baseUrl;
+    if (previous.model === undefined) delete process.env.OPENCODE_MODEL; else process.env.OPENCODE_MODEL = previous.model;
+  }
 });
 
 test("JEV detection separates replay history from current receipt state", async () => {

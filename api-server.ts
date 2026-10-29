@@ -140,10 +140,21 @@ const siteStore = new Map<string, { config: Record<string, unknown>; revisions: 
 ]);
 let lastCustomerModelDiagnostic: { endpointHost: string; status?: number; errorType?: string; event: string; at: string } | null = null;
 
+type CustomerModelRuntimeStatus =
+  | "completed"
+  | "fallback"
+  | "billing_required"
+  | "unauthorized"
+  | "rate_limited"
+  | "invalid_response"
+  | "unavailable";
+
 type CustomerModelRuntime = {
   provider: string;
   model: string;
-  status: "completed" | "unavailable";
+  status: CustomerModelRuntimeStatus;
+  responseStatus?: number;
+  providerIssue?: ChatReplyResult["providerIssue"];
   at: string;
 };
 
@@ -1817,6 +1828,10 @@ type ChatReplyResult = {
   modelUsed?: string;
   /** Safe public classification only; provider response bodies and credentials stay server-side. */
   providerIssue?: "unauthorized" | "billing_required" | "rate_limited" | "invalid_response" | "unavailable";
+  /** HTTP status returned by the configured provider, when one was received. */
+  providerResponseStatus?: number;
+  /** Detailed runtime classification used by the model_completed stage. */
+  runtimeStatus?: CustomerModelRuntimeStatus;
   dataMode?: "demo/synthetic" | "external";
   sources?: string[];
   evidenceIds?: string[];
@@ -1850,6 +1865,8 @@ type ChatMeta = {
   /** Public model identifier only; never expose credentials or prompt text. */
   model?: string;
   providerIssue?: "unauthorized" | "billing_required" | "rate_limited" | "invalid_response" | "unavailable";
+  providerResponseStatus?: number;
+  runtimeStatus?: CustomerModelRuntimeStatus;
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];
@@ -1974,12 +1991,12 @@ async function streamChatWithReply(
   const verifierStageStatus = !baseMeta.batchId || result.verifierStatus === "not_run" ? "fallback" : "completed";
   const jevDecision = result.jev?.decision.decision
     ?? (!baseMeta.batchId || (result.verifierStatus && result.verifierStatus !== "accepted") ? "request_more_evidence" : "route_to_rule");
-  const modelStatus = result.status === "model_assisted" ? "completed" : "fallback";
+  const modelRuntimeStatus = result.runtimeStatus ?? (result.status === "model_assisted" ? "completed" : result.providerIssue ?? "fallback");
   send({ kind: "stage", stage: "reading_batch", status: "completed", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
   send({ kind: "stage", stage: "verifier_checked", status: verifierStageStatus, detail: result.verifierStatus ?? "checked", traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
   send({ kind: "stage", stage: "jev_routed", status: "completed", detail: jevDecision, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
-  send({ kind: "stage", stage: "model_started", status: modelStatus, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
-  send({ kind: "stage", stage: "model_completed", status: modelStatus, detail: result.safety?.reasons?.join(",") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "model_started", status: "active", detail: result.providerUsed ?? publicCustomerProvider(), traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
+  send({ kind: "stage", stage: "model_completed", status: modelRuntimeStatus, detail: [result.providerIssue, result.providerResponseStatus ? `HTTP ${result.providerResponseStatus}` : undefined, ...(result.safety?.reasons ?? [])].filter(Boolean).join(" · ") || undefined, traceId: baseMeta.traceId, batchId: baseMeta.batchId, evidenceIds: resultEvidenceIds, dataMode: resultDataMode });
   if (baseMeta.batchId) {
     const auditRun = {
       schemaVersion: "truthpass.agent.audit.v2",
@@ -1999,6 +2016,9 @@ async function streamChatWithReply(
       chainContext: baseMeta.chainContext ?? result.chainContext ?? null,
       jev: result.jev ? { decision: result.jev.decision, provider: result.jev.provider, model: result.jev.model, live: result.jev.live } : null,
       verificationStatus: result.status === "model_assisted" ? "model_assisted" : "deterministic_fallback",
+      providerIssue: result.providerIssue ?? null,
+      providerResponseStatus: result.providerResponseStatus ?? null,
+      runtimeStatus: modelRuntimeStatus,
       createdAt: new Date().toISOString(),
     };
     agentAuditRuns.set(baseMeta.traceId, auditRun);
@@ -2019,6 +2039,8 @@ async function streamChatWithReply(
     provider: result.providerUsed ?? (result.status === "model_assisted" ? publicCustomerProvider() : "deterministic"),
     model: result.modelUsed ?? (result.status === "model_assisted" ? publicCustomerModel() : "deterministic-fallback"),
     ...(result.providerIssue ? { providerIssue: result.providerIssue } : {}),
+    ...(result.providerResponseStatus !== undefined ? { providerResponseStatus: result.providerResponseStatus } : {}),
+    runtimeStatus: modelRuntimeStatus,
     modelAssisted: result.status === "model_assisted",
     evidenceIds: result.evidenceIds ?? [],
     pipeline: [...CUSTOMER_CHAT_PIPELINE],
@@ -2141,6 +2163,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   if (!provider.configured) return {
     lines: [],
     status: "deterministic_fallback",
+    runtimeStatus: "fallback",
     dataMode: "demo/synthetic",
     sources,
     safety: { status: "fallback", citations: [], reasons: ["provider_not_configured"] },
@@ -2150,6 +2173,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   // instead of silently switching to a different provider.
   const providers: ResolvedAgentProvider[] = [provider];
   let providerIssue: ChatReplyResult["providerIssue"] = "unavailable";
+  let providerResponseStatus: number | undefined;
+  let runtimeStatus: CustomerModelRuntimeStatus = "unavailable";
   const safetyContract = {
     batchId: contract?.batchId,
     dataMode: contract?.dataMode ?? "demo/synthetic",
@@ -2203,7 +2228,15 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
             : res.status === 429
               ? "rate_limited"
               : "unavailable";
-        const diagnostic = { event: "customer_service_provider_unavailable", endpointHost: new URL(endpoint).host, status: res.status, at: new Date().toISOString() } as const;
+        providerResponseStatus = res.status;
+        runtimeStatus = providerIssue === "billing_required"
+          ? "billing_required"
+          : providerIssue === "unauthorized"
+            ? "unauthorized"
+            : providerIssue === "rate_limited"
+              ? "rate_limited"
+              : "unavailable";
+        const diagnostic = { event: "customer_service_provider_unavailable", endpointHost: new URL(endpoint).host, status: res.status, at: new Date().toISOString(), providerIssue } as const;
         lastCustomerModelDiagnostic = diagnostic;
         console.warn(JSON.stringify(diagnostic));
         continue;
@@ -2213,6 +2246,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       const safety = typeof content === "string" ? validateConsumerModelOutput(content, safetyContract) : { status: "rejected" as const, citations: [], reasons: ["model_content_missing"] };
       if (safety.status !== "accepted" || !safety.text) {
         providerIssue = "invalid_response";
+        runtimeStatus = "invalid_response";
+        providerResponseStatus = res.status;
         const text = typeof content === "string" ? content.trim() : "";
         const diagnostic = {
           event: "customer_service_provider_invalid_response",
@@ -2234,10 +2269,13 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       // The configured provider succeeded; clear any prior diagnostic so status
       // reflects the current successful call.
       lastCustomerModelDiagnostic = null;
+      providerResponseStatus = res.status;
+      runtimeStatus = "completed";
       lastCustomerModelRuntime = {
         provider: candidate.provider,
         model: candidate.model,
-        status: "completed",
+        status: runtimeStatus,
+        responseStatus: providerResponseStatus,
         at: new Date().toISOString(),
       };
       return {
@@ -2245,13 +2283,16 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         status: "model_assisted",
         providerUsed: candidate.provider,
         modelUsed: candidate.model,
+        providerResponseStatus,
+        runtimeStatus,
         dataMode: "demo/synthetic",
         sources,
         evidenceIds: safety.citations.filter((item) => safetyContract.evidenceIds.includes(item)),
         safety: { status: "accepted", citations: safety.citations, reasons: [] },
       };
     } catch (error) {
-      const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString() } as const;
+      runtimeStatus = "unavailable";
+      const diagnostic = { event: "customer_service_provider_error", endpointHost: new URL(endpoint).host, errorType: error instanceof Error ? error.name : "unknown", at: new Date().toISOString(), providerIssue: "unavailable" } as const;
       lastCustomerModelDiagnostic = diagnostic;
       console.warn(JSON.stringify(diagnostic));
       // No alternate provider is attempted; the caller receives deterministic
@@ -2262,10 +2303,23 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   lastCustomerModelRuntime = {
     provider: provider.provider,
     model: provider.model,
-    status: "unavailable",
+    status: runtimeStatus,
+    responseStatus: providerResponseStatus,
+    providerIssue,
     at: new Date().toISOString(),
   };
-  return { lines: [], status: providerIssue === "rate_limited" ? "rate_limited" : "provider_unavailable", providerIssue, dataMode: "demo/synthetic", sources, safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] } };
+  return {
+    lines: [],
+    status: providerIssue === "rate_limited" ? "rate_limited" : "provider_unavailable",
+    providerUsed: provider.provider,
+    modelUsed: provider.model,
+    providerIssue,
+    providerResponseStatus,
+    runtimeStatus,
+    dataMode: "demo/synthetic",
+    sources,
+    safety: { status: "rejected", citations: [], reasons: ["model_output_rejected_or_unavailable"] },
+  };
 }
 
 function isChainStatusQuestion(question: string): boolean {
@@ -3393,6 +3447,8 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
   const reply = await demoConsumerChat(batchId, batch, question, chainContext, locale, retrieval);
   const lifecycle = lifecyclePublicView(batchId);
   const status = reply.status ?? "deterministic_fallback";
+  const modelCompletedStatus = reply.runtimeStatus
+    ?? (status === "model_assisted" ? "completed" : reply.providerIssue ?? "fallback");
   return {
     schemaVersion: "truthpass.agent.query.v1",
     traceId,
@@ -3405,16 +3461,26 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
       { stage: "retrieval_completed", status: "completed", hitCount: retrieval.length },
       { stage: "verifier_checked", status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
       { stage: "jev_routed", status: reply.jev?.decision.decision ?? (reply.verifierStatus === "accepted" ? "route_to_rule_verifier" : "request_more_evidence"), source: reply.jev?.provider ?? "deterministic", model: reply.jev?.model ?? "deterministic-fallback", live: reply.jev?.live === true },
-      { stage: "model_completed", status: status === "model_assisted" ? "completed" : "fallback" },
+      { stage: "model_completed", status: modelCompletedStatus, providerIssue: reply.providerIssue ?? null, providerResponseStatus: reply.providerResponseStatus ?? null },
     ],
     retrieval: { query: question, hits: retrieval },
     answer: reply.lines.map((line) => line.text).join(" "),
     citations: reply.safety?.citations ?? [],
     evidenceIds: reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds),
-    model: { status, provider: reply.providerUsed ?? "deterministic", model: reply.modelUsed ?? "deterministic-fallback" },
+    model: {
+      status,
+      provider: reply.providerUsed ?? "deterministic",
+      model: reply.modelUsed ?? "deterministic-fallback",
+      runtimeStatus: modelCompletedStatus,
+      providerIssue: reply.providerIssue ?? null,
+      providerResponseStatus: reply.providerResponseStatus ?? null,
+    },
     modelAssisted: status === "model_assisted",
     validationStatus: reply.safety?.status ?? (status === "model_assisted" ? "accepted" : "fallback"),
     validationReasons: reply.safety?.reasons ?? [],
+    providerIssue: reply.providerIssue ?? null,
+    providerResponseStatus: reply.providerResponseStatus ?? null,
+    runtimeStatus: modelCompletedStatus,
     pipelineDetail: {
       verifier: { status: reply.verifierStatus ?? "checked", reasons: reply.verifierReasons ?? [] },
       jev: {
@@ -3427,7 +3493,7 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
         missingEvidenceCodes: reply.jev?.decision.missingEvidenceCodes ?? [],
         conflictCodes: reply.jev?.decision.conflictCodes ?? [],
       },
-      deepseek: { status: status === "model_assisted" ? "completed" : status === "deterministic_fallback" ? "fallback" : "unavailable" },
+      deepseek: { status: status === "model_assisted" ? "completed" : "fallback" },
     },
     lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction },
     chainContext: chainContext ?? null,
@@ -3833,6 +3899,12 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       lastSuccessfulProvider: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.provider : null,
       lastSuccessfulModel: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.model : null,
       lastModelRuntimeStatus: lastCustomerModelRuntime?.status ?? null,
+      lastProviderResponseStatus: lastCustomerModelRuntime?.responseStatus ?? null,
+      lastProviderIssue: lastCustomerModelRuntime?.providerIssue ?? null,
+      configured: configuredProvider.configured,
+      lastRequestVerified: lastCustomerModelRuntime?.status === "completed",
+      lastRequestFallback: Boolean(lastCustomerModelRuntime && lastCustomerModelRuntime.status !== "completed"),
+      runtimeStatus: lastCustomerModelRuntime?.status ?? "runtime_unknown",
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",
@@ -5357,7 +5429,14 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       const result = await runUnifiedAgentQuery(batchId, question, traceId, locale);
       send({ kind: "stage", stage: "verifier_checked", status: "completed", detail: result.stages.find((stage) => stage.stage === "verifier_checked")?.status, evidenceIds: result.evidenceIds, ...base });
       send({ kind: "stage", stage: "jev_routed", status: "completed", detail: result.stages.find((stage) => stage.stage === "jev_routed")?.status, evidenceIds: result.evidenceIds, ...base });
-      send({ kind: "stage", stage: "model_completed", status: result.model.status === "model_assisted" ? "completed" : "fallback", evidenceIds: result.evidenceIds, ...base });
+      send({
+        kind: "stage",
+        stage: "model_completed",
+        status: result.runtimeStatus ?? (result.model.status === "model_assisted" ? "completed" : "fallback"),
+        detail: result.providerIssue ? `${result.providerIssue}${result.providerResponseStatus ? ` · HTTP ${result.providerResponseStatus}` : ""}` : undefined,
+        evidenceIds: result.evidenceIds,
+        ...base,
+      });
       send({ ...result, kind: "meta", agentMode: result.model.status === "model_assisted" ? "model_assisted" : "deterministic_fallback", serviceStatus: result.model.status, modelAssisted: result.model.status === "model_assisted", validationStatus: result.validationStatus ?? (result.model.status === "model_assisted" ? "accepted" : "fallback"), validationReasons: result.validationReasons ?? [], pipeline: ["verifier", "jev", "deepseek"], pipelineDetail: result.pipelineDetail });
       send({ kind: "answer", cls: "plain", text: result.answer, ...base, evidenceIds: result.evidenceIds });
       send({ kind: "done", ...base, evidenceIds: result.evidenceIds });

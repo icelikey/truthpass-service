@@ -122,7 +122,7 @@ function providerIssueLabel(issue: string | undefined, en: boolean): string | nu
     case "billing_required":
       return en
         ? "The model account needs billing or available credits. The evidence fallback is still working."
-        : "模型账户需要计费或可用额度；当前已安全回退到批次资料回答。";
+        : "OpenCode 请求已发送，返回 HTTP 402（额度不足）；当前使用当前批次登记资料回退，未经校验的模型原文未展示。";
     case "unauthorized":
       return en
         ? "The model credential was rejected. The evidence fallback is still working."
@@ -147,6 +147,7 @@ function providerIssueLabel(issue: string | undefined, en: boolean): string | nu
 const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
   begin: "开始",
   reading_batch: "读取批次",
+  retrieval_completed: "检索完成",
   verifier_checked: "规则核验",
   jev_routed: "JEV 分流",
   model_started: "模型解释",
@@ -289,6 +290,7 @@ function MessageView({
           <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Evidence fallback" : "基础回答")} </summary>
           <div className="agent-trace-grid">
             <span><b>{en ? "Model" : "模型"}</b>{message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Compatible API" : "兼容接口")} · ${message.meta.model ?? (en ? "configured model" : "已配置模型")}` : "deterministic fallback"}</span>
+            <span><b>{en ? "Runtime" : "运行结果"}</b>{message.meta.runtimeStatus ?? (message.meta.modelAssisted ? "completed" : "fallback")}{message.meta.providerResponseStatus ? ` · HTTP ${message.meta.providerResponseStatus}` : ""}{message.meta.providerIssue ? ` · ${message.meta.providerIssue}` : ""}</span>
             <span><b>{en ? "Pipeline" : "流程"}</b>{(message.meta.pipeline ?? []).map((stage) => stage === "verifier" ? (en ? "Rule checks" : "规则核验") : stage === "jev" ? "JEV" + (en ? " routing" : " 分流") : stage === "deepseek" ? (en ? `${message.meta?.provider ?? "Model"} explanation` : `${message.meta?.provider ?? "模型"} 解释`) : stage).join(" → ")}</span>
             {message.meta.pipelineDetail && <span><b>{en ? "Result" : "结果"}</b>Verifier: {message.meta.pipelineDetail.verifier.status} · JEV: {message.meta.pipelineDetail.jev.decision} · Model: {message.meta.pipelineDetail.deepseek.status}</span>}
             <span><b>{en ? "Citations" : "引用"}</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : (en ? "No additional evidence IDs" : "当前回答没有额外证据 ID")}</span>
@@ -348,6 +350,16 @@ function MessageView({
         </div>
       )}
 
+      {message.done && message.meta?.modelAssisted && (
+        <div className="chat-provider-run success" role="status">
+          {en ? "OpenCode completed the explanation" : "OpenCode 已完成解释"} · {en ? "model-assisted" : "模型参与"} · {en ? "validation" : "校验"}: {message.meta.validationStatus ?? "accepted"}
+        </div>
+      )}
+      {message.done && message.meta?.providerIssue === "billing_required" && (
+        <div className="chat-provider-run billing" role="status">
+          {en ? "OpenCode request sent · HTTP 402 billing required · safe evidence fallback applied; unvalidated model text was not shown." : "OpenCode 请求已发送 · HTTP 402 额度不足 · 已安全回退到当前批次资料，未经校验的模型原文未展示。"}
+        </div>
+      )}
       <div className="msg-bubble">
         {structuredSections.length > 0 ? (
           <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>

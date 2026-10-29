@@ -122,6 +122,7 @@ export type ChatLineClass =
 export type AgentStreamStage =
   | "begin"
   | "reading_batch"
+  | "retrieval_completed"
   | "verifier_checked"
   | "jev_routed"
   | "model_started"
@@ -154,6 +155,8 @@ export interface ChatEvent {
   model?: string;
   /** Safe public classification of a provider failure; never includes the provider response or credentials. */
   providerIssue?: "unauthorized" | "billing_required" | "rate_limited" | "invalid_response" | "unavailable";
+  providerResponseStatus?: number;
+  runtimeStatus?: string;
   modelAssisted?: boolean;
   fallbackApplied?: boolean;
   evidenceIds?: string[];
@@ -161,7 +164,16 @@ export interface ChatEvent {
   pipeline?: string[];
   pipelineDetail?: {
     verifier: { status: string; reasons?: string[] };
-    jev: { decision: string; confidence?: number };
+    jev: {
+      decision: string;
+      confidence?: number;
+      status?: string;
+      provider?: string;
+      model?: string;
+      nextAction?: string;
+      missingEvidenceCodes?: string[];
+      conflictCodes?: string[];
+    };
     deepseek: { status: "completed" | "fallback" | "unavailable" };
   };
   contextMode?: "production_sync_simulation" | "external_production";

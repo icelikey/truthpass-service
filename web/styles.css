@@ -2508,6 +2508,16 @@ select:focus-visible,
 .chat-sse-state.unavailable,
 .chat-sse-state.rate-limited,
 .chat-sse-state.provider-diagnostic { color: #e7c58f; }
+.chat-provider-run { margin: 7px 0 6px; padding: 8px 10px; border-radius: 8px; font-size: 11px; line-height: 1.5; }
+.chat-provider-run.success { color: #b9ded0; border: 1px solid rgba(90,205,150,.34); background: rgba(22,69,52,.28); }
+.chat-provider-run.billing { color: #f3ca7d; border: 1px solid rgba(220,167,86,.42); background: rgba(66,45,20,.32); }
+.tp-consumer-page .agent-answer-section { background: #142131; border-color: rgba(211,184,132,.24); }
+.tp-consumer-page .agent-answer-section p { color: #eef4f6; }
+.tp-consumer-page .agent-answer-section strong { color: #8dd7d0; }
+.tp-consumer-page .chat-meta { color: #9fc8ca; }
+.tp-consumer-page .agent-trace-details { color: #d5e6e7; background: rgba(8,18,29,.92); }
+.tp-consumer-page .agent-trace-details summary { color: #a8e0d9; }
+.tp-consumer-page .chat-stage-details { background: rgba(8,18,29,.92); color: #e7f0f2; }
 
 .tenant-agent-runtime-notice {
   display: grid;
@@ -3443,7 +3453,7 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tp-consumer-page .chat-panel { min-height: 660px; }
 .tp-consumer-page .chat-head { background: rgba(190, 152, 76, .09); border-color: rgba(211,184,132,.25); }
 .tp-consumer-page .chat-log { max-height: 490px; }
-.tp-consumer-page .msg.agent .msg-bubble { background: rgba(248,239,220,.05); border-color: rgba(211,184,132,.2); }
+.tp-consumer-page .msg.agent .msg-bubble { background: #101a28; border-color: rgba(211,184,132,.32); color: #eef4f6; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
 .tp-consumer-page .msg.user .msg-bubble { background: rgba(122,185,180,.15); border-color: rgba(122,185,180,.28); }
 .tp-consumer-page .chat-input { border-color: rgba(211,184,132,.25); background: rgba(10, 13, 19, .5); }
 .tp-consumer-page .product-panel, .tp-consumer-page .evidence-panel { margin-bottom: 14px; padding: 20px; }

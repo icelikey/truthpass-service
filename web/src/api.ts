@@ -224,7 +224,7 @@ export async function postChat(
   const res = await fetch("/api/agent/query/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batchId, locale, messages: [{ role: "user", content: question }] }),
+    body: JSON.stringify({ batchId, locale, question }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error("stream unavailable");
