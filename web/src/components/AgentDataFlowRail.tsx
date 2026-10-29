@@ -175,7 +175,13 @@ export function AgentDataFlowRail({
       <div className="agent-data-flow-steps" aria-live="polite">
         {FLOW_STAGES.map((stage, index) => {
           const event = latestByStage.get(stage.key);
-          const status = event?.status ?? "pending";
+          const stageIndex = FLOW_STAGES.findIndex((candidate) => candidate.key === stage.key);
+          const latestStageIndex = [...latestByStage.keys()].reduce((max, key) => Math.max(max, FLOW_STAGES.findIndex((candidate) => candidate.key === key)), -1);
+          // An active stage ends when a later stage arrives. This keeps a completed
+          // run from leaving “整理解释” visibly stuck in progress after a
+          // fallback or accepted answer has already been returned.
+          const rawStatus = event?.status ?? "pending";
+          const status = rawStatus === "active" && (runComplete || stageIndex < latestStageIndex) ? "completed" : rawStatus;
           return <article className={`agent-flow-step ${status}`} key={stage.key}>
             <span className="agent-flow-step-number">{status === "completed" ? "✓" : index + 1}</span>
             <div><strong>{zh ? stage.zh : stage.en}</strong><span>{event ? (event.detail || STATUS_LABELS[status][locale]) : (zh ? "等待前一步" : "Waiting")}</span></div>

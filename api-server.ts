@@ -3384,7 +3384,7 @@ function searchBatchKnowledge(batchId: string, query = ""): AgentSearchHit[] {
   const batch = demoBatchFor(batchId);
   if (!batch) throw new Error("BATCH_NOT_FOUND");
   const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
-  const productId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil-concentrate";
+  const productId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil";
   const evidenceIds = evidenceFor(batchId).map((item) => item.evidenceId).filter((item): item is string => typeof item === "string");
   const parameters = parameterDetailsFor(batchId);
   const production = productionProcessFor(batchId);
@@ -3468,7 +3468,7 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
     traceId,
     batchId,
     tenantId: retrieval[0]?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
-    productId: retrieval[0]?.productId ?? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil-concentrate"),
+    productId: retrieval[0]?.productId ?? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil"),
     dataMode: reply.dataMode ?? "demo/synthetic",
     stages: [
       { stage: "reading_batch", status: "completed", hitCount: retrieval.length },

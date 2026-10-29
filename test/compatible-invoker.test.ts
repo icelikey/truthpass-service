@@ -74,6 +74,20 @@ test("explicit OpenCode selection uses the OpenCode secret and compatible endpoi
   assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/openai/v1/chat/completions");
 });
 
+
+test("explicit DeepSeek selection uses the direct DeepSeek endpoint and default model", () => {
+  const provider = resolveAgentProvider({
+    AGENT_PROVIDER: "deepseek",
+    DEEPSEEK_API_KEY: TEST_API_KEY,
+    DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+  });
+  assert.equal(provider.provider, "deepseek");
+  assert.equal(provider.source, "agent");
+  assert.equal(provider.apiKey, TEST_API_KEY);
+  assert.equal(provider.model, "deepseek-chat");
+  assert.equal(providerEndpoint(provider.baseUrl), "https://api.deepseek.com/chat/completions");
+});
+
 test("invalid findings are dropped per item instead of failing the whole output", async () => {
   const input = await productionInput();
   const invoke = createCompatibleAgentInvoker({

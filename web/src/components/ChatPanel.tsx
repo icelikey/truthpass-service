@@ -248,7 +248,7 @@ function MessageView({
   const statusMeta = serviceStatusMeta(serviceStatus);
   const agentLabel = en
     ? (agentMode === "model_assisted" ? "Model-assisted" : agentMode === "deterministic_fallback" ? "Evidence fallback" : "Product Agent")
-    : (agentMode === "model_assisted" ? "智能回答" : agentMode === "deterministic_fallback" ? "基础回答" : "商品助手");
+    : (agentMode === "model_assisted" ? "模型参与解释" : agentMode === "deterministic_fallback" ? "依据回答" : "商品助手");
   const isLoading = !message.done && message.lines.length === 0;
   const showHandoff =
     serviceStatus === "provider_unavailable" ||
@@ -287,7 +287,7 @@ function MessageView({
       </div>
       {(message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
         <details className="agent-trace-details">
-          <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Evidence fallback" : "基础回答")} </summary>
+          <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Current-record fallback" : "当前批次资料回退")} </summary>
           <div className="agent-trace-grid">
             <span><b>{en ? "Model" : "模型"}</b>{message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Compatible API" : "兼容接口")} · ${message.meta.model ?? (en ? "configured model" : "已配置模型")}` : "deterministic fallback"}</span>
             <span><b>{en ? "Runtime" : "运行结果"}</b>{message.meta.runtimeStatus ?? (message.meta.modelAssisted ? "completed" : "fallback")}{message.meta.providerResponseStatus ? ` · HTTP ${message.meta.providerResponseStatus}` : ""}{message.meta.providerIssue ? ` · ${message.meta.providerIssue}` : ""}</span>
@@ -306,7 +306,7 @@ function MessageView({
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
-      {!minimal && stream.history.length > 0 && (
+      {stream.history.length > 0 && (
         <details className={`chat-stage-details${message.done ? " is-complete" : ""}`} open>
           <summary>{en ? "Live data flow" : "数据流过程"} · {message.done ? (en ? "completed" : "已完成") : (en ? "running" : "运行中")}</summary>
           <div className="chat-stage-rail" role="status" aria-live="polite">
@@ -352,12 +352,12 @@ function MessageView({
 
       {message.done && message.meta?.modelAssisted && (
         <div className="chat-provider-run success" role="status">
-          {en ? "OpenCode completed the explanation" : "OpenCode 已完成解释"} · {en ? "model-assisted" : "模型参与"} · {en ? "validation" : "校验"}: {message.meta.validationStatus ?? "accepted"}
+          {en ? `${message.meta.provider ?? "Model"} completed the explanation` : `${message.meta.provider ?? "模型"} 已完成解释`} · {en ? "model-assisted" : "模型参与"} · {en ? "validation" : "校验"}: {message.meta.validationStatus ?? "accepted"}
         </div>
       )}
       {message.done && message.meta?.providerIssue === "billing_required" && (
         <div className="chat-provider-run billing" role="status">
-          {en ? "OpenCode request sent · HTTP 402 billing required · safe evidence fallback applied; unvalidated model text was not shown." : "OpenCode 请求已发送 · HTTP 402 额度不足 · 已安全回退到当前批次资料，未经校验的模型原文未展示。"}
+          {en ? `${message.meta.provider ?? "Model provider"} request sent · HTTP 402 billing required · safe evidence fallback applied; unvalidated model text was not shown.` : `${message.meta.provider ?? "模型服务"} 请求已发送 · HTTP 402 额度或计费未满足 · 已安全回退到当前批次资料，未经校验的模型原文未展示。`}
         </div>
       )}
       <div className="msg-bubble">
@@ -533,12 +533,14 @@ export function ChatPanel({
   const latestAgentMeta = [...messages].reverse().find((message) => message.role === "agent" && message.meta)?.meta;
   const runtimeStatus = latestAgentMeta?.serviceStatus ?? latestAgentMeta?.agentMode;
   const runtimeLabel = runtimeStatus === "model_assisted"
-    ? (en ? "Model explanation active" : "模型已参与解释")
+    ? (en ? "Agent explanation verified" : "Agent 解释已校验")
     : runtimeStatus === "provider_unavailable"
-      ? (en ? "Model unavailable · evidence still readable" : "模型暂不可用 · 基础资料仍可查")
+      ? (en ? "Provider unavailable · evidence still readable" : "模型服务暂不可用 · 资料仍可查")
       : runtimeStatus === "rate_limited"
-        ? (en ? "Rate limited · evidence fallback" : "请求受限 · 使用基础回答")
-        : (en ? "Evidence and next step" : "证据和下一步");
+        ? (en ? "Request limited · evidence fallback" : "请求受限 · 资料仍可查")
+        : runtimeStatus === "deterministic_fallback"
+          ? (en ? "Evidence answer · records still readable" : "依据回答 · 登记资料仍可查")
+          : (en ? "Ask the Agent · see the record" : "直接问 Agent · 看清依据");
   const batchOptions = productLabel?.includes("米") || productLabel?.toLowerCase().includes("rice") ? RICE_BATCHES : FISH_OIL_BATCHES;
   const lastAutoQueryRef = useRef<string | null>(null);
 
