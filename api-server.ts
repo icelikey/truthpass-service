@@ -2093,6 +2093,8 @@ type ConsumerModelContract = {
   allowedCitations?: string[];
   allowedNumbers?: string[];
   locale?: "zh" | "en";
+  /** Stable, non-secret conversation identifier forwarded to OpenCode Go. */
+  sessionId?: string;
 };
 
 function normalizeConsumerModelText(raw: string, contract?: ConsumerModelContract): string | null {
@@ -2205,9 +2207,21 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
   for (const candidate of providers) {
     const endpoint = providerEndpoint(candidate.baseUrl);
     try {
+      const requestHeaders: Record<string, string> = {
+        Authorization: "Bearer " + candidate.apiKey,
+        "Content-Type": "application/json",
+        "User-Agent": "TruthPass-Agent/1.0 (+https://truthpass-service.vercel.app)",
+      };
+      // OpenCode Go uses the session header to identify a stable coding-agent
+      // conversation for routing and prompt caching. Keep it non-secret and
+      // batch-scoped; never forward a wallet, API key, or private evidence.
+      if (candidate.provider === "opencode") {
+        requestHeaders["x-opencode-session"] = contract?.sessionId
+          ?? `truthpass:${contract?.batchId ?? "public-chat"}:${contract?.locale ?? "zh"}`;
+      }
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: "Bearer " + candidate.apiKey, "Content-Type": "application/json" },
+        headers: requestHeaders,
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
           model: candidate.model,

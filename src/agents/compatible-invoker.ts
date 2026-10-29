@@ -29,9 +29,17 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
     });
     if (!resolved.configured) throw new Error("Agent 模型未配置：需要 AGENT_API_KEY 和 AGENT_MODEL，或 OPENCODE_API_KEY");
 
+    const requestHeaders: Record<string, string> = {
+      Authorization: "Bearer " + resolved.apiKey,
+      "Content-Type": "application/json",
+      "User-Agent": "TruthPass-Agent/1.0 (+https://truthpass-service.vercel.app)",
+    };
+    if (resolved.provider === "opencode") {
+      requestHeaders["x-opencode-session"] = `truthpass:${sanitized.batchId}`;
+    }
     const response = await fetchImpl(providerEndpoint(resolved.baseUrl), {
       method: "POST",
-      headers: { Authorization: "Bearer " + resolved.apiKey, "Content-Type": "application/json" },
+      headers: requestHeaders,
       signal: AbortSignal.timeout(15_000),
       body: JSON.stringify({
         model: resolved.model,

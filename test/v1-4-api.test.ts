@@ -375,9 +375,11 @@ test("OpenCode billing failures stay visible and fall back safely", async () => 
   process.env.OPENCODE_API_KEY = "test-opencode-key";
   process.env.OPENCODE_BASE_URL = "https://opencode.ai/inference/openai/v1";
   process.env.OPENCODE_MODEL = "deepseek-v4.1-flash";
+  let opencodeHeaders: Headers | undefined;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (target.startsWith("https://opencode.ai/")) {
+      opencodeHeaders = new Headers(init?.headers);
       return new Response(JSON.stringify({ error: { message: "billing required" } }), {
         status: 402,
         headers: { "content-type": "application/json" },
@@ -411,6 +413,8 @@ test("OpenCode billing failures stay visible and fall back safely", async () => 
       assert.equal(status.runtimeStatus, "billing_required");
       assert.equal(status.lastProviderResponseStatus, 402);
       assert.equal(status.lastProviderIssue, "billing_required");
+      assert.equal(opencodeHeaders?.get("x-opencode-session"), "truthpass:FO-2026-001:zh");
+      assert.match(opencodeHeaders?.get("user-agent") ?? "", /^TruthPass-Agent\/1\.0/);
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -433,9 +437,11 @@ test("OpenCode HTTP 200 is published only after contract validation", async () =
   process.env.OPENCODE_API_KEY = "test-opencode-key";
   process.env.OPENCODE_BASE_URL = "https://opencode.ai/inference/openai/v1";
   process.env.OPENCODE_MODEL = "deepseek-v4.1-flash";
+  let opencodeHeaders: Headers | undefined;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (target.startsWith("https://opencode.ai/")) {
+      opencodeHeaders = new Headers(init?.headers);
       return new Response(JSON.stringify({
         choices: [{
           message: {
@@ -471,6 +477,8 @@ test("OpenCode HTTP 200 is published only after contract validation", async () =
       assert.match(stream, /"providerResponseStatus":200/);
       assert.match(stream, /"runtimeStatus":"completed"/);
       assert.match(stream, /"stage":"model_completed","status":"completed"/);
+      assert.equal(opencodeHeaders?.get("x-opencode-session"), "truthpass:FO-2026-001:zh");
+      assert.match(opencodeHeaders?.get("user-agent") ?? "", /^TruthPass-Agent\/1\.0/);
     });
   } finally {
     globalThis.fetch = originalFetch;

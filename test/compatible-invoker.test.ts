@@ -44,6 +44,8 @@ test("third-party compatible provider receives redacted data and citations map b
   const output = await runAgent("production", input, invoke);
   assert.equal(url, "https://llm.example/v1/chat/completions");
   assert.equal((headers as Record<string, string>).Authorization, "Bearer test-key");
+  assert.equal((headers as Record<string, string>)["x-opencode-session"], undefined);
+  assert.match((headers as Record<string, string>)["User-Agent"], /^TruthPass-Agent\/1\.0/);
   assert.ok(sentBody.includes('"response_format":{"type":"json_object"}'));
   assert.ok(!sentBody.includes("private-test@example.invalid"));
   assert.ok(!sentBody.includes(fishOilBatch.batchId));
