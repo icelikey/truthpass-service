@@ -1859,6 +1859,9 @@ type ChatMeta = {
   serviceStatus: ChatServiceStatus;
   dataMode: "demo/synthetic" | "external";
   batchId: string | null;
+  /** Public tenant/product scope; never expose credentials or private payloads. */
+  tenantId?: string;
+  productId?: string;
   traceId: string;
   /** Public provider label only; never expose credentials or request payloads. */
   provider?: string;
@@ -2035,6 +2038,8 @@ async function streamChatWithReply(
     serviceStatus: result.status,
     dataMode: result.dataMode ?? baseMeta.dataMode ?? "demo/synthetic",
     batchId: baseMeta.batchId,
+    ...(baseMeta.tenantId ? { tenantId: baseMeta.tenantId } : {}),
+    ...(baseMeta.productId ? { productId: baseMeta.productId } : {}),
     traceId: baseMeta.traceId,
     provider: result.providerUsed ?? (result.status === "model_assisted" ? publicCustomerProvider() : "deterministic"),
     model: result.modelUsed ?? (result.status === "model_assisted" ? publicCustomerModel() : "deterministic-fallback"),
@@ -2725,8 +2730,12 @@ async function consumerChatWithSlot(req: IncomingMessage, batchId: string, quest
   const retrieval = searchBatchKnowledge(batchId, question);
   const reply = demoConsumerChat(batchId, b, question, chainContext, locale, retrieval);
   const lifecycle = lifecyclePublicView(batchId);
+  const tenantId = isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo";
+  const productId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil";
   await streamChatWithReply(res, "consumer_evidence", [], reply, {
     batchId,
+    tenantId,
+    productId,
     traceId,
     contextMode: lifecycle.contextMode,
     contextSource: lifecycle.contextSource,

@@ -79,6 +79,21 @@ test("unknown batch SSE is explicit and cannot fall through to another batch", a
   });
 });
 
+test("fish-oil Agent SSE keeps canonical tenant and product scope", async () => {
+  await withServer(async (baseUrl) => {
+    const events = await readEvents(baseUrl, "sse-product-scope-001", {
+      batchId: "FO-2026-001",
+      messages: [{ role: "user", content: "请解释当前批次的检测和生产记录。" }],
+    });
+    const meta = events.find((event) => event.kind === "meta");
+    assert.equal(meta?.batchId, "FO-2026-001");
+    assert.equal(meta?.tenantId, "tenant-fish-oil-demo");
+    assert.equal(meta?.productId, "fish-oil");
+    assert.equal(meta?.dataMode, "demo/synthetic");
+    assert.ok(meta?.evidenceIds?.every((id: unknown) => typeof id === "string" && id.startsWith("FO-2026-001:")));
+  });
+});
+
 test("agent SSE keeps production coverage separate from parameter acceptance", async () => {
   await withServer(async (baseUrl) => {
     const events = await readEvents(baseUrl, "sse-production-gap-001", {
