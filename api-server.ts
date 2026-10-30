@@ -2528,10 +2528,18 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     verification: {
       status: overallVerificationStatus,
       reasons: overallVerificationReasonsForOutput,
+      reasonCount: overallVerificationReasonsForOutput.length,
     },
+    retrieval: {
+      hitCount: retrievalHits.length,
+      evidenceCount: evidenceIds.length,
+      hits: retrievalHits,
+    },
+    evidenceCard: evidenceCardForModel,
     productionEvidence: {
       observedStageCount: productionEvidence.observedStageCount,
       requiredStageCount: productionEvidence.requiredStageCount,
+      missingStageCount: productionEvidence.missingStages.length,
       facts: productionEvidence.facts,
       missingStages: missingStagesForOutput,
     },
