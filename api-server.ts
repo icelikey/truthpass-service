@@ -2522,6 +2522,34 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
       : b.passed
         ? `结论：${overallVerificationStatus === "accepted" ? `${b.name}（${batchId}）的登记参数落在当前演示规则范围内，可以继续了解` : `${b.name}（${batchId}）的参数虽在当前演示规则范围内，但生产资料仍需复核`}。依据：${demoParameterDetail(b)}${productionGapText}；${sourceText}。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：${overallVerificationStatus === "accepted" ? "打开证据卡核对来源" : "由生产方补齐生产阶段资料后重新核验"}。`
         : `结论：${b.name}（${batchId}）需要先复核参数再决定是否下单。依据：${demoParameterDetail(b)}${sourceText}；deterministic_verifier。不确定：当前是 demo/synthetic，不能替代真实商品认证。下一步：由企业或检测机构补齐对应资料后重新核对。`;
+  const deterministicNumberSource = JSON.stringify({
+    productionDate: b.productionDate,
+    selectedFacts: selectedFactsForOutput,
+    verification: {
+      status: overallVerificationStatus,
+      reasons: overallVerificationReasonsForOutput,
+    },
+    productionEvidence: {
+      observedStageCount: productionEvidence.observedStageCount,
+      requiredStageCount: productionEvidence.requiredStageCount,
+      facts: productionEvidence.facts,
+      missingStages: missingStagesForOutput,
+    },
+    deterministicFacts: isRiceBatch(batchId)
+      ? { production: productionEvidence.facts, productionStages: productionEvidence.stages }
+      : {
+          epaDhaPercent: b.epaDha,
+          peroxideValue: b.peroxide,
+          totox: b.totox,
+          coldChainGapHours: b.coldGap,
+          heavyMetals: b.heavyMetals,
+        },
+    jev: {
+      confidence: jev.decision.confidence,
+      nextAction: jev.decision.nextAction,
+    },
+  });
+  const deterministicNumbers = deterministicNumberSource.match(/(?<![A-Za-z])\d+(?:\.\d+)?(?:\s*(?:%|小时|天|mg|g|kg|℃|°C|BOT|元|CNY|USD))?/gi) ?? [];
   const allowedNumbers = [
     String(b.epaDha), `${b.epaDha}%`,
     String(b.peroxide), `${b.peroxide}mg`,
@@ -2531,6 +2559,7 @@ async function demoConsumerChat(batchId: string, b: DemoBatch, question: string,
     ...productionEvidence.facts.flatMap((fact) => fact.value.match(/\d+(?:\.\d+)?/g) ?? []),
     ...b.productionDate.split(/[^0-9]+/).filter(Boolean),
     ...Object.values(b.heavyMetals).flatMap((value) => [String(value)]),
+    ...deterministicNumbers,
   ];
   const retrievalMeta = { query: question, hitCount: retrievalHits.length, hitIds: retrievalHits.map((hit) => hit.hitId) };
   const modelResult = await callCustomerModel(
