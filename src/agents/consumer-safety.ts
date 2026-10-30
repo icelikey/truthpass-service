@@ -39,7 +39,7 @@ const BATCH_ID = /\b[A-Z]{2,12}-\d{4}-\d{2,6}\b/g;
 const NUMBER = /(?<![A-Za-z])\d+(?:\.\d+)?(?:\s*%|\s*(?:小时|天|mg|g|kg|℃|°C|BOT|元|CNY|USD))?/gi;
 const UNSUPPORTED_SUCCESS = /(已购买|已支付|交易成功|已上链|receipt\s*(?:已|已经)?确认|已签名|已广播|已退款|已经完成操作|purchase\s*(?:is\s*)?complete|payment\s*(?:is\s*)?successful|transaction\s*(?:is\s*)?confirmed)/i;
 const MODEL_ASSERTION = /(型号(?:是|为|：|:)|具体型号|model\s*(?:is|:)|(?:灯号|指示灯|灯光|绿灯|红灯|黄灯|设备灯)(?:是|为|表示|代表)|设备(?:状态|结果)?\s*(?:是|为|表示|代表|已(?:经)?正常|正常|异常))/i;
-const NEGATION = /(没有|未有|未登记|未知|无法|不能|不清楚|不确定|尚未|暂无|不代表|不可|no\s+record|unknown|cannot|can't|not\s+available|not\s+provided)/i;
+const NEGATION = /(没有|未有|未登记|未知|无法|不能|不清楚|不确定|尚未|暂无|不代表|不可|不是|并非|并不|不足以|不能称为|不能作为|no\s+record|unknown|cannot|can't|not\s+available|not\s+provided)/i;
 const DEMO_CLAIM = /(真实认证|官方认证|已证明安全|安全无疑|officially\s+certified|proven\s+safe)/i;
 
 export function consumerSafetyFewShot(locale: "zh" | "en" = "zh"): string {

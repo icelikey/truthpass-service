@@ -109,3 +109,15 @@ test("consumer safety rejects JSON outside the exact five-field contract", () =>
   assert.equal(result.status, "rejected");
   assert.ok(result.reasons.includes("unexpected_contract_fields"));
 });
+
+
+test("consumer safety accepts explicit negative demo boundary language", () => {
+  const result = validateConsumerModelOutput(JSON.stringify({
+    conclusion: "当前资料不是官方认证，也不能证明商品安全。",
+    evidence: "来源为当前批次登记资料。",
+    uncertainty: "资料仍是 demo/synthetic。",
+    nextAction: "补充真实来源后重新核验。",
+    citations: ["product_policy"],
+  }), baseContract);
+  assert.equal(result.status, "accepted");
+});
