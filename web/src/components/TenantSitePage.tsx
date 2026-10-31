@@ -53,6 +53,7 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
     ["developers", zh ? "开发者" : "Developers", routeFor(site, "developers", locale)],
   ];
   const isConsumerView = view === "home" || view === "agent" || view === "wallet";
+  const isAgentConsumerView = view === "agent";
   const alternateLocale = zh ? "en" : "zh";
   const localeHref = localizedSiteRoute(site, view, alternateLocale, view === "developers" ? undefined : batchId);
   return (
@@ -61,10 +62,10 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
         <span className="tp-brand-word">TruthPass</span><span className="tenant-site-mark">{site.brand.mark}</span>
       </a>
       <div className="tenant-site-context"><strong>{site.brand.name}</strong><span>{site.product.name}</span></div>
-      <nav aria-label={zh ? "企业站点导航" : "Site navigation"}>
+      {!isAgentConsumerView && <nav aria-label={zh ? "企业站点导航" : "Site navigation"}>
         {(isConsumerView ? consumerLabels : [...consumerLabels, ...workspaceLabels]).map(([key, label, href]) => <a key={key} className={view === key ? "active" : ""} href={href}>{label}</a>)}
-      </nav>
-      {isConsumerView && (
+      </nav>}
+      {isConsumerView && !isAgentConsumerView && (
         <details className="tenant-nav-more">
           <summary>{zh ? "更多" : "More"}</summary>
           <div className="tenant-nav-more-menu">
@@ -73,7 +74,7 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
         </details>
       )}
       {site.locale.supported.includes(alternateLocale) && <a className="tenant-language-link" href={localeHref}>{zh ? "EN" : "中文"}</a>}
-      <a className="tenant-back-link" href={`${zh ? "/" : "/en"}?view=consumer&batch=${encodeURIComponent(batchId)}`}>{zh ? "回到 TruthPass" : "Back to TruthPass"}</a>
+      {!isAgentConsumerView && <a className="tenant-back-link" href={`${zh ? "/" : "/en"}?view=consumer&batch=${encodeURIComponent(batchId)}`}>{zh ? "回到 TruthPass" : "Back to TruthPass"}</a>}
     </header>
   );
 }
@@ -488,9 +489,9 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }, [appendFlowEvent, batchId, locale, site.product.demoMode]);
   return (
     <main className="tenant-site-main tenant-agent-main">
-      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "鱼油商品助手" : "FISH OIL PRODUCT AGENT"}</p><h1>{zh ? "问我这批鱼油，值不值得继续了解。" : "Ask about this batch before you decide."}</h1><p>{zh ? `我会直接查看 ${site.product.name} 的生产、检测、运输和反馈资料，用简单的话告诉你：目前查到什么、还缺什么、下一步怎么办。` : `I will read the production, testing, delivery, and feedback record for this ${site.product.name} batch and explain what is known, missing, and next.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "让每一步都清晰可见" : "MAKE EVERY STEP CLEAR"}</p><h1>{zh ? "先问清楚，再决定要不要买。" : "Ask first. Decide with clarity."}</h1><p>{zh ? `把这批${site.product.name}交给 Agent。它会查生产、检测、运输和反馈，用大白话告诉你：哪里有依据、哪里还缺资料、下一步怎么走。` : `Give this ${site.product.name} batch to the Agent. It checks production, testing, delivery, and feedback, then explains what is supported, what is missing, and what to do next.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
-        <div className="tenant-panel-head"><strong>{zh ? "和商品助手对话" : "Talk to the product Agent"}</strong><span>{batchId}</span></div>
+        <div className="tenant-panel-head"><strong>{zh ? "直接问这批鱼油" : "Ask about this batch"}</strong><span>{batchId}</span></div>
         <p className="tenant-agent-prompt-hint">{zh ? "你可以直接问：检测通过了吗？冷链有没有中断？还缺什么资料？" : "Ask directly: did testing pass, was cold chain covered, or what is still missing?"}</p>
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}

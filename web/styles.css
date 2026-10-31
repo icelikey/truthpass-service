@@ -3773,6 +3773,15 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-context-demo-action span { color: #9e998e; font-size: 11px; line-height: 1.45; }
 .tenant-agent-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 0; border-top: 1px solid rgba(200,163,106,.2); }
 .tenant-agent-actions span { color: #9e998e; font-size: 11px; }
+.tenant-agent-actions .tp-paper-btn { color: #6f4b22; }
+.tenant-agent-actions .tp-paper-btn:hover { color: #8e2d23; }
+.tenant-agent-header-label { margin-left: auto; color: #d7c7a4; font-size: 12px; }
+.chat-panel-minimal .chat-welcome-copy { margin: 0; color: #25313b; font-size: 14px; line-height: 1.65; }
+.chat-panel-minimal .chat-welcome-note { margin: 8px 0 0; color: #7b756c; font-size: 11px; line-height: 1.5; }
+.chat-panel-minimal .msg.agent .msg-bubble { background: #f8f5ed; border-color: rgba(96,78,47,.18); color: #25313b; }
+.chat-panel-minimal .chat-head { background: rgba(255,255,255,.45); border-color: rgba(96,78,47,.15); }
+.chat-panel-minimal .chat-head-text small { color: #776f63; }
+.chat-panel-minimal .chat-meta { color: #776f63; }
 .tenant-context-drawer { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 16px; max-width: 1200px; margin: 16px auto 0; padding: 16px; border: 1px solid rgba(200,163,106,.25); border-radius: 14px; background: rgba(21,21,19,.58); }
 .tenant-context-column { min-width: 0; }
 .tenant-panel { padding: 18px; }

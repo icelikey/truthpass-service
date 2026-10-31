@@ -250,11 +250,12 @@ function MessageView({
     ? (agentMode === "model_assisted" ? "Model-assisted" : agentMode === "deterministic_fallback" ? "Evidence fallback" : "Product Agent")
     : (agentMode === "model_assisted" ? "模型参与解释" : agentMode === "deterministic_fallback" ? "依据回答" : "商品助手");
   const isLoading = !message.done && message.lines.length === 0;
-  const showHandoff =
+  const showHandoff = !minimal && (
     serviceStatus === "provider_unavailable" ||
     serviceStatus === "rate_limited" ||
     serviceStatus === "deterministic_fallback" ||
-    Boolean(message.error);
+    Boolean(message.error)
+  );
   const structuredSections = message.done ? parseAgentSections(message.lines, locale) : [];
   const stream = streamStageMeta(message);
   const answerValidation = answerValidationMeta(message);
@@ -541,6 +542,9 @@ export function ChatPanel({
         : runtimeStatus === "deterministic_fallback"
           ? (en ? "Evidence answer · records still readable" : "依据回答 · 登记资料仍可查")
           : (en ? "Ask the Agent · see the record" : "直接问 Agent · 看清依据");
+  const displayRuntimeLabel = minimal
+    ? (en ? "Ask about this batch" : "直接问这批资料")
+    : runtimeLabel;
   const batchOptions = productLabel?.includes("米") || productLabel?.toLowerCase().includes("rice") ? RICE_BATCHES : FISH_OIL_BATCHES;
   const lastAutoQueryRef = useRef<string | null>(null);
 
@@ -561,17 +565,17 @@ export function ChatPanel({
     onMeta(latestAgent?.meta);
   }, [messages, onMeta]);
 
-  const runVerify = async (question: string, batch?: string) => {
+  const runVerify = async (question: string, batch?: string, showUserMessage = true) => {
     if (!question.trim() || busy) return;
     setInput("");
     const bid = batch ?? extractBatchId(question) ?? batchId;
     if (bid) {
       onStart();
       onBatch(bid);
-      await ask(question, bid, onFlowEvent, locale);
+      await ask(question, bid, onFlowEvent, locale, { showUserMessage });
       onDone();
     } else {
-      await ask(question, "", onFlowEvent, locale);
+      await ask(question, "", onFlowEvent, locale, { showUserMessage });
     }
   };
 
@@ -588,7 +592,9 @@ export function ChatPanel({
       ?? (en
         ? `Inspect batch ${autoQueryBatch}: production, testing, cold chain, gaps, and next owner.`
         : `请检查批次 ${autoQueryBatch} 的生产、检测、冷链、缺口和下一步责任方。`);
-    void runVerify(initialQuestion, autoQueryBatch ?? batchId ?? undefined);
+    // This is a page entry action, not something the visitor typed. Keep the
+    // internal retrieval prompt out of the visible conversation.
+    void runVerify(initialQuestion, autoQueryBatch ?? batchId ?? undefined, false);
   }, [autoQueryBatch, autoQueryPrompt, batchId, busy, en]);
 
   const recommend = async (text: string) => {
@@ -806,7 +812,7 @@ export function ChatPanel({
   };
 
   return (
-    <aside id="agent" className="panel chat-panel">
+    <aside id="agent" className={`panel chat-panel${minimal ? " chat-panel-minimal" : ""}`}>
       <div className="chat-head">
         <div className="chat-head-icon" aria-hidden="true">
           <img src="/assets/brand-mark.png" alt="" />
@@ -814,25 +820,28 @@ export function ChatPanel({
         <div className="chat-head-text">
           <strong>{en ? "TruthPass Product Agent" : "TruthPass Agent 客服"}</strong>
           <small>
-            <span className={`status-dot ${runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited" ? "offline" : ""}`} title={runtimeLabel} />
-            {runtimeLabel} · {en ? "shows sources and uncertainty" : "显示来源和不确定性"}
+            <span className={`status-dot ${!minimal && (runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited") ? "offline" : ""}`} title={minimal ? displayRuntimeLabel : runtimeLabel} />
+            {displayRuntimeLabel} · {en ? "shows sources and uncertainty" : "会说明依据和不确定性"}
           </small>
         </div>
       </div>
 
       <div className="chat-log" ref={chatLogRef} aria-live="polite">
-        <div className="msg agent">
-          <div className="chat-meta" aria-label={en ? "Welcome message metadata" : "欢迎语元信息"}>
+        <div className="msg agent chat-welcome">
+          {!minimal && <div className="chat-meta" aria-label={en ? "Welcome message metadata" : "欢迎语元信息"}>
             <span className="status-pill demo">{en ? "Demo data" : "演示资料"}</span>
             <span className="status-pill pending">{en ? "Product Agent" : "商品助手"}</span>
-          </div>
+          </div>}
           <div className="msg-bubble">
-            <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
+            {minimal ? <>
+              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `直接问我${productLabel ?? "这件商品"}：检测、冷链、生产记录，或者还缺什么资料。`}</p>
+              <p className="chat-welcome-note">{en ? "This demo uses synthetic records and is not product certification." : "当前使用演示资料，不能替代真实商品认证。"}</p>
+            </> : <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
               <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "结论"}</strong><p>{en ? "I will show the product evidence without making a quality promise for anyone." : "我帮你看商品依据，不替任何一方做质量承诺。"}</p></section>
               <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "依据"}</strong><p>{en ? "Production, testing, delivery, and aftercare records are grouped by batch." : "生产、检测、运输和售后资料都按批次整理。"}</p></section>
               <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "不确定"}</strong><p>{en ? `This ${productLabel ?? "product"} record is synthetic demo data and is not certification.` : `当前${productLabel ?? "商品"}资料是演示资料，不能替代真实认证。`}</p></section>
               <section className="agent-answer-section agent-answer-下一步"><strong>{en ? "Next step" : "下一步"}</strong><p>{en ? "Choose a batch or ask me what evidence is still missing." : "先选择批次，或者直接问我“还缺什么资料”。"}</p></section>
-            </div>
+            </div>}
           </div>
         </div>
         {messages.map((message) => (
@@ -898,9 +907,9 @@ export function ChatPanel({
                 {prompt.label}
               </button>
             ))}
-            <button type="button" aria-label={en ? "Request human support" : "请求人工客服接手"} onClick={handleHandoff} disabled={busy}>
+            {!minimal && <button type="button" aria-label={en ? "Request human support" : "请求人工客服接手"} onClick={handleHandoff} disabled={busy}>
               {en ? "Human support" : "转人工"}
-            </button>
+            </button>}
           </div>
         )}
         {batchId && !minimal && (

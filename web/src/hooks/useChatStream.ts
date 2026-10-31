@@ -84,7 +84,13 @@ export function useChatStream() {
   }, []);
 
   const ask = useCallback(
-    async (question: string, batchId: string | null = null, onEvent?: (event: ChatEvent) => void, locale: "zh" | "en" = "zh") => {
+    async (
+      question: string,
+      batchId: string | null = null,
+      onEvent?: (event: ChatEvent) => void,
+      locale: "zh" | "en" = "zh",
+      options?: { showUserMessage?: boolean },
+    ) => {
       const text = question.trim();
       if (!text) return;
 
@@ -92,10 +98,11 @@ export function useChatStream() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      const showUserMessage = options?.showUserMessage !== false;
       const userMsg: ChatMessage = { id: nextId(), role: "user", lines: [{ cls: "plain", text }], done: true };
       const agentId = nextId();
       const agentMsg: ChatMessage = { id: agentId, role: "agent", lines: [], done: false };
-      setMessages((prev) => [...prev, userMsg, agentMsg]);
+      setMessages((prev) => [...prev, ...(showUserMessage ? [userMsg] : []), agentMsg]);
 
       try {
         await postChat(
@@ -157,7 +164,25 @@ export function useChatStream() {
         );
       } catch {
         if (!controller.signal.aborted) {
-          patch(agentId, (m) => ({ ...m, done: true, error: "连接中断，请重试" }));
+          patch(agentId, (m) => ({
+            ...m,
+            done: true,
+            lines: [{
+              cls: "disclaimer",
+              text: locale === "en"
+                ? "I could not read the live record just now, so I will not make a claim. Please try again in a moment or open the answer basis."
+                : "在线资料暂时没有读回来，我先不替你下结论。请稍后再试，也可以展开“回答依据”查看当前已登记信息。",
+            }],
+            meta: {
+              ...m.meta,
+              agentMode: "deterministic_fallback",
+              serviceStatus: "provider_unavailable",
+              runtimeStatus: "unavailable",
+              validationStatus: "fallback",
+              fallbackApplied: true,
+              dataMode: "demo/synthetic",
+            },
+          }));
         }
       }
     },
