@@ -3782,6 +3782,15 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .chat-panel-minimal .chat-head { background: rgba(255,255,255,.45); border-color: rgba(96,78,47,.15); }
 .chat-panel-minimal .chat-head-text small { color: #776f63; }
 .chat-panel-minimal .chat-meta { color: #776f63; }
+.tenant-agent-single .agent-answer-section { background: #fffdf7; border-color: rgba(96,78,47,.18); }
+.tenant-agent-single .agent-answer-section strong { color: #9a5e24; }
+.tenant-agent-single .agent-answer-section p { color: #403d37; }
+.tenant-agent-single .agent-answer-结论 { background: #f1f7f3; border-color: rgba(43,125,95,.28); }
+.tenant-agent-single .agent-answer-结论 strong { color: #2b7d5f; }
+.tenant-agent-single .agent-answer-不确定 { background: #fff7e6; border-color: rgba(177,138,69,.3); }
+.tenant-agent-single .agent-answer-不确定 strong { color: #9a6a19; }
+.tenant-agent-single .agent-answer-下一步 { background: #fdf0e8; border-color: rgba(167,31,36,.2); }
+.tenant-agent-single .agent-answer-下一步 strong { color: #8e2d23; }
 .tenant-context-drawer { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 16px; max-width: 1200px; margin: 16px auto 0; padding: 16px; border: 1px solid rgba(200,163,106,.25); border-radius: 14px; background: rgba(21,21,19,.58); }
 .tenant-context-column { min-width: 0; }
 .tenant-panel { padding: 18px; }
