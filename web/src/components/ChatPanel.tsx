@@ -265,7 +265,7 @@ function MessageView({
 
   return (
     <div className="msg agent">
-      <div className="chat-meta" aria-label={en ? "Answer metadata" : "回答元信息"}>
+      {!minimal && <div className="chat-meta" aria-label={en ? "Answer metadata" : "回答元信息"}>
         <span className={`status-pill ${agentMode === "model_assisted" ? "verified" : "fallback"}`}>
           {agentLabel}
         </span>
@@ -284,8 +284,8 @@ function MessageView({
             {message.meta.chainContext.rpcReachable ? (en ? "Chain online" : "链在线") : (en ? "Chain unavailable" : "链暂不可读")} · {message.meta.chainContext.anchorStatus}
           </span>
         )}
-      </div>
-      {(message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
+      </div>}
+      {!minimal && (message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
         <details className="agent-trace-details">
           <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Current-record fallback" : "当前批次资料回退")} </summary>
           <div className="agent-trace-grid">
@@ -306,7 +306,7 @@ function MessageView({
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
       )}
-      {stream.history.length > 0 && (
+      {!minimal && stream.history.length > 0 && (
         <details className={`chat-stage-details${message.done ? " is-complete" : ""}`} open>
           <summary>{en ? "Live data flow" : "数据流过程"} · {message.done ? (en ? "completed" : "已完成") : (en ? "running" : "运行中")}</summary>
           <div className="chat-stage-rail" role="status" aria-live="polite">
@@ -325,7 +325,7 @@ function MessageView({
           </div>
         </details>
       )}
-      {message.done && hasValidationMeta && (
+      {!minimal && message.done && hasValidationMeta && (
         <div className={`answer-validation-summary ${deterministicFallback || (validationPassed && citationPassed) ? "passed" : "review"}`} role="status">
           <strong>{deterministicFallback ? (en ? "Safely fell back to an evidence answer" : "已安全回退到基础回答") : validationPassed && citationPassed ? (en ? "Answer passed format and citation checks" : "回答通过格式与引用校验") : (en ? "Answer needs review" : "回答需要复核")}</strong>
           <span>{deterministicFallback ? (en ? "Unvalidated model text was not published" : "未发布未经校验的模型原文") : validationPassed ? (en ? "Format check passed" : "格式校验通过") : `${en ? "Format check: " : "格式校验："}${answerValidation.validationStatus ?? (en ? "not provided" : "未提供")}`}</span>
@@ -335,27 +335,27 @@ function MessageView({
           )}
         </div>
       )}
-      {message.done && statusMeta?.sse === "fallback" && (
+      {!minimal && message.done && statusMeta?.sse === "fallback" && (
         <div className="chat-sse-state fallback" role="status">{en ? "Using an evidence fallback. The content still comes from registered records." : "当前使用基础回答，内容仍来自已登记资料。"}</div>
       )}
-      {message.done && statusMeta?.sse === "unavailable" && (
+      {!minimal && message.done && statusMeta?.sse === "unavailable" && (
         <div className="chat-sse-state unavailable" role="status">{en ? "The model service is unavailable. Try again or request human support." : "模型服务暂不可用，请稍后重试或转人工。"}</div>
       )}
-      {message.done && statusMeta?.sse === "rate-limited" && (
+      {!minimal && message.done && statusMeta?.sse === "rate-limited" && (
         <div className="chat-sse-state rate-limited" role="status">{en ? "Too many requests (rate limited). Please try again shortly." : "请求过于频繁（rate limited），请稍后再问。"}</div>
       )}
-      {message.done && message.meta?.providerIssue && (
+      {!minimal && message.done && message.meta?.providerIssue && (
         <div className="chat-sse-state provider-diagnostic" role="status">
           {providerIssueLabel(message.meta.providerIssue, en)}
         </div>
       )}
 
-      {message.done && message.meta?.modelAssisted && (
+      {!minimal && message.done && message.meta?.modelAssisted && (
         <div className="chat-provider-run success" role="status">
           {en ? `${message.meta.provider ?? "Model"} completed the explanation` : `${message.meta.provider ?? "模型"} 已完成解释`} · {en ? "model-assisted" : "模型参与"} · {en ? "validation" : "校验"}: {message.meta.validationStatus ?? "accepted"}
         </div>
       )}
-      {message.done && message.meta?.providerIssue === "billing_required" && (
+      {!minimal && message.done && message.meta?.providerIssue === "billing_required" && (
         <div className="chat-provider-run billing" role="status">
           {en ? `${message.meta.provider ?? "Model provider"} request sent · HTTP 402 billing required · safe evidence fallback applied; unvalidated model text was not shown.` : `${message.meta.provider ?? "模型服务"} 请求已发送 · HTTP 402 额度或计费未满足 · 已安全回退到当前批次资料，未经校验的模型原文未展示。`}
         </div>

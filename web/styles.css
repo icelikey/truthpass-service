@@ -3766,6 +3766,11 @@ button.merchant-batch-table-row:hover, button.merchant-batch-table-row:focus-vis
 .tenant-agent-single { max-width: 900px; margin: 0 auto; }
 .tenant-agent-single .chat-panel { border: 0; box-shadow: none; background: transparent; }
 .tenant-agent-single .chat-quick-minimal { padding-top: 8px; }
+.tenant-agent-prompt-hint { margin: 0 0 8px; color: #b8b0a3; font-size: 13px; line-height: 1.6; }
+.tenant-context-drawer .agent-data-flow-rail { margin-top: 16px; }
+.tenant-context-drawer .agent-data-flow-head { border-top: 1px solid rgba(200,163,106,.2); padding-top: 15px; }
+.tenant-context-demo-action { display: flex; align-items: center; gap: 10px; margin-top: 13px; padding-top: 12px; border-top: 1px solid rgba(200,163,106,.16); }
+.tenant-context-demo-action span { color: #9e998e; font-size: 11px; line-height: 1.45; }
 .tenant-agent-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 0; border-top: 1px solid rgba(200,163,106,.2); }
 .tenant-agent-actions span { color: #9e998e; font-size: 11px; }
 .tenant-context-drawer { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 16px; max-width: 1200px; margin: 16px auto 0; padding: 16px; border: 1px solid rgba(200,163,106,.25); border-radius: 14px; background: rgba(21,21,19,.58); }
