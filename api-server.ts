@@ -3852,6 +3852,13 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
   // enabled; production persistence can replace this store without changing
   // the public API.
   const siteMatch = p.match(/^\/api\/sites\/([^/]+)(?:\/([^/]+))?$/);
+  if (p === "/api/sites" && req.method === "GET") {
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.site.collection.v1",
+      sites: [...siteStore.values()].map((record) => ({ ...record.config, revision: record.revisions[record.revisions.length - 1] })),
+    });
+    return true;
+  }
   if (p === "/api/sites" && req.method === "POST") {
     try {
       const input = await readBody(req);
