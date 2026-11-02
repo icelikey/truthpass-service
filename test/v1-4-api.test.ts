@@ -264,6 +264,18 @@ test("Agent manifest and collaboration expose explicit runtime mode", async () =
   });
 });
 
+
+test("site manifest collection is readable at the advertised endpoint", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(baseUrl + "/api/sites");
+    const body = await response.json() as Record<string, any>;
+    assert.equal(response.status, 200);
+    assert.equal(body.schemaVersion, "truthpass.site.collection.v1");
+    assert.ok(Array.isArray(body.sites));
+    assert.ok(body.sites.some((site: Record<string, any>) => site.slug === "fish-oil-demo"));
+  });
+});
+
 test("unified Agent query returns retrieval hits and one batch-scoped trace", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/agent/query`, {
