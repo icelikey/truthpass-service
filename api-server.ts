@@ -630,10 +630,23 @@ const task: TaskRequest = {
   productionTime: "2026-10-06T08:00:00Z",
   acceptance: { requireSignature: true, policyId: "fish-oil-quality", policyVersion: "v1" },
 };
-const dataSource = process.env.TRUTHPASS_DATA_SOURCE ?? (persistenceEnabled() ? "postgres" : "fixtures");
+let dataSource = process.env.TRUTHPASS_DATA_SOURCE ?? (persistenceEnabled() ? "postgres" : "fixtures");
 
 // ---------- 初始化只读数据仓库 ----------
-const repository = dataSource === "postgres" ? await loadRepositoryFromPostgres() : new MemoryDataRepository();
+let repository: MemoryDataRepository;
+if (dataSource === "postgres") {
+  try {
+    repository = await loadRepositoryFromPostgres();
+  } catch (error) {
+    // A stale or unreachable optional database must not take the public Agent offline.
+    // Keep the failure visible in logs and expose the effective source as fixtures.
+    console.error("[truthpass] postgres unavailable; using fixture data", error);
+    dataSource = "fixtures";
+    repository = new MemoryDataRepository();
+  }
+} else {
+  repository = new MemoryDataRepository();
+}
 if (dataSource !== "postgres") {
   repository.createProduct(fishOilProduct);
   repository.createBatch(fishOilBatch);
