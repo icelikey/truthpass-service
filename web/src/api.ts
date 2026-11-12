@@ -18,6 +18,7 @@ import type {
   PublicBatchOverview,
 } from "./types";
 import { merchantRequestHeaders } from "./merchant/merchantApi";
+import { supabase } from "./lib/supabase";
 
 export const BATCH_ID = "FO-2026-001";
 
@@ -26,6 +27,56 @@ async function getJson<T>(url: string): Promise<T> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as T;
 }
+
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+async function authorizedJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = { ...await authHeaders(), ...(init.headers as Record<string, string> | undefined) };
+  const res = await fetch(url, { ...init, headers });
+  const body = await res.text();
+  let parsed: unknown;
+  try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = {}; }
+  if (!res.ok) {
+    const code = parsed && typeof parsed === "object" && "error" in parsed ? String((parsed as { error?: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(code);
+  }
+  return parsed as T;
+}
+
+export interface ConsumerAgentGrantView {
+  grantId: string;
+  agentId: string;
+  label: string;
+  scopes: string[];
+  batchIds: string[];
+  productIds: string[];
+  createdAt: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+  dataClass: string;
+}
+
+export interface ConsumerAgentGrantIssue {
+  grant: ConsumerAgentGrantView;
+  token: string;
+  tokenShownOnce: boolean;
+  warning: string;
+}
+
+export const fetchConsumerAgentGrants = () => authorizedJson<{ grants: ConsumerAgentGrantView[] }>("/api/consumer/agent/grants");
+export const createConsumerAgentGrant = (input: { label?: string; agentId?: string; scopes: string[]; batchIds?: string[]; productIds?: string[] }) =>
+  authorizedJson<ConsumerAgentGrantIssue>("/api/consumer/agent/grants", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+export const revokeConsumerAgentGrant = (grantId: string) =>
+  authorizedJson<{ grant: ConsumerAgentGrantView }>(`/api/consumer/agent/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" });
+export const fetchConsumerAgentProfile = (token: string) =>
+  authorizedJson<Record<string, unknown>>("/api/consumer/agent/profile", { headers: { authorization: `Bearer ${token}` } });
+export const fetchConsumerAgentGuidance = (batchId?: string) =>
+  authorizedJson<{ guidance: Array<Record<string, unknown>> }>(`/api/consumer/agent/guidance${batchId ? `?batch=${encodeURIComponent(batchId)}` : ""}`);
 
 export const fetchProduct = (batchId: string) => getJson<ProductBatch>(`/api/products/${batchId}`);
 export const fetchEvidenceLink = (batchId: string) => getJson<EvidenceStep[]>(`/api/products/${batchId}/evidence-link`);

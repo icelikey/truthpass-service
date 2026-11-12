@@ -22,6 +22,19 @@ test("consumer safety accepts a cited four-field JSON answer", () => {
   assert.deepEqual(result.citations, ["FO-2026-001:inspection", "FO-2026-001:cold-chain"]);
 });
 
+test("consumer safety removes duplicated section labels from model fields", () => {
+  const result = validateConsumerModelOutput(JSON.stringify({
+    conclusion: "结论：当前资料可以继续了解。",
+    evidence: "依据：来源为当前批次登记资料。",
+    uncertainty: "不确定：仍是 demo/synthetic。",
+    nextAction: "下一步：补充缺失资料。",
+    citations: ["FO-2026-001:inspection"],
+  }), baseContract);
+  assert.equal(result.status, "accepted");
+  assert.equal(result.text, "结论：当前资料可以继续了解。 依据：来源为当前批次登记资料。 不确定：仍是 demo/synthetic。 下一步：补充缺失资料。");
+  assert.doesNotMatch(result.text ?? "", /结论：结论：|依据：依据：|不确定：不确定：|下一步：下一步：/);
+});
+
 test("consumer safety preserves English labels for English model output", () => {
   const result = validateConsumerModelOutput(JSON.stringify({
     conclusion: "These records can be reviewed further.",

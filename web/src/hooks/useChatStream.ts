@@ -26,6 +26,7 @@ export interface ChatMessage {
     | "fallbackApplied"
     | "evidenceIds"
     | "retrieval"
+    | "expertKnowledge"
     | "pipeline"
     | "pipelineDetail"
     | "batchId"

@@ -14,7 +14,7 @@ const DEMO_BATCH_ID = "FO-2026-001";
 const DEMO_TASK_ID = "task-fish-oil-2026-001";
 
 type OutputMode = "text" | "json";
-type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "ask" | "search" | "lifecycle" | "watch" | "anchor" | "replay" | "manifest" | "status" | "collaborate" | "register" | "help";
+type Command = "doctor" | "discover" | "verify" | "explain" | "recommend" | "order" | "inspect" | "ask" | "search" | "lifecycle" | "watch" | "anchor" | "replay" | "manifest" | "status" | "collaborate" | "register" | "account" | "purchases" | "updates" | "guidance" | "help";
 
 interface NormalizedService {
   serviceId: string;
@@ -72,6 +72,10 @@ const HELP = `真验 TruthPass CLI ${CLI_VERSION}
   truthpass inspect --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass collaborate --remote https://truthpass-service.vercel.app --batch FO-2026-001 --tenant demo --token <TOKEN> [--json]
   truthpass register --remote https://truthpass-service.vercel.app --tenant demo --token <TOKEN> --agent-id my-agent --name "我的 Agent" --capability consumer.inspect [--json]
+  truthpass account --remote https://truthpass-service.vercel.app --token <PERSONAL_AGENT_TOKEN> [--json]
+  truthpass purchases --remote https://truthpass-service.vercel.app --token <PERSONAL_AGENT_TOKEN> [--json]
+  truthpass updates --remote https://truthpass-service.vercel.app --token <PERSONAL_AGENT_TOKEN> --batch FO-2026-001 [--json]
+  truthpass guidance --remote https://truthpass-service.vercel.app --token <PERSONAL_AGENT_TOKEN> --batch FO-2026-001 [--json]
   truthpass anchor --batch FO-2026-001 --dry-run [--network testnet] [--json]
   truthpass replay --batch FO-2026-001 [--json]
 
@@ -150,7 +154,7 @@ function parseArgs(argv: string[]): ParsedArgs | { error: string } {
       continue;
     }
     if (arg.startsWith("-")) return { error: `未知参数: ${arg}` };
-    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "ask", "search", "lifecycle", "watch", "anchor", "replay", "manifest", "status", "collaborate", "register", "help"].includes(arg);
+    const knownCommand = ["doctor", "discover", "verify", "explain", "recommend", "order", "inspect", "ask", "search", "lifecycle", "watch", "anchor", "replay", "manifest", "status", "collaborate", "register", "account", "purchases", "updates", "guidance", "help"].includes(arg);
     if (knownCommand) {
       if (command) return { error: `只能指定一个命令，收到: ${arg}` };
       command = arg as Command;
@@ -458,7 +462,7 @@ async function fetchRemoteJson(args: ParsedArgs, path: string, init: RequestInit
   // CLI 只对网络层失败和 5xx 重试，不重试 4xx，避免把权限错误掩盖掉。
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
+      response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(path.includes("/api/agent/query") ? 60_000 : 20_000) });
       if (response.status < 500 || attempt === 2) break;
     } catch (error) {
       lastError = error;
@@ -534,6 +538,16 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
       body: JSON.stringify({ agentId: args.agentId, tenantId: args.tenantId, name: args.agentName, capabilities: args.capabilities, publicKey: args.publicKey }),
     }, true);
   }
+  if (command === "account") return fetchRemoteJson(args, "/api/consumer/agent/profile");
+  if (command === "purchases") return fetchRemoteJson(args, "/api/consumer/agent/purchases");
+  if (command === "updates") {
+    const suffix = args.batchId ? `?batch=${encodeURIComponent(args.batchId.toUpperCase())}` : "";
+    return fetchRemoteJson(args, `/api/consumer/agent/updates${suffix}`);
+  }
+  if (command === "guidance") {
+    const suffix = args.batchId ? `?batch=${encodeURIComponent(args.batchId.toUpperCase())}` : "";
+    return fetchRemoteJson(args, `/api/consumer/agent/guidance${suffix}`);
+  }
   const batchId = encodeURIComponent(args.batchId.toUpperCase());
   if (command === "inspect" || command === "verify") {
     const result = await fetchRemoteJson(args, `/api/cli/inspect?batchId=${batchId}`);
@@ -569,6 +583,14 @@ async function remoteCommand(args: ParsedArgs): Promise<Record<string, unknown>>
     const query = args.question?.trim();
     if (!query) throw new Error("ask 需要问题文本，可直接写在命令后或使用 --question");
     const body = { batchId: args.batchId.toUpperCase(), question: query };
+    if (args.token && !args.tenantId) {
+      if (args.stream) throw new Error("个人 Agent token 当前使用 JSON 查询；如需搜索历程，请在网页对话中查看 SSE");
+      return fetchRemoteJson(args, "/api/consumer/agent/query", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }
     if (args.stream) return fetchRemoteSse(args, "/api/agent/query/stream", body);
     return fetchRemoteJson(args, "/api/agent/query", {
       method: "POST",
@@ -880,6 +902,24 @@ function agentTranslation(result: Record<string, unknown>): string {
 }
 
 export function textFor(result: Record<string, unknown>): string {
+  if (result.schemaVersion === "truthpass.cli.error.v1") return `错误 ${result.code ?? "UNKNOWN"}：${result.message ?? "请求失败"}${result.remoteUrl ? `\n服务：${result.remoteUrl}` : ""}\n`;
+  if (result.schemaVersion === "truthpass.consumer-agent.profile.v1") return `个人 Agent：${result.agentId ?? "未命名"}\n授权范围：${((result.scopes as unknown[] | undefined) ?? []).join("、") || "无"}\n绑定批次：${((result.batchIds as unknown[] | undefined) ?? []).join("、") || "未限制"}\n`;
+  if (result.schemaVersion === "truthpass.consumer-agent.purchases.v1") {
+    const purchases = (result.purchases as Array<Record<string, unknown>> | undefined) ?? [];
+    return `我的购买记录（${purchases.length} 条）\n${purchases.map((item) => `- ${item.batchId ?? "未知批次"} · ${item.productName ?? "商品"} · ${item.status ?? "已绑定"}`).join("\n") || "暂无已绑定购买记录"}\n`;
+  }
+  if (result.schemaVersion === "truthpass.consumer-agent.updates.v1") {
+    const updates = (result.updates as Array<Record<string, unknown>> | undefined) ?? [];
+    return `我的产品更新（${updates.length} 条）\n${updates.map((item) => `- ${item.batchId ?? "未知批次"} · ${item.title ?? item.type ?? "批次更新"}：${item.detail ?? item.message ?? "已更新"}`).join("\n") || "暂无更新"}\n`;
+  }
+  if (result.schemaVersion === "truthpass.consumer-agent.guidance.v1") {
+    const entries = (result.guidance as Array<Record<string, unknown>> | undefined) ?? [];
+    const lines = entries.flatMap((entry) => {
+      const cards = (entry.guidance as Array<Record<string, unknown>> | undefined) ?? [];
+      return cards.map((card) => `- ${card.title ?? "使用提醒"}：${card.text ?? "请以包装标签和生产方说明为准"}（${entry.batchId ?? "未知批次"}）`);
+    });
+    return `鱼油日常使用提醒（${lines.length} 条）\n${lines.join("\n") || "暂无已授权批次的使用提醒"}\n`;
+  }
   if (result.command === "doctor") return `真验 CLI ${result.version}\nfixture: ${result.fixtureMode}\nJEV: ${((result.jev as Record<string, unknown>).mode)}\n链上: ${((result.chain as Record<string, unknown>).status)}\n`;
   if (result.schemaVersion === "truthpass.cli.remote-doctor.v1") {
     const status = (result.status ?? {}) as Record<string, unknown>;

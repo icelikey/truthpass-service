@@ -84,6 +84,26 @@ function normalizeSectionLabels(value: string, locale: "zh" | "en" = "zh"): stri
     .trim();
 }
 
+function stripLeadingSectionLabel(value: string, section: "conclusion" | "evidence" | "uncertainty" | "next", locale: "zh" | "en"): string {
+  const labels = locale === "en"
+    ? {
+        conclusion: "Conclusion",
+        evidence: "Evidence|Basis",
+        uncertainty: "Uncertainty|Unknowns?",
+        next: "Next\\s*(?:step|action)",
+      }
+    : {
+        conclusion: "结论",
+        evidence: "依据",
+        uncertainty: "不确定",
+        next: "下一步",
+      };
+  const pattern = new RegExp(`^(?:${labels[section]})\\s*[：:]\\s*`, "i");
+  let normalized = value.trim();
+  while (pattern.test(normalized)) normalized = normalized.replace(pattern, "").trim();
+  return normalized;
+}
+
 function maxJsonDepth(value: unknown, depth = 0): number {
   if (value === null || typeof value !== "object") return depth;
   if (Array.isArray(value)) return Math.max(depth, ...value.map((item) => maxJsonDepth(item, depth + 1)));
@@ -105,10 +125,10 @@ function asModelOutput(raw: string, locale: "zh" | "en" = "zh"): { output?: Cons
       const citations = Array.isArray(parsed.citations) ? parsed.citations.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
       if (citations.length > 12 || citations.some((item) => item.length > 200)) return { reason: "citations_too_large" };
       const output: ConsumerModelOutput = {
-        conclusion: String(parsed.conclusion).trim(),
-        evidence: String(parsed.evidence).trim(),
-        uncertainty: String(parsed.uncertainty).trim(),
-        nextAction: String(parsed.nextAction).trim(),
+        conclusion: stripLeadingSectionLabel(String(parsed.conclusion), "conclusion", locale),
+        evidence: stripLeadingSectionLabel(String(parsed.evidence), "evidence", locale),
+        uncertainty: stripLeadingSectionLabel(String(parsed.uncertainty), "uncertainty", locale),
+        nextAction: stripLeadingSectionLabel(String(parsed.nextAction), "next", locale),
         citations,
       };
       const labels = locale === "en"

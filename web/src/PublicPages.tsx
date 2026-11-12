@@ -313,9 +313,9 @@ function PlatformBatchLookup({ zh }: { zh: boolean }) {
           placeholder={zh ? "例如 FO-2026-001 或 RC-2026-001" : "For example FO-2026-001 or RC-2026-001"}
           autoComplete="off"
         />
-        <button className="tp-red-btn" type="submit">{zh ? "查看一份商品记录" : "View the product record"} <span aria-hidden="true">→</span></button>
+        <button className="tp-red-btn" type="submit">{zh ? "查这一批" : "Check this batch"} <span aria-hidden="true">→</span></button>
       </div>
-      <small className={error ? "has-error" : ""}>{error || (zh ? "先看清，再决定是否继续" : "Check the record before you decide")}</small>
+      <small className={error ? "has-error" : ""}>{error || (zh ? "有依据就讲依据，缺资料就讲缺口。" : "We show the evidence and say what is missing.")}</small>
     </form>
   );
 }
@@ -329,7 +329,7 @@ function PlatformCaseCard({ image, eyebrow, title, batch, body, href, zh }: { im
         <h3>{title}<span aria-hidden="true"> ↗</span></h3>
         <code>{batch}</code>
         <p>{body}</p>
-        <span className="tp-platform-case-action">{zh ? "查看一份商品记录" : "View the record"} →</span>
+        <span className="tp-platform-case-action">{zh ? "查这一批" : "View the record"} →</span>
       </div>
     </a>
   );
@@ -344,9 +344,9 @@ function PlatformHome({ route }: { route: "zh-home" | "en-home" }) {
           <div className="tp-platform-hero-copy">
             <p className="tp-kicker">{zh ? "商品记录和验证服务" : "PRODUCT RECORDS AND VERIFICATION"}</p>
             <span className="tp-demo-ribbon">{zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION"}</span>
-            <h1>{zh ? <>从生产到购买<br /><span>一条路看清</span></> : <>From production to purchase<br /><span>see the whole record</span></>}</h1>
-            <p className="tp-platform-lead">{zh ? "把商品的来路 交到购买的人手里" : "Put the product record in the hands of the person who buys it"}</p>
-            <p className="tp-platform-capability">{zh ? "建设信任能力" : "Build the trust capability"}</p>
+            <h1>{zh ? <>把货查清楚，<br /><span>再把钱花明白。</span></> : <>Check the goods.<br /><span>Spend with clarity.</span></>}</h1>
+            <p className="tp-platform-lead">{zh ? "你扫码，我来查。生产、检测、运输和使用提醒，一项项讲明白。" : "You scan, I check. Production, testing, delivery, and usage notes, explained clearly."}</p>
+            <p className="tp-platform-capability">{zh ? "不看空话，先看记录。" : "No slogans first. Read the record."}</p>
             <PlatformBatchLookup zh={zh} />
             <div className="tp-platform-actions">
               <a className="tp-paper-btn" href={zh ? "/merchant" : "/en/merchant"}>{zh ? "为企业建设信任能力" : "Build trust capability for your business"} <span aria-hidden="true">→</span></a>
@@ -428,7 +428,7 @@ function ProductIntroPage({ route }: { route: ProductIntroRoute }) {
         ["04", "Keep the purchase connected", "Consumer queries, wallet signatures, receipts, and aftercare return to the same product record."],
       ];
   const values = zh
-    ? [["消费者", "先看清，再决定", "不再只看一句营销文案，而是看生产、检测、运输和当前缺口。"], ["企业", "把信任做成能力", "把资料、责任和反馈放在一个持续更新的商品官网里。"], ["机构", "每次确认都有边界", "样品、报告、钱包身份和争议记录可以按批次回看。"], ["开发者", "同一份公开记录", "网站、MCP 和 CLI 都读取同一套批次上下文。"]]
+    ? [["消费者", "把货查清楚，再把钱花明白", "不再只看一句营销文案，而是看生产、检测、运输和当前缺口。"], ["企业", "把信任做成能力", "把资料、责任和反馈放在一个持续更新的商品官网里。"], ["机构", "每次确认都有边界", "样品、报告、钱包身份和争议记录可以按批次回看。"], ["开发者", "同一份公开记录", "网站、MCP 和 CLI 都读取同一套批次上下文。"]]
     : [["Consumers", "Check before deciding", "Read production, testing, delivery, and current gaps instead of relying on a single claim."], ["Businesses", "Build trust capability", "Turn records, responsibility, and feedback into a living product site."], ["Institutions", "Confirm within a clear boundary", "Review samples, reports, wallet identity, and disputes by batch."], ["Developers", "One public record", "The site, MCP, and CLI read the same batch context."]];
   return (
     <PageFrame route={route} active="product">

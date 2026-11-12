@@ -145,15 +145,15 @@ function providerIssueLabel(issue: string | undefined, en: boolean): string | nu
 }
 
 const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
-  begin: "开始",
-  reading_batch: "读取批次",
-  retrieval_completed: "检索完成",
-  verifier_checked: "规则核验",
-  jev_routed: "JEV 分流",
-  model_started: "模型解释",
-  model_completed: "解释完成",
-  answer: "组织回答",
-  done: "完成",
+  begin: "先查这批货",
+  reading_batch: "正在读取这批货",
+  retrieval_completed: "登记资料已找到",
+  verifier_checked: "再核对检测",
+  jev_routed: "再看运输和保存",
+  model_started: "再找还缺什么",
+  model_completed: "正在整理解释",
+  answer: "最后把话讲明白",
+  done: "回答已生成",
 };
 
 function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; history: AgentStreamStage[] } {
@@ -163,8 +163,8 @@ function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; hi
 }
 
 function stageStatusLabel(status: string | undefined, en: boolean): string {
-  if (en) return status === "active" ? "working" : status === "fallback" ? "fallback" : status === "unavailable" ? "unavailable" : "done";
-  return status === "active" ? "处理中" : status === "fallback" ? "回退" : status === "unavailable" ? "不可用" : "已完成";
+  if (en) return status === "active" ? "searching" : status === "fallback" ? "fallback" : status === "unavailable" ? "unavailable" : "checked";
+  return status === "active" ? "正在查找" : status === "fallback" ? "安全回退" : status === "unavailable" ? "暂不可用" : "已核对";
 }
 
 function answerValidationMeta(message: ChatMessage): {
@@ -258,6 +258,15 @@ function MessageView({
   );
   const structuredSections = message.done ? parseAgentSections(message.lines, locale) : [];
   const stream = streamStageMeta(message);
+  const retrievalCount = message.meta?.retrieval?.hitCount
+    ?? message.meta?.retrieval?.hits?.length
+    ?? 0;
+  const evidenceCount = message.meta?.evidenceIds?.length ?? 0;
+  const searchSummary = [
+    message.meta?.batchId ? (en ? `batch ${message.meta.batchId}` : `批次 ${message.meta.batchId}`) : "",
+    retrievalCount > 0 ? (en ? `${retrievalCount} records found` : `找到 ${retrievalCount} 条资料`) : "",
+    evidenceCount > 0 ? (en ? `${evidenceCount} evidence cited` : `引用 ${evidenceCount} 条证据`) : "",
+  ].filter(Boolean).join(en ? " · " : " · ");
   const answerValidation = answerValidationMeta(message);
   const validationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.validationStatus ?? "");
   const citationPassed = /^(passed|pass|valid|checked|accepted)$/i.test(answerValidation.citationStatus ?? "");
@@ -296,20 +305,21 @@ function MessageView({
             {message.meta.pipelineDetail && <span><b>{en ? "Result" : "结果"}</b>Verifier: {message.meta.pipelineDetail.verifier.status} · JEV: {message.meta.pipelineDetail.jev.decision} · Model: {message.meta.pipelineDetail.deepseek.status}</span>}
             <span><b>{en ? "Citations" : "引用"}</b>{message.meta.evidenceIds?.length ? message.meta.evidenceIds.join(" · ") : (en ? "No additional evidence IDs" : "当前回答没有额外证据 ID")}</span>
             {message.meta.retrieval && <span><b>{en ? "Retrieval" : "检索"}</b>{message.meta.retrieval.hitCount ?? message.meta.retrieval.hits?.length ?? 0} {en ? "hits" : "条"} · {(message.meta.retrieval.hitIds ?? message.meta.retrieval.hits?.map((hit) => hit.hitId).filter((id): id is string => Boolean(id)) ?? []).join(" · ")}</span>}
+            {message.meta.expertKnowledge && <span><b>{en ? "Expert knowledge" : "专家知识"}</b>{message.meta.expertKnowledge.hitCount ?? message.meta.expertKnowledge.hits?.length ?? 0} {en ? "scoped hits" : "条范围命中"} · {message.meta.expertKnowledge.source ?? "truthpass+sag-scoped-adapter"}</span>}
             <span><b>Trace ID</b><code>{message.meta.traceId ?? "—"}</code></span>
           </div>
         </details>
       )}
 
       {isLoading && (
-        <div className="chat-sse-state loading" role="status">{en ? "Generating an answer…" : "正在生成回答…"}</div>
+        <div className="chat-sse-state loading" role="status">{en ? "Searching the current record and checking its sources…" : "正在查找当前资料，并核对每个来源…"}</div>
       )}
       {!message.done && message.lines.length > 0 && (
-        <div className="chat-sse-state loading" role="status">{en ? "Streaming…" : "流式输出中…"}</div>
+        <div className="chat-sse-state loading" role="status">{en ? "Still checking the record…" : "还在核对当前资料…"}</div>
       )}
-      {!minimal && stream.history.length > 0 && (
-        <details className={`chat-stage-details${message.done ? " is-complete" : ""}`} open>
-          <summary>{en ? "Live data flow" : "数据流过程"} · {message.done ? (en ? "completed" : "已完成") : (en ? "running" : "运行中")}</summary>
+      {stream.history.length > 0 && (
+        <details className={`chat-stage-details${minimal ? " compact" : ""}${message.done ? " is-complete" : ""}`} open>
+          <summary>{en ? "Search and verification trail" : "查找与核对过程"} · {message.done ? (en ? "checked" : "已核对") : (en ? "searching" : "正在查找")}{searchSummary ? ` · ${searchSummary}` : ""}</summary>
           <div className="chat-stage-rail" role="status" aria-live="polite">
             {stream.history.map((stage, index) => {
               const rawMeta = message.meta as (ChatMessage["meta"] & { stageStatuses?: Record<string, string>; stageDetails?: Record<string, string> }) | undefined;
@@ -375,7 +385,7 @@ function MessageView({
           <LineView key={i} line={line} />
         ))}
         {!message.done && message.lines.length === 0 && (
-          <div className="thinking">{en ? "TruthPass is organizing the evidence and sources…" : "TruthPass 正在整理证据与来源…"}</div>
+          <div className="thinking">{en ? "TruthPass is finding the relevant records and checking their sources…" : "TruthPass 正在查找相关资料，并核对来源…"}</div>
         )}
         {message.recommendations && (
           <div className="recommend-list">
@@ -818,7 +828,7 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>{en ? "TruthPass Product Agent" : "TruthPass Agent 客服"}</strong>
+          <strong>{en ? "TruthPass Product Agent" : "TruthPass 商品 Agent"}</strong>
           <small>
             <span className={`status-dot ${!minimal && (runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited") ? "offline" : ""}`} title={minimal ? displayRuntimeLabel : runtimeLabel} />
             {displayRuntimeLabel} · {en ? "shows sources and uncertainty" : "会说明依据和不确定性"}
@@ -834,13 +844,14 @@ export function ChatPanel({
           </div>}
           <div className="msg-bubble">
             {minimal ? <>
-              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `直接问我${productLabel ?? "这件商品"}：检测、冷链、生产记录，或者还缺什么资料。`}</p>
+              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `你把批次交给我，我先把登记资料查一遍。`}</p>
+              <p className="chat-welcome-note">{en ? "You do not need a special command. Choose a question below or type it in your own words." : "不用记命令，点下面的问题，或者直接用自己的话问。"}</p>
               <p className="chat-welcome-note">{en ? "This demo uses synthetic records and is not product certification." : "当前使用演示资料，不能替代真实商品认证。"}</p>
             </> : <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
-              <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "结论"}</strong><p>{en ? "I will show the product evidence without making a quality promise for anyone." : "我帮你看商品依据，不替任何一方做质量承诺。"}</p></section>
-              <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "依据"}</strong><p>{en ? "Production, testing, delivery, and aftercare records are grouped by batch." : "生产、检测、运输和售后资料都按批次整理。"}</p></section>
-              <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "不确定"}</strong><p>{en ? `This ${productLabel ?? "product"} record is synthetic demo data and is not certification.` : `当前${productLabel ?? "商品"}资料是演示资料，不能替代真实认证。`}</p></section>
-              <section className="agent-answer-section agent-answer-下一步"><strong>{en ? "Next step" : "下一步"}</strong><p>{en ? "Choose a batch or ask me what evidence is still missing." : "先选择批次，或者直接问我“还缺什么资料”。"}</p></section>
+              <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "先说结论"}</strong><p>{en ? "I will check this batch record before you decide." : "我先查这批货的登记资料，再把结论讲明白。"}</p></section>
+              <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "我查到的依据"}</strong><p>{en ? "Production, testing, delivery, and usage notes are grouped by batch." : "生产、检测、运输和使用提醒都按批次整理。"}</p></section>
+              <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "目前还不能确认"}</strong><p>{en ? `This ${productLabel ?? "product"} record is synthetic demo data and is not certification.` : `目前还不能确认的，我会单独说清楚；当前资料是演示资料，不能替代真实认证。`}</p></section>
+              <section className="agent-answer-section agent-answer-下一步"><strong>{en ? "Next step" : "你接下来可以做的是"}</strong><p>{en ? "Choose a batch or ask me what evidence is still missing." : "先选批次，或者直接问我“还缺什么资料”。"}</p></section>
             </div>}
           </div>
         </div>
@@ -895,7 +906,7 @@ export function ChatPanel({
         </div>}
         {batchId && (
           <div className="quick-group">
-            <span className="chat-quick-label">{en ? "Ask about:" : "你想了解："}</span>
+            <span className="chat-quick-label">{en ? "Ask the Agent:" : "直接问 Agent："}</span>
             {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).slice(0, minimal ? 4 : undefined).map((prompt) => (
               <button
                 key={prompt.label}

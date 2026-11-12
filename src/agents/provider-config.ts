@@ -24,7 +24,7 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
       return {
         provider: "opencode",
         apiKey: openCodeKey,
-        baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/openai/v1").replace(/\/+$/, ""),
+        baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/go/openai/v1").replace(/\/+$/, ""),
         model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
         configured: true,
         source: "opencode",
@@ -76,7 +76,7 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
     return {
       provider: "opencode",
       apiKey: openCodeKey,
-      baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/openai/v1").replace(/\/+$/, ""),
+      baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/go/openai/v1").replace(/\/+$/, ""),
       model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
       configured: true,
       source: "opencode",

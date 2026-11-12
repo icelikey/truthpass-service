@@ -161,6 +161,7 @@ export interface ChatEvent {
   fallbackApplied?: boolean;
   evidenceIds?: string[];
   retrieval?: { query?: string; hitCount?: number; hitIds?: string[]; hits?: Array<{ hitId?: string; title?: string; evidenceIds?: string[] }> };
+  expertKnowledge?: { source?: string; hitCount?: number; hits?: Array<{ hitId?: string; packId?: string; title?: string; snippet?: string; sourceRefs?: string[]; scope?: string }> };
   pipeline?: string[];
   pipelineDetail?: {
     verifier: { status: string; reasons?: string[] };

@@ -6,7 +6,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
@@ -105,6 +105,7 @@ import {
   type PaymentOrderInput,
 } from "./src/payments/index.js";
 
+import { expertAgentCore, sagScopedAdapter, type KnowledgePack } from "./src/agent-core/core.js";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const WEB_DIST = join(__dirname, "web", "dist");
 const WEB = existsSync(WEB_DIST) ? WEB_DIST : join(__dirname, "web");
@@ -159,6 +160,199 @@ type CustomerModelRuntime = {
 };
 
 let lastCustomerModelRuntime: CustomerModelRuntime | null = null;
+
+type ConsumerAgentScope = "purchases.read" | "updates.read" | "guidance.read" | "agent.query" | "feedback.prepare";
+type ConsumerAgentGrant = {
+  grantId: string;
+  userId: string;
+  agentId: string;
+  label: string;
+  scopes: ConsumerAgentScope[];
+  batchIds: string[];
+  productIds: string[];
+  tokenHash: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+  dataClass: "personal";
+};
+type ConsumerAgentPrincipal = {
+  userId: string;
+  grant?: ConsumerAgentGrant;
+  authMode: "supabase_session" | "personal_agent_token";
+};
+const consumerAgentGrants = new Map<string, ConsumerAgentGrant>();
+let consumerAgentGrantHydration: Promise<void> | undefined;
+const CONSUMER_AGENT_SCOPES: ConsumerAgentScope[] = ["purchases.read", "updates.read", "guidance.read", "agent.query", "feedback.prepare"];
+
+function consumerAgentTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function normalizeConsumerAgentScopes(input: unknown): ConsumerAgentScope[] {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.filter((value): value is ConsumerAgentScope => typeof value === "string" && CONSUMER_AGENT_SCOPES.includes(value as ConsumerAgentScope)))];
+}
+
+function normalizeConsumerAgentBatchIds(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.filter((value): value is string => typeof value === "string" && /^([A-Z]{2,8})-[A-Z0-9-]{3,64}$/.test(value.trim().toUpperCase())).map((value) => value.trim().toUpperCase()))];
+}
+
+function normalizeConsumerAgentProductIds(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.filter((value): value is string => typeof value === "string" && /^[a-z0-9][a-z0-9-]{1,80}$/.test(value.trim().toLowerCase())).map((value) => value.trim().toLowerCase()))];
+}
+
+function consumerAgentGrantAllows(grant: ConsumerAgentGrant, scope: ConsumerAgentScope, batchId?: string, productId?: string): boolean {
+  if (grant.revokedAt || !grant.scopes.includes(scope)) return false;
+  if (batchId && grant.batchIds.length > 0 && !grant.batchIds.includes(batchId.toUpperCase())) return false;
+  if (productId && grant.productIds.length > 0 && !grant.productIds.includes(productId.toLowerCase())) return false;
+  return true;
+}
+
+function publicConsumerAgentGrant(grant: ConsumerAgentGrant) {
+  return {
+    grantId: grant.grantId,
+    agentId: grant.agentId,
+    label: grant.label,
+    scopes: grant.scopes,
+    batchIds: grant.batchIds,
+    productIds: grant.productIds,
+    createdAt: grant.createdAt,
+    lastUsedAt: grant.lastUsedAt ?? null,
+    revokedAt: grant.revokedAt ?? null,
+    dataClass: grant.dataClass,
+  };
+}
+
+async function hydrateConsumerAgentGrants(): Promise<void> {
+  if (consumerAgentGrantHydration) return consumerAgentGrantHydration;
+  consumerAgentGrantHydration = (async () => {
+    const admin = getSupabaseStorageAdmin();
+    if (!admin) return;
+    const { data } = await admin.client
+      .from("truthpass_consumer_agent_grants")
+      .select("grant_id, user_id, agent_id, label, scopes, batch_ids, product_ids, token_hash, created_at, last_used_at, revoked_at, data_class")
+      .limit(500);
+    for (const row of data ?? []) {
+      const grant: ConsumerAgentGrant = {
+        grantId: String(row.grant_id),
+        userId: String(row.user_id),
+        agentId: String(row.agent_id),
+        label: String(row.label),
+        scopes: normalizeConsumerAgentScopes(row.scopes),
+        batchIds: normalizeConsumerAgentBatchIds(row.batch_ids),
+        productIds: normalizeConsumerAgentProductIds(row.product_ids),
+        tokenHash: String(row.token_hash),
+        createdAt: String(row.created_at),
+        lastUsedAt: row.last_used_at ? String(row.last_used_at) : undefined,
+        revokedAt: row.revoked_at ? String(row.revoked_at) : undefined,
+        dataClass: "personal",
+      };
+      if (grant.tokenHash) consumerAgentGrants.set(grant.tokenHash, grant);
+    }
+  })().catch(() => { /* optional persistence is unavailable */ });
+  return consumerAgentGrantHydration;
+}
+
+async function resolveConsumerAgentPrincipal(req: IncomingMessage): Promise<ConsumerAgentPrincipal | undefined> {
+  await hydrateConsumerAgentGrants();
+  const authorization = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+  if (!authorization.startsWith("Bearer ")) return undefined;
+  const token = authorization.slice("Bearer ".length).trim();
+  if (!token) return undefined;
+  if (token.startsWith("tpa_")) {
+    const grant = consumerAgentGrants.get(consumerAgentTokenHash(token));
+    if (!grant || grant.revokedAt) return undefined;
+    grant.lastUsedAt = new Date().toISOString();
+    return { userId: grant.userId, grant, authMode: "personal_agent_token" };
+  }
+  const user = await resolveSupabaseUser(req);
+  return user && typeof user.id === "string" && user.id ? { userId: user.id, authMode: "supabase_session" } : undefined;
+}
+
+async function listConsumerPurchases(userId: string): Promise<Array<Record<string, unknown>>> {
+  const admin = getSupabaseStorageAdmin();
+  if (!admin) return [];
+  const { data, error } = await admin.client
+    .from("orders")
+    .select("id, order_id, batch_id, product_name, image_url, quantity, status, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return [];
+  return (data ?? []).map((row) => ({
+    orderId: row.order_id ?? row.id,
+    batchId: row.batch_id,
+    productName: row.product_name,
+    quantity: row.quantity,
+    status: row.status,
+    createdAt: row.created_at,
+    dataMode: "external",
+  }));
+}
+
+async function personalAgentUpdates(userId: string, requestedBatchId?: string): Promise<Array<Record<string, unknown>>> {
+  const purchases = await listConsumerPurchases(userId);
+  const allowed = purchases.filter((purchase) => typeof purchase.batchId === "string" && (!requestedBatchId || purchase.batchId === requestedBatchId));
+  const updates: Array<Record<string, unknown>> = [];
+  for (const purchase of allowed) {
+    const batchId = String(purchase.batchId);
+    const lifecycle = lifecyclePublicView(batchId);
+    updates.push({
+      batchId,
+      productId: isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil",
+      productName: purchase.productName,
+      lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction, events: lifecycle.events },
+      dataMode: lifecycle.dataMode,
+      currentReceipt: false,
+      note: "更新来自已绑定购买批次；没有当前会话 receipt 时不会把链上历史记录说成当前交易成功。",
+    });
+  }
+  return updates;
+}
+
+async function personalAgentGuidance(userId: string, requestedBatchId?: string): Promise<Array<Record<string, unknown>>> {
+  const purchases = await listConsumerPurchases(userId);
+  const purchasedBatchIds = purchases
+    .map((purchase) => typeof purchase.batchId === "string" ? purchase.batchId.toUpperCase() : "")
+    .filter(Boolean);
+  const batchIds = requestedBatchId
+    ? [requestedBatchId.toUpperCase()]
+    : [...new Set(purchasedBatchIds)];
+  return batchIds.flatMap((batchId) => {
+    const demo = demoBatchFor(batchId);
+    if (!demo) return [];
+    const purchase = purchases.find((item) => String(item.batchId ?? "").toUpperCase() === batchId);
+    const lifecycle = lifecyclePublicView(batchId);
+    const isFishOil = !isRiceBatch(batchId);
+    const guidance = isFishOil
+      ? [
+          { key: "follow_label", title: "按标签使用", text: "每日用量和适用人群以包装标签、生产方说明或专业人士建议为准；当前批次资料没有登记个体化剂量，Agent 不替你做医疗建议。", source: "包装标签 / 生产方说明" },
+          { key: "with_food", title: "按已登记说明使用", text: "当前演示产品说明建议随餐使用；如果你手上的包装标签不同，以手上实物标签为准。", source: "企业演示资料 · 使用说明" },
+          { key: "storage", title: "保存", text: "置于阴凉、干燥、避光处，保持包装密封，避免高温和长期受潮。", source: "企业演示资料 · 保存贴士" },
+          { key: "check", title: "先看异常", text: "如果包装破损、气味异常或到货与记录不一致，先暂停使用，保留凭证并联系商家售后。", source: "TruthPass 售后规则" },
+        ]
+      : [
+          { key: "follow_label", title: "按标签使用", text: "日常使用以包装标签和生产方说明为准；当前 Agent 不提供医疗或个体化用量建议。", source: "包装标签 / 生产方说明" },
+          { key: "storage", title: "保存", text: "按产品标签要求保存，避免高温、阳光直射和包装受潮。", source: "生产方说明" },
+        ];
+    return [{
+      batchId,
+      productId: isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil",
+      productName: purchase?.productName ?? demo.name,
+      purchaseBound: Boolean(purchase),
+      guidance,
+      lifecycle: { revision: lifecycle.contextRevision, syncedAt: lifecycle.syncedAt, nextAction: lifecycle.nextAction },
+      dataMode: lifecycle.dataMode,
+      sourceEvidenceIds: [batchId + ":evidence:1", batchId + ":evidence:2", batchId + ":evidence:4"],
+      medicalBoundary: "不提供疾病诊断、疗效承诺或个体化剂量；如有用药、孕期、过敏或慢性病情况，请先咨询专业人士。",
+      note: "这是基于已授权批次资料的使用提醒，不代表商品认证或适合所有人。",
+    }];
+  });
+}
+
 const publicPolicyRegistry = createDefaultProductPolicyRegistry();
 const anonymousConsumers = new AnonymousConsumerRegistry();
 
@@ -2237,6 +2431,9 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
           temperature: 0.2,
           max_tokens: 500,
           stream: false,
+          ...(candidate.provider === "opencode" && candidate.model === "deepseek-v4.1-flash"
+            ? { thinking: { type: "disabled" } }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -2260,8 +2457,15 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
         console.warn(JSON.stringify(diagnostic));
         continue;
       }
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-      const content = data.choices?.[0]?.message?.content;
+      const data = (await res.json()) as {
+        choices?: Array<{
+          finish_reason?: unknown;
+          message?: { content?: unknown; reasoning_content?: unknown; [key: string]: unknown };
+        }>;
+      };
+      const choice = data.choices?.[0];
+      const message = choice?.message;
+      const content = message?.content;
       const safety = typeof content === "string" ? validateConsumerModelOutput(content, safetyContract) : { status: "rejected" as const, citations: [], reasons: ["model_content_missing"] };
       if (safety.status !== "accepted" || !safety.text) {
         providerIssue = "invalid_response";
@@ -2274,6 +2478,9 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
           at: new Date().toISOString(),
           hasContent: typeof content === "string",
           length: text.length,
+          messageKeys: message ? Object.keys(message).sort() : [],
+          reasoningLength: typeof message?.reasoning_content === "string" ? message.reasoning_content.length : null,
+          finishReason: choice?.finish_reason ?? null,
           hasConclusion: /结论：/.test(text),
           hasEvidence: /依据：/.test(text),
           hasUncertainty: /不确定：/.test(text),
@@ -3503,18 +3710,40 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
   const batch = demoBatchFor(batchId);
   if (!batch) throw new Error("BATCH_NOT_FOUND");
   const retrieval = searchBatchKnowledge(batchId, question);
+  const tenantId = retrieval[0]?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo");
+  const productId = retrieval[0]?.productId ?? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil");
+  const expertKnowledge = await sagScopedAdapter.searchScopedKnowledge({
+    tenantId: "",
+    productId,
+    batchId,
+    query: question,
+  });
   const chainContext = isChainStatusQuestion(question) ? await buildChainQueryContext(batchId) : undefined;
   const reply = await demoConsumerChat(batchId, batch, question, chainContext, locale, retrieval);
   const lifecycle = lifecyclePublicView(batchId);
   const status = reply.status ?? "deterministic_fallback";
   const modelCompletedStatus = reply.runtimeStatus
     ?? (status === "model_assisted" ? "completed" : reply.providerIssue ?? "fallback");
+  const validationStatus = reply.safety?.status ?? (status === "model_assisted" ? "accepted" : "fallback");
+  const evidenceIds = reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds);
+  void expertAgentCore.recordInteraction({
+    traceId,
+    actorType: "consumer",
+    tenantId,
+    productId,
+    batchId,
+    intent: question,
+    evidenceIds,
+    verifierResult: reply.verifierStatus ?? "checked",
+    responseStatus: validationStatus === "accepted" ? "completed" : validationStatus === "rejected" ? "rejected" : "fallback",
+    consentScope: "none",
+  }).catch(() => undefined);
   return {
     schemaVersion: "truthpass.agent.query.v1",
     traceId,
     batchId,
-    tenantId: retrieval[0]?.tenantId ?? (isRiceBatch(batchId) ? "tenant-rice-demo" : "tenant-fish-oil-demo"),
-    productId: retrieval[0]?.productId ?? (isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil"),
+    tenantId,
+    productId,
     dataMode: reply.dataMode ?? "demo/synthetic",
     stages: [
       { stage: "reading_batch", status: "completed", hitCount: retrieval.length },
@@ -3524,9 +3753,10 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
       { stage: "model_completed", status: modelCompletedStatus, providerIssue: reply.providerIssue ?? null, providerResponseStatus: reply.providerResponseStatus ?? null },
     ],
     retrieval: { query: question, hitCount: retrieval.length, hitIds: retrieval.map((hit) => hit.hitId), hits: retrieval },
+    expertKnowledge: { source: "truthpass+sag-scoped-adapter", hitCount: expertKnowledge.length, hits: expertKnowledge },
     answer: reply.lines.map((line) => line.text).join(" "),
     citations: reply.safety?.citations ?? [],
-    evidenceIds: reply.evidenceIds ?? retrieval.flatMap((item) => item.evidenceIds),
+    evidenceIds,
     model: {
       status,
       provider: reply.providerUsed ?? "deterministic",
@@ -3536,7 +3766,7 @@ async function runUnifiedAgentQuery(batchId: string, question: string, traceId: 
       providerResponseStatus: reply.providerResponseStatus ?? null,
     },
     modelAssisted: status === "model_assisted",
-    validationStatus: reply.safety?.status ?? (status === "model_assisted" ? "accepted" : "fallback"),
+    validationStatus,
     validationReasons: reply.safety?.reasons ?? [],
     providerIssue: reply.providerIssue ?? null,
     providerResponseStatus: reply.providerResponseStatus ?? null,
@@ -3983,6 +4213,182 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     return true;
   }
 
+  if (p === "/api/consumer/agent/grants" && (req.method === "GET" || req.method === "POST")) {
+    const user = await resolveSupabaseUser(req);
+    if (!user || typeof user.id !== "string" || !user.id) {
+      sendJson(res, 401, { error: "CONSUMER_AGENT_AUTH_REQUIRED", message: "请先登录后管理个人 Agent 授权。" });
+      return true;
+    }
+    const userId = user.id;
+    if (req.method === "GET") {
+      await hydrateConsumerAgentGrants();
+      const grants = [...consumerAgentGrants.values()].filter((grant) => grant.userId === user.id).map(publicConsumerAgentGrant);
+      sendJson(res, 200, { schemaVersion: "truthpass.consumer-agent.grants.v1", grants, dataClass: "personal", persistence: getSupabaseStorageAdmin() ? "supabase_or_memory" : "memory" });
+      return true;
+    }
+    const body = await readBody(req) as Record<string, unknown>;
+    const scopes = normalizeConsumerAgentScopes(body.scopes);
+    if (!scopes.length) {
+      sendJson(res, 422, { error: "CONSUMER_AGENT_SCOPE_REQUIRED", allowedScopes: CONSUMER_AGENT_SCOPES });
+      return true;
+    }
+    const batchIds = normalizeConsumerAgentBatchIds(body.batchIds);
+    const productIds = normalizeConsumerAgentProductIds(body.productIds);
+    const rawToken = `tpa_${randomBytes(32).toString("base64url")}`;
+    const grant: ConsumerAgentGrant = {
+      grantId: `tpg_${randomBytes(12).toString("hex")}`,
+      userId,
+      agentId: typeof body.agentId === "string" && body.agentId.trim() ? body.agentId.trim().slice(0, 80) : `consumer-agent-${userId.slice(0, 8)}`,
+      label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : "我的 TruthPass Agent",
+      scopes,
+      batchIds,
+      productIds,
+      tokenHash: consumerAgentTokenHash(rawToken),
+      createdAt: new Date().toISOString(),
+      dataClass: "personal",
+    };
+    consumerAgentGrants.set(grant.tokenHash, grant);
+    const admin = getSupabaseStorageAdmin();
+    let persistence: "supabase" | "memory_fallback" = "memory_fallback";
+    if (admin) {
+      const { error } = await admin.client.from("truthpass_consumer_agent_grants").insert({
+        grant_id: grant.grantId,
+        user_id: grant.userId,
+        agent_id: grant.agentId,
+        label: grant.label,
+        scopes: grant.scopes,
+        batch_ids: grant.batchIds,
+        product_ids: grant.productIds,
+        token_hash: grant.tokenHash,
+        created_at: grant.createdAt,
+        data_class: grant.dataClass,
+      });
+      if (!error) persistence = "supabase";
+    }
+    sendJson(res, 201, {
+      schemaVersion: "truthpass.consumer-agent.grant-issued.v1",
+      grant: publicConsumerAgentGrant(grant),
+      token: rawToken,
+      tokenShownOnce: true,
+      persistence,
+      persistenceWarning: persistence === "memory_fallback" ? "当前授权仅保存在运行实例内；请先应用 003_consumer_agent_grants.sql 并配置 Supabase service role 后再用于长期个人 Agent。" : null,
+      warning: "这是一次性个人 Agent 授权凭证；不要把 Supabase 密码或 access token 交给 CLI。泄露后请立即撤销。",
+    });
+    return true;
+  }
+
+  const consumerGrantMatch = p.match(/^\/api\/consumer\/agent\/grants\/([^/]+)$/);
+  if (consumerGrantMatch && req.method === "DELETE") {
+    const user = await resolveSupabaseUser(req);
+    if (!user) {
+      sendJson(res, 401, { error: "CONSUMER_AGENT_AUTH_REQUIRED" });
+      return true;
+    }
+    const grantId = decodeURIComponent(consumerGrantMatch[1]);
+    const grant = [...consumerAgentGrants.values()].find((candidate) => candidate.grantId === grantId && candidate.userId === user.id);
+    if (!grant) {
+      sendJson(res, 404, { error: "CONSUMER_AGENT_GRANT_NOT_FOUND", grantId });
+      return true;
+    }
+    grant.revokedAt = new Date().toISOString();
+    const admin = getSupabaseStorageAdmin();
+    if (admin) await admin.client.from("truthpass_consumer_agent_grants").update({ revoked_at: grant.revokedAt }).eq("grant_id", grant.grantId).eq("user_id", user.id);
+    sendJson(res, 200, { schemaVersion: "truthpass.consumer-agent.grant-revoked.v1", grant: publicConsumerAgentGrant(grant) });
+    return true;
+  }
+
+  const personalAgent = p.startsWith("/api/consumer/agent/") ? await resolveConsumerAgentPrincipal(req) : undefined;
+  if (p === "/api/consumer/agent/profile" && req.method === "GET") {
+    if (!personalAgent) {
+      sendJson(res, 401, { error: "CONSUMER_AGENT_TOKEN_REQUIRED" });
+      return true;
+    }
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.consumer-agent.profile.v1",
+      userId: personalAgent.userId,
+      agentId: personalAgent.grant?.agentId ?? "browser-agent",
+      authMode: personalAgent.authMode,
+      scopes: personalAgent.grant?.scopes ?? ["purchases.read", "updates.read", "guidance.read", "agent.query", "feedback.prepare"],
+      batchIds: personalAgent.grant?.batchIds ?? [],
+      productIds: personalAgent.grant?.productIds ?? [],
+      dataClass: "personal",
+      note: "个人 Agent 只读取当前用户自己的购买和授权批次；模型不能代替用户付款、签名或写链。",
+    });
+    return true;
+  }
+
+  if (p === "/api/consumer/agent/purchases" && req.method === "GET") {
+    if (!personalAgent || !personalAgent.grant || !consumerAgentGrantAllows(personalAgent.grant, "purchases.read")) {
+      sendJson(res, personalAgent ? 403 : 401, { error: personalAgent ? "CONSUMER_AGENT_SCOPE_DENIED" : "CONSUMER_AGENT_TOKEN_REQUIRED", requiredScope: "purchases.read" });
+      return true;
+    }
+    const purchases = await listConsumerPurchases(personalAgent.userId);
+    const filtered = purchases.filter((purchase) => !personalAgent.grant!.batchIds.length || personalAgent.grant!.batchIds.includes(String(purchase.batchId).toUpperCase()));
+    sendJson(res, 200, { schemaVersion: "truthpass.consumer-agent.purchases.v1", userId: personalAgent.userId, purchases: filtered, dataClass: "personal", traceId: requestTraceId(req) });
+    return true;
+  }
+
+  if (p === "/api/consumer/agent/updates" && req.method === "GET") {
+    const requestedBatchId = (url.searchParams.get("batch") || "").trim().toUpperCase() || undefined;
+    if (!personalAgent || !personalAgent.grant || !consumerAgentGrantAllows(personalAgent.grant, "updates.read", requestedBatchId)) {
+      sendJson(res, personalAgent ? 403 : 401, { error: personalAgent ? "CONSUMER_AGENT_SCOPE_DENIED" : "CONSUMER_AGENT_TOKEN_REQUIRED", requiredScope: "updates.read" });
+      return true;
+    }
+    const updates = await personalAgentUpdates(personalAgent.userId, requestedBatchId);
+    const filtered = updates.filter((update) => !requestedBatchId || consumerAgentGrantAllows(personalAgent.grant!, "updates.read", String(update.batchId)));
+    sendJson(res, 200, { schemaVersion: "truthpass.consumer-agent.updates.v1", userId: personalAgent.userId, updates: filtered, dataClass: "personal", traceId: requestTraceId(req) });
+    return true;
+  }
+
+  if (p === "/api/consumer/agent/guidance" && req.method === "GET") {
+    const requestedBatchId = (url.searchParams.get("batch") || "").trim().toUpperCase() || undefined;
+    if (!personalAgent || !personalAgent.grant || !consumerAgentGrantAllows(personalAgent.grant, "guidance.read", requestedBatchId)) {
+      sendJson(res, personalAgent ? 403 : 401, { error: personalAgent ? "CONSUMER_AGENT_SCOPE_DENIED" : "CONSUMER_AGENT_TOKEN_REQUIRED", requiredScope: "guidance.read" });
+      return true;
+    }
+    const batchIds = requestedBatchId ? [requestedBatchId] : personalAgent.grant.batchIds;
+    if (!batchIds.length) {
+      sendJson(res, 422, { error: "CONSUMER_AGENT_BATCH_REQUIRED", message: "请在授权中绑定批次，或通过 batch 参数指定一个已授权批次。" });
+      return true;
+    }
+    const guidance = await personalAgentGuidance(personalAgent.userId, requestedBatchId);
+    const filtered = guidance.filter((item) => consumerAgentGrantAllows(personalAgent.grant!, "guidance.read", String(item.batchId), String(item.productId)));
+    sendJson(res, 200, { schemaVersion: "truthpass.consumer-agent.guidance.v1", userId: personalAgent.userId, guidance: filtered, dataClass: "personal", traceId: requestTraceId(req) });
+    return true;
+  }
+
+  if (p === "/api/consumer/agent/query" && req.method === "POST") {
+    if (!personalAgent || !personalAgent.grant) {
+      sendJson(res, personalAgent ? 403 : 401, { error: personalAgent ? "CONSUMER_AGENT_SCOPE_DENIED" : "CONSUMER_AGENT_TOKEN_REQUIRED", requiredScope: "agent.query" });
+      return true;
+    }
+    const body = await readBody(req) as Record<string, unknown>;
+    const requestedBatchId = typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : "";
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    if (!requestedBatchId || !question) {
+      sendJson(res, 422, { error: "CONSUMER_AGENT_QUERY_INPUT_REQUIRED", fields: ["batchId", "question"] });
+      return true;
+    }
+    const productId = isRiceBatch(requestedBatchId) ? "rice-wuchang" : "fish-oil";
+    if (!consumerAgentGrantAllows(personalAgent.grant, "agent.query", requestedBatchId, productId)) {
+      sendJson(res, 403, { error: "CONSUMER_AGENT_SCOPE_DENIED", batchId: requestedBatchId, productId, requiredScope: "agent.query" });
+      return true;
+    }
+    const purchases = await listConsumerPurchases(personalAgent.userId);
+    const hasPurchase = purchases.some((purchase) => String(purchase.batchId ?? "").toUpperCase() === requestedBatchId);
+    if (!hasPurchase && personalAgent.grant.batchIds.length === 0) {
+      sendJson(res, 403, { error: "CONSUMER_AGENT_BATCH_NOT_BOUND", batchId: requestedBatchId, message: "该批次尚未绑定到你的购买记录或明确授权范围。" });
+      return true;
+    }
+    try {
+      const result = await runUnifiedAgentQuery(requestedBatchId, question, requestTraceId(req), body.locale === "en" ? "en" : "zh");
+      sendJson(res, 200, { ...result, userId: personalAgent.userId, authMode: personalAgent.authMode, personalScope: { purchaseBound: hasPurchase, grantBatchScoped: personalAgent.grant.batchIds.length > 0 } });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), batchId: requestedBatchId });
+    }
+    return true;
+  }
+
   if (p === "/api/agent/manifest" && req.method === "GET") {
     const origin = `${url.protocol}//${url.host}`;
     sendJson(res, 200, {
@@ -3996,7 +4402,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       registrationAuthMode: process.env.TRUTHPASS_AGENT_REGISTRATION_TOKEN ? "bearer_token" : "unconfigured_demo",
       dataClass: "demo/synthetic",
       publicUrl: origin,
-      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.feedback.prepare", "consumer.feedback.confirm", "agent.search", "agent.query", "agent.query.stream", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal"],
+      capabilities: ["agent.mcp", "agent.collaborate", "agent.report", "agent.register", "consumer.inspect", "cli.inspect", "cli.explain", "lifecycle.read", "lifecycle.simulate", "chain.status", "wallet.prepare", "wallet.broadcast", "wallet.bind", "evidence.anchor", "verification.record", "audit.finding", "audit.approval", "audit.resolve", "consumer.purchase", "consumer.contribution", "consumer.dispute", "public.standard.read", "public.policy.read", "consumer.credential.issue", "consumer.feedback.submit", "consumer.feedback.prepare", "consumer.feedback.confirm", "agent.search", "agent.query", "agent.query.stream", "consumer.payment.quote", "consumer.payment.alipay", "consumer.payment.paypal", "consumer.agent.profile", "consumer.agent.grants", "consumer.agent.purchases", "consumer.agent.updates", "consumer.agent.guidance", "consumer.agent.query"],
       endpoints: {
         sites: `${origin}/api/sites`,
         site: `${origin}/api/sites/{slug}`,
@@ -4023,6 +4429,12 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         purchaseStatus: `${origin}/api/public/batches/{batchId}/purchase-status`,
         feedbackPrepare: `${origin}/api/feedback/prepare`,
         feedbackConfirm: `${origin}/api/feedback/confirm`,
+        consumerAgentGrants: `${origin}/api/consumer/agent/grants`,
+        consumerAgentProfile: `${origin}/api/consumer/agent/profile`,
+        consumerAgentPurchases: `${origin}/api/consumer/agent/purchases`,
+        consumerAgentUpdates: `${origin}/api/consumer/agent/updates?batch={batchId}`,
+        consumerAgentGuidance: `${origin}/api/consumer/agent/guidance?batch={batchId}`,
+        consumerAgentQuery: `${origin}/api/consumer/agent/query`,
         feedbackSummary: `${origin}/api/feedback/summary?batchId={batchId}`,
         alipayCreate: `${origin}/api/payments/alipay/create`,
         alipayNotify: `${origin}/api/payments/alipay/notify`,
@@ -4030,6 +4442,13 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         paypalCapture: `${origin}/api/payments/paypal/capture`,
         paypalWebhook: `${origin}/api/payments/paypal/webhook`,
         enterpriseEvidenceImport: `${origin}/api/tenants/{tenantId}/evidence/import`,
+        expertProfile: `${origin}/api/agent/expert-profile?domain={domain}&role={role}`,
+        knowledgePacks: `${origin}/api/tenants/{tenantId}/knowledge-packs`,
+        knowledgeSearch: `${origin}/api/agent/knowledge/search?batchId={batchId}&productId={productId}&q={query}`,
+        consumerNeeds: `${origin}/api/consumer/needs`,
+        productSpecs: `${origin}/api/tenants/{tenantId}/product-specs`,
+        brandProposals: `${origin}/api/tenants/{tenantId}/brand-proposals`,
+        improvementReport: `${origin}/api/tenants/{tenantId}/improvement-report?batchId={batchId}`,
         enterpriseMediaPresign: `${origin}/api/tenants/{tenantId}/media/presign`,
         enterpriseMediaUpload: `${origin}/api/tenants/{tenantId}/media/upload/{uploadId}`,
         enterpriseMediaIntake: `${origin}/api/tenants/{tenantId}/evidence/intake`,
@@ -4103,6 +4522,172 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const roles = (await Promise.all([...walletBindingRoles].map((role) => findWalletBinding(address, tenantId, [role]))))
       .filter((item): item is WalletBindingRecord => Boolean(item));
     sendJson(res, 200, { schemaVersion: "truthpass.wallet.binding-list.v1", address, tenantId, bindingMode: walletBindingMode(), bindings: roles });
+    return true;
+  }
+
+  const knowledgePacksMatch = p.match(/^\/api\/tenants\/([^/]+)\/knowledge-packs$/);
+  if (knowledgePacksMatch && (req.method === "GET" || req.method === "POST")) {
+    const tenantId = decodeURIComponent(knowledgePacksMatch[1]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    if (req.method === "GET") {
+      const packs = expertAgentCore.listKnowledgePacks(tenantId);
+      sendJson(res, 200, { schemaVersion: "truthpass.knowledge-packs.v1", tenantId, packs, knowledgeMode: "tenant_scoped", traceId: requestTraceId(req) });
+      return true;
+    }
+    const body = await readBody(req) as Record<string, unknown>;
+    const documents = Array.isArray(body.documents) ? body.documents.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item, index) => ({
+      id: typeof item.id === "string" && item.id.trim() ? item.id.trim() : `doc-${index + 1}`,
+      title: typeof item.title === "string" ? item.title.trim() : "",
+      text: typeof item.text === "string" ? item.text.trim() : "",
+      tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === "string") : [],
+      sourceRefs: Array.isArray(item.sourceRefs) ? item.sourceRefs.filter((ref): ref is string => typeof ref === "string") : [],
+    })).filter((item) => item.title && item.text) : [];
+    try {
+      const pack: KnowledgePack = {
+        id: typeof body.id === "string" && body.id.trim() ? body.id.trim() : `tenant-${tenantId}-knowledge-${Date.now()}`,
+        tenantId,
+        scope: "tenant_private",
+        domain: typeof body.domain === "string" && body.domain.trim() ? body.domain.trim() : "fish-oil",
+        version: typeof body.version === "string" && body.version.trim() ? body.version.trim() : "1.0.0",
+        documents,
+        sourceRefs: Array.isArray(body.sourceRefs) ? body.sourceRefs.filter((ref): ref is string => typeof ref === "string") : [],
+        definitions: body.definitions && typeof body.definitions === "object" && !Array.isArray(body.definitions) ? body.definitions as Record<string, string> : {},
+        interpretationRules: Array.isArray(body.interpretationRules) ? body.interpretationRules.filter((item): item is string => typeof item === "string") : [],
+        forbiddenClaims: Array.isArray(body.forbiddenClaims) ? body.forbiddenClaims.filter((item): item is string => typeof item === "string") : [],
+        effectiveAt: typeof body.effectiveAt === "string" && body.effectiveAt.trim() ? body.effectiveAt : new Date().toISOString(),
+        supersedes: typeof body.supersedes === "string" ? body.supersedes : undefined,
+      };
+      const saved = expertAgentCore.registerKnowledgePack(pack);
+      sendJson(res, 201, { schemaVersion: "truthpass.knowledge-pack.write.v1", tenantId, pack: saved, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, traceId: requestTraceId(req) });
+    }
+    return true;
+  }
+
+  if (p === "/api/agent/expert-profile" && req.method === "GET") {
+    const requestedTenant = (req.headers["x-truthpass-tenant"] || "").toString().trim();
+    const domain = (url.searchParams.get("domain") || "fish-oil").trim();
+    const role = url.searchParams.get("role") === "merchant" ? "merchant" : "consumer";
+    sendJson(res, 200, {
+      schemaVersion: "truthpass.expert-agent-profile.v1",
+      profile: expertAgentCore.expertProfile({ tenantId: requestedTenant || undefined, domain, role }),
+      knowledgeMode: requestedTenant ? "tenant_scoped" : "public_reference",
+      traceId: requestTraceId(req),
+    });
+    return true;
+  }
+
+  if (p === "/api/agent/knowledge/search" && req.method === "GET") {
+    const batchId = (url.searchParams.get("batchId") || BATCH_ID).trim().toUpperCase();
+    const productId = (url.searchParams.get("productId") || "fish-oil").trim();
+    const query = (url.searchParams.get("q") || "").trim();
+    const requestedTenant = (req.headers["x-truthpass-tenant"] || "").toString().trim();
+    try {
+      const batch = demoBatchFor(batchId);
+      if (!batch) {
+        sendJson(res, 404, { error: "BATCH_NOT_FOUND", batchId, productId, traceId: requestTraceId(req) });
+        return true;
+      }
+      const expectedProductId = isRiceBatch(batchId) ? "rice-wuchang" : "fish-oil";
+      if (productId !== expectedProductId) {
+        sendJson(res, 409, { error: "PRODUCT_BATCH_SCOPE_MISMATCH", batchId, productId, expectedProductId, traceId: requestTraceId(req) });
+        return true;
+      }
+      const hits = await sagScopedAdapter.searchScopedKnowledge({ tenantId: requestedTenant, productId, batchId, query });
+      sendJson(res, 200, { schemaVersion: "truthpass.agent.knowledge-search.v1", tenantId: requestedTenant || undefined, productId, batchId, query, hits, source: "truthpass+sag-scoped-adapter", knowledgeMode: requestedTenant ? "tenant_scoped" : "public_reference", traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), batchId, productId, traceId: requestTraceId(req) });
+    }
+    return true;
+  }
+
+  if (p === "/api/consumer/needs" && req.method === "POST") {
+    const body = await readBody(req) as Record<string, unknown>;
+    const consentScope = body.consentScope === "industry_insight" || body.consentScope === "personal_use" || body.consentScope === "anonymous_research" ? body.consentScope : "none";
+    try {
+      const need = await expertAgentCore.recordConsumerNeed({
+        anonymousConsumerId: typeof body.anonymousConsumerId === "string" ? body.anonymousConsumerId : "",
+        tenantId: typeof body.tenantId === "string" ? body.tenantId : undefined,
+        productId: typeof body.productId === "string" ? body.productId : undefined,
+        batchId: typeof body.batchId === "string" ? body.batchId.trim().toUpperCase() : undefined,
+        useCase: typeof body.useCase === "string" ? body.useCase : "",
+        concern: typeof body.concern === "string" ? body.concern : "",
+        preferredParameters: body.preferredParameters && typeof body.preferredParameters === "object" && !Array.isArray(body.preferredParameters) ? body.preferredParameters as Record<string, string | number | boolean> : {},
+        budgetRange: body.budgetRange && typeof body.budgetRange === "object" && !Array.isArray(body.budgetRange) ? body.budgetRange as { min?: number; max?: number; currency?: string } : undefined,
+        storageContext: typeof body.storageContext === "string" ? body.storageContext : undefined,
+        consentScope,
+      });
+      sendJson(res, 201, { schemaVersion: "truthpass.consumer-need.v1", need, privacy: { anonymousConsumerId: "pseudonymous", rawComment: "not_collected" }, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), traceId: requestTraceId(req) });
+    }
+    return true;
+  }
+
+  const productSpecsMatch = p.match(/^\/api\/tenants\/([^/]+)\/product-specs$/);
+  if (productSpecsMatch && (req.method === "GET" || req.method === "POST")) {
+    const tenantId = decodeURIComponent(productSpecsMatch[1]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    if (req.method === "GET") {
+      sendJson(res, 200, { schemaVersion: "truthpass.product-specs.v1", tenantId, specs: expertAgentCore.listProductSpecs(tenantId), traceId: requestTraceId(req) });
+      return true;
+    }
+    const body = await readBody(req) as Record<string, unknown>;
+    try {
+      const spec = await expertAgentCore.createProductSpec({
+        tenantId,
+        domain: typeof body.domain === "string" && body.domain.trim() ? body.domain.trim() : "fish-oil",
+        needIds: Array.isArray(body.needIds) ? body.needIds.filter((item): item is string => typeof item === "string") : [],
+        policyVersion: typeof body.policyVersion === "string" ? body.policyVersion : undefined,
+      });
+      sendJson(res, 201, { schemaVersion: "truthpass.product-spec.v1", tenantId, spec, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, traceId: requestTraceId(req) });
+    }
+    return true;
+  }
+
+  const brandProposalsMatch = p.match(/^\/api\/tenants\/([^/]+)\/brand-proposals$/);
+  if (brandProposalsMatch && (req.method === "GET" || req.method === "POST")) {
+    const tenantId = decodeURIComponent(brandProposalsMatch[1]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    if (req.method === "GET") {
+      sendJson(res, 200, { schemaVersion: "truthpass.brand-proposals.v1", tenantId, proposals: expertAgentCore.listBrandProposals(tenantId), traceId: requestTraceId(req) });
+      return true;
+    }
+    const body = await readBody(req) as Record<string, unknown>;
+    try {
+      const proposal = await expertAgentCore.createBrandProposal({ tenantId, productSpecId: typeof body.productSpecId === "string" ? body.productSpecId : "" });
+      sendJson(res, 201, { schemaVersion: "truthpass.brand-proposal.v1", tenantId, proposal, traceId: requestTraceId(req) });
+    } catch (error) {
+      sendJson(res, 422, { error: error instanceof Error ? error.message : String(error), tenantId, traceId: requestTraceId(req) });
+    }
+    return true;
+  }
+
+  const improvementReportMatch = p.match(/^\/api\/tenants\/([^/]+)\/improvement-report$/);
+  if (improvementReportMatch && req.method === "GET") {
+    const tenantId = decodeURIComponent(improvementReportMatch[1]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId });
+      return true;
+    }
+    const batchId = url.searchParams.get("batchId")?.trim().toUpperCase() || undefined;
+    sendJson(res, 200, { schemaVersion: "truthpass.production-improvement-report.v2", ...expertAgentCore.improvementReport(tenantId, batchId), traceId: requestTraceId(req) });
     return true;
   }
 

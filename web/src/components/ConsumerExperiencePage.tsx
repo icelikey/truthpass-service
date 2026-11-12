@@ -39,22 +39,24 @@ const copy = {
     history: "我的记录",
     eyebrow: "公开证据 · TRUTHPASS",
     demo: "演示资料 · 不能替代真实商品认证",
-    title: "先看清，\n再下单。",
-    lead: "生产、检测、运输，一件件摆出来。",
-    searchTitle: "查一批商品",
-    searchBody: "输入批次号，Agent 会把能确认的事实和缺口讲清楚。",
-    searchPlaceholder: "例如 FO-2026-001",
-    search: "查看这批",
+    title: "把货查清楚，\n再把钱花明白。",
+    lead: "你扫码，我来查。Agent 读取生产、检测、运输和使用提醒，有依据就讲依据，缺资料就讲缺口。",
+    searchTitle: "查这一批",
+    searchBody: "输入包装上的批次号，先看看这批货有没有依据。",
+    searchPlaceholder: "输入包装上的批次号",
+    search: "查这一批",
     sample: "示例批次：FO-2026-001",
+    askHint: "不会提问也没关系，直接点一个：",
+    askExamples: ["这批货从哪里来？", "检测结果怎么看？", "运输和保存有没有缺口？", "我还需要向商家确认什么？"],
     factsTitle: "先看三件事",
-    facts: ["生产记录有没有", "检测结果能不能查", "运输记录缺不缺"],
-    factHint: "没有依据的，我不会替你补。",
-    agentTitle: "你问什么，我查什么。",
-    agentBody: "Agent 先读已登记资料，再把结论、依据、不确定和下一步说清楚。",
-    evidenceTitle: "这批的依据",
-    techTitle: "查看回答依据",
+    facts: ["从哪里来", "检测怎么测", "运输有没有记录"],
+    factHint: "不看空话，先看记录。",
+    agentTitle: "你问一件，我查一批。",
+    agentBody: "Agent 先读登记资料，再把结论、依据、不确定和下一步讲明白。",
+    evidenceTitle: "这批货的依据",
+    techTitle: "看我查到的依据",
     techBody: "这里可以看到 Agent 读了哪些资料、规则怎么判断，以及下一步由谁处理。",
-    pipeline: ["读取批次资料", "规则核验", "JEV 分流", "模型解释"],
+    pipeline: ["先查这批货", "再核对检测", "再看运输和保存", "再找还缺什么", "最后把话讲明白"],
     pipelineNote: "模型只负责把已有结果讲明白，不能替机构签字，也不能替你付款。",
     status: "演示环境在线",
     wallet: "连接钱包",
@@ -71,22 +73,24 @@ const copy = {
     history: "My records",
     eyebrow: "OPEN EVIDENCE · TRUTHPASS",
     demo: "DEMO / SYNTHETIC · NOT CERTIFICATION",
-    title: "Check first.\nBuy next.",
-    lead: "Production, testing, delivery — show the record.",
-    searchTitle: "Inspect a batch",
-    searchBody: "Enter a batch ID and the agent will explain what is known and what is missing.",
-    searchPlaceholder: "For example FO-2026-001",
-    search: "Inspect this batch",
+    title: "Check the goods.\nSpend with clarity.",
+    lead: "You scan, I check. The Agent reads production, testing, delivery, and usage notes, then shows what is supported and what is missing.",
+    searchTitle: "Check this batch",
+    searchBody: "Enter the batch ID from the package and see what this product can support.",
+    searchPlaceholder: "Enter the package batch ID",
+    search: "Check this batch",
     sample: "Sample batch: FO-2026-001",
+    askHint: "You do not need to know the right question. Start with one:",
+    askExamples: ["Where did this batch come from?", "How do I read the test results?", "Are transport or storage gaps visible?", "What should I ask the merchant?"],
     factsTitle: "Start with three facts",
-    facts: ["Is production recorded?", "Can testing be checked?", "Is delivery covered?"],
-    factHint: "If there is no evidence, the agent will say so.",
-    agentTitle: "Ask once. Get the evidence.",
-    agentBody: "The agent reads registered records first, then explains the conclusion, sources, gaps, and next step.",
-    evidenceTitle: "Evidence for this batch",
-    techTitle: "See how the answer was made",
+    facts: ["Where it came from", "How it was tested", "Whether delivery is recorded"],
+    factHint: "No slogans first. Read the record.",
+    agentTitle: "Ask about one product. Check one batch.",
+    agentBody: "The Agent reads registered records first, then explains the conclusion, sources, uncertainty, and next step.",
+    evidenceTitle: "Evidence for this product batch",
+    techTitle: "See what I checked",
     techBody: "Review the records, deterministic checks, routing decision, and the person responsible for the next step.",
-    pipeline: ["Read batch records", "Run rule checks", "Route with JEV", "Model explanation"],
+    pipeline: ["Check this batch", "Verify testing", "Review transport and storage", "Find what is missing", "Explain the result"],
     pipelineNote: "The model explains existing results. It cannot sign for an institution or pay for you.",
     status: "Demo service online",
     wallet: "Connect wallet",
@@ -101,6 +105,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const { address, chainId, setWalletModalOpen } = useWallet();
   const [query, setQuery] = useState(batchId ?? "");
   const [autoQueryBatch, setAutoQueryBatch] = useState<string | null>(batchId);
+  const [autoQueryPrompt, setAutoQueryPrompt] = useState<string | null>(null);
   const [showHow, setShowHow] = useState(false);
   const [agentStatus, setAgentStatus] = useState<{ agentMode?: string; model?: string | null; provider?: string | null; providerIssue?: string; modelAssisted?: boolean; status?: string }>({});
   const [flowEvents, setFlowEvents] = useState<AgentFlowEvent[]>([]);
@@ -137,7 +142,16 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
     const next = value.trim().toUpperCase();
     if (!next) return;
     setQuery(next);
+    setAutoQueryPrompt(null);
     setAutoQueryBatch(next);
+    window.setTimeout(() => document.getElementById("agent")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
+  };
+
+  const submitExampleQuestion = (question: string) => {
+    const scopedBatch = batchId ?? "FO-2026-001";
+    setQuery(scopedBatch);
+    setAutoQueryBatch(scopedBatch);
+    setAutoQueryPrompt(question);
     window.setTimeout(() => document.getElementById("agent")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
   };
 
@@ -330,7 +344,15 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
               <input id="consumer-batch-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.searchPlaceholder} autoComplete="off" />
               <button type="submit" className="tp-red-btn">{t.search} <span aria-hidden="true">→</span></button>
             </div>
-            <button type="button" className="tp-consumer-sample" onClick={() => submitQuery("FO-2026-001")}>{t.sample}</button>
+            <div className="tp-consumer-search-actions"><button type="button" className="tp-consumer-sample" onClick={() => submitQuery("FO-2026-001")}>{t.sample}</button><button type="button" className="tp-paper-btn tp-consumer-ask-agent" onClick={() => submitExampleQuestion(t.askExamples[0])}>{locale === "zh" ? "直接问 Agent" : "Ask the Agent"} →</button></div>
+            <div className="tp-consumer-ask-guide">
+              <strong>{t.askHint}</strong>
+              <div className="tp-consumer-ask-chips">
+                {t.askExamples.map((question) => (
+                  <button key={question} type="button" onClick={() => submitExampleQuestion(question)}>{question}</button>
+                ))}
+              </div>
+            </div>
             <div className="tp-consumer-status"><span className="tp-status-dot" />{t.status}</div>
           </form>
         </section>
@@ -375,6 +397,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
               onReceiptVerified={props.onReceiptVerified}
               batchId={batchId}
               autoQueryBatch={autoQueryBatch}
+              autoQueryPrompt={autoQueryPrompt}
               locale={locale}
               minimal
             />
