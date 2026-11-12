@@ -828,10 +828,10 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>{en ? "TruthPass Product Agent" : "TruthPass 商品 Agent"}</strong>
+          <strong>{en ? "TruthPass Product Check" : "TruthPass 商品查询"}</strong>
           <small>
             <span className={`status-dot ${!minimal && (runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited") ? "offline" : ""}`} title={minimal ? displayRuntimeLabel : runtimeLabel} />
-            {displayRuntimeLabel} · {en ? "shows sources and uncertainty" : "会说明依据和不确定性"}
+            {displayRuntimeLabel} · {en ? "shows records and gaps" : "会说明记录和缺口"}
           </small>
         </div>
       </div>
@@ -906,7 +906,7 @@ export function ChatPanel({
         </div>}
         {batchId && (
           <div className="quick-group">
-            <span className="chat-quick-label">{en ? "Ask the Agent:" : "直接问 Agent："}</span>
+            <span className="chat-quick-label">{en ? "You can ask:" : "你可以这样问："}</span>
             {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).slice(0, minimal ? 4 : undefined).map((prompt) => (
               <button
                 key={prompt.label}
