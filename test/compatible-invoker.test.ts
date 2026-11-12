@@ -71,9 +71,20 @@ test("explicit OpenCode selection uses the OpenCode secret and compatible endpoi
   assert.equal(provider.source, "opencode");
   assert.equal(provider.apiKey, TEST_API_KEY);
   assert.equal(provider.model, "deepseek-v4.1-flash");
-  assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/openai/v1/chat/completions");
+  assert.equal(provider.baseUrl, "https://opencode.ai/inference/go/openai/v1");
+  assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/go/openai/v1/chat/completions");
 });
 
+
+test("OpenCode Go is the default endpoint when no legacy base URL is supplied", () => {
+  const provider = resolveAgentProvider({
+    AGENT_PROVIDER: "opencode",
+    OPENCODE_API_KEY: TEST_API_KEY,
+    OPENCODE_MODEL: "deepseek-v4.1-flash",
+  });
+  assert.equal(provider.baseUrl, "https://opencode.ai/inference/go/openai/v1");
+  assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/go/openai/v1/chat/completions");
+});
 
 test("explicit DeepSeek selection uses the direct DeepSeek endpoint and default model", () => {
   const provider = resolveAgentProvider({

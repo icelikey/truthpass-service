@@ -16,6 +16,17 @@ export interface ResolvedAgentProvider {
  * deployments keep their behaviour. OpenCode is an opt-in fallback for the
  * public Agent service when only OPENCODE_* is configured.
  */
+const OPENCODE_GO_BASE_URL = "https://opencode.ai/inference/go/openai/v1";
+
+function resolveOpenCodeBaseUrl(value?: string): string {
+  const base = value?.trim().replace(/\/+$/, "");
+  if (!base) return OPENCODE_GO_BASE_URL;
+  // The old Console route accepts the same OpenAI shape but is not the Go
+  // service. Normalize it so copied legacy environment values use Go billing.
+  if (/^https:\/\/opencode\.ai\/inference\/openai\/v1$/i.test(base)) return OPENCODE_GO_BASE_URL;
+  return base;
+}
+
 export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): ResolvedAgentProvider {
   const requestedProvider = env.AGENT_PROVIDER?.trim().toLowerCase();
   if (requestedProvider === "opencode") {
@@ -24,7 +35,7 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
       return {
         provider: "opencode",
         apiKey: openCodeKey,
-        baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/go/openai/v1").replace(/\/+$/, ""),
+        baseUrl: resolveOpenCodeBaseUrl(env.OPENCODE_BASE_URL),
         model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
         configured: true,
         source: "opencode",
@@ -76,7 +87,7 @@ export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): Reso
     return {
       provider: "opencode",
       apiKey: openCodeKey,
-      baseUrl: (env.OPENCODE_BASE_URL?.trim() || "https://opencode.ai/inference/go/openai/v1").replace(/\/+$/, ""),
+      baseUrl: resolveOpenCodeBaseUrl(env.OPENCODE_BASE_URL),
       model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
       configured: true,
       source: "opencode",

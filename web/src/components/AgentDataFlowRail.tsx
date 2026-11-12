@@ -45,7 +45,7 @@ const STATUS_LABELS: Record<AgentFlowStatus, { zh: string; en: string }> = {
   pending: { zh: "等待", en: "pending" },
   active: { zh: "进行中", en: "active" },
   completed: { zh: "已完成", en: "completed" },
-  fallback: { zh: "基础回答", en: "fallback" },
+  fallback: { zh: "按登记资料回答", en: "record-based answer" },
   unavailable: { zh: "不可用", en: "unavailable" },
   info: { zh: "记录", en: "info" },
 };
@@ -60,8 +60,8 @@ const FLOW_STAGES: Array<{ key: string; zh: string; en: string }> = [
 
 function flowStageKey(event: AgentFlowEvent, locale: "zh" | "en"): string | undefined {
   const labels = locale === "zh"
-    ? [["读取当前批次"], ["Verifier 完成规则核验", "按规则核对"], ["JEV 完成分流", "判断还缺什么"], ["模型开始整理解释", "整理说明"], ["模型解释完成", "说明已完成"]]
-    : [["Reading this batch"], ["Verifier checked rules", "Rules checked"], ["JEV routed next step", "Next gap identified"], ["Model started explanation", "Organizing the explanation"], ["Model explanation completed", "Explanation ready"]];
+    ? [["读取当前批次", "正在读取这批货", "读取这批资料"], ["Verifier 完成规则核验", "按规则核对", "再核对检测", "核对检测"], ["JEV 完成分流", "判断还缺什么", "再看运输和保存", "检查缺口"], ["模型开始整理解释", "整理说明", "正在整理解释", "返回结论"], ["模型解释完成", "说明已完成", "回答已生成", "最后把话讲明白"]]
+    : [["Reading this batch", "Reading this record"], ["Verifier checked rules", "Rules checked", "Verify testing"], ["JEV routed next step", "Next gap identified", "Review transport and storage"], ["Model started explanation", "Organizing the explanation"], ["Model explanation completed", "Explanation ready", "Answer generated"]];
   const index = labels.findIndex((candidates) => candidates.includes(event.label));
   return index >= 0 ? FLOW_STAGES[index]?.key : undefined;
 }

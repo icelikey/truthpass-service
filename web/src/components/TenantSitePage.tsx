@@ -194,7 +194,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
         {site.batch.evidenceCategories.slice(0, 3).map((item, index) => <article key={item}><b>0{index + 1}</b><strong>{item}</strong><span>{zh ? "已绑定当前批次" : "Linked to this batch"}</span></article>)}
       </section>
       <section className="tenant-route-grid">
-        <a href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "消费者" : "CONSUMER"}</span><h2>{zh ? "问商品助手" : "Ask the product Agent"}</h2><p>{zh ? "结论、依据、不确定、下一步。" : "Conclusion, sources, uncertainty, next step."}</p></a>
+        <a href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "消费者" : "CONSUMER"}</span><h2>{zh ? "查商品记录" : "Check the product record"}</h2><p>{zh ? "查记录、看依据、知道还缺什么。" : "Check the record, see the basis, and know what is missing."}</p></a>
         <a href={localizedSiteRoute(site, "merchant", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "企业" : "BUSINESS"}</span><h2>{zh ? "把资料整理清楚" : "Make the record legible"}</h2><p>{zh ? "上传、核验、确认、发布。" : "Collect, verify, confirm, publish."}</p></a>
         <a href={localizedSiteRoute(site, "institution", locale, scopedBatch(site, batch))}><span className="tp-kicker">{zh ? "机构" : "INSTITUTION"}</span><h2>{zh ? "一批一查" : "Review one batch at a time"}</h2><p>{zh ? "检测、签名、争议都有记录。" : "Testing, signatures, and disputes stay recorded."}</p></a>
       </section>
@@ -561,13 +561,15 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       ? (AGENT_FLOW_STAGE_LABELS[stage]?.[locale] ?? stage)
       : (locale === "zh" ? "运行摘要已返回" : "Run metadata returned");
     const detail = event.detail
-      ?? (event.pipelineDetail
-        ? `Verifier ${event.pipelineDetail.verifier.status} · JEV ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "模型" : "model"} ${event.pipelineDetail.deepseek.status}`
-        : undefined)
-      ?? event.text
-      ?? (event.kind === "meta"
-        ? (locale === "zh" ? "Verifier、JEV、模型和引用状态已写入运行摘要。" : "Verifier, JEV, model, and citation state were returned.")
-        : "");
+      ?? (locale === "zh"
+        ? event.stage === "reading_batch" ? `找到 ${event.evidenceIds?.length ?? 0} 条这批货的登记记录。`
+          : event.stage === "verifier_checked" ? (event.status === "completed" ? "已按登记的检测规则核对，并标出还缺的资料。" : "正在按登记规则核对这批货。")
+            : event.stage === "jev_routed" ? "正在判断运输、保存和其他资料还缺什么。"
+              : event.stage === "model_started" ? "正在把查到的内容整理成容易看懂的话。"
+                : event.stage === "model_completed" ? (event.providerIssue ? "说明服务暂时不可用，已改用这批货的登记资料回答。" : "这批货的说明已经整理好。")
+                  : event.kind === "meta" ? "查找记录已返回。" : event.text ?? ""
+        : event.text
+          ?? (event.kind === "meta" ? "Lookup record returned." : ""));
     appendFlowEvent({
       source: "Agent SSE",
       label,
@@ -584,7 +586,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "让每一步都清晰可见" : "MAKE EVERY STEP CLEAR"}</p><h1>{zh ? "把货查清楚，再把钱花明白。" : "Check the goods. Spend with clarity."}</h1><p>{zh ? `你扫码，我来查。先看登记记录，再看检测、运输和保存；有依据就讲依据，缺资料就讲缺口。` : `Scan the batch and check the record. See production, testing, delivery, storage, what is supported, and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "查这一批鱼油" : "Ask about this batch"}</strong><span>{batchId}</span></div>
-        <p className="tenant-agent-prompt-hint">{zh ? "你可以直接问：检测通过了吗？冷链有没有中断？还缺什么资料？" : "Ask directly: did testing pass, was cold chain covered, or what is still missing?"}</p>
+        <p className="tenant-agent-prompt-hint">{zh ? "可以问：检测记录、运输保存，或者还缺什么资料。" : "Ask about testing, transport, storage, or what is still missing."}</p>
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
@@ -625,7 +627,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         />
         <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起回答依据" : "Hide answer basis") : (zh ? "看我查到的依据" : "See answer basis")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "需要时再展开来源、状态和更新记录" : "Open sources and status only when needed")}</span></div>
         <section className="tenant-agent-access" aria-label={zh ? "我的商品提醒" : "My product watch list"}>
-          <div className="tenant-panel-head"><div><strong>{zh ? "我的商品提醒" : "My product watch list"}</strong><small>{zh ? "让查询工具持续帮你盯住已授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理提醒" : "Manage watch list")}</button></div>
+          <div className="tenant-panel-head"><div><strong>{zh ? "我的商品" : "My products"}</strong><small>{zh ? "让查询工具持续帮你盯住已授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理提醒" : "Manage watch list")}</button></div>
           {grantOpen && <div className="tenant-agent-access-body">
             <p>{zh ? "授权后，你自己的 CLI 或其他 Agent 只能读取你的购买记录、已绑定批次更新，并在授权范围内向 TruthPass 提问。它不能替你付款、签名或写链。" : "After authorization, your CLI or another Agent can read only your purchases, updates for bound batches, and ask TruthPass within this scope. It cannot pay, sign, or write to chain for you."}</p>
             {!authConfigured && !authLoading && <p className="tenant-agent-access-muted">{zh ? "当前云主机还没有接入账号服务，登录/注册和长期授权暂不可用；匿名查询和证据解释仍可使用。" : "The cloud host has no account provider configured yet, so sign-in and durable grants are unavailable; anonymous inspection and evidence explanations still work."}</p>}
@@ -652,6 +654,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         locale={locale}
         chainStatus={chainStatus}
         onClear={() => setFlowEvents([])}
+        consumerFriendly
       /><div className="tenant-context-demo-action"><button type="button" className="tp-paper-btn" onClick={() => void runFishOilDemo()} disabled={demoRunning}>{demoRunning ? (zh ? "正在更新演示资料…" : "Updating demo records…") : (zh ? "更新一次演示资料" : "Refresh demo records")} →</button><span>{zh ? "仅用于演示持续变化，不会伪装成真实认证。" : "Demo refresh only; it never represents certification."}</span></div></div><div className="tenant-context-column"><section className="tenant-usage-panel" aria-label={zh ? "产品使用说明" : "Product usage guide"}><div className="tenant-panel-head"><strong>{zh ? "使用教程与贴士" : "How to use"}</strong><span>{zh ? "来源可见" : "Sourced"}</span></div><div className="tenant-usage-grid"><div><b>{zh ? "使用教程" : "Guide"}</b>{site.product.usageGuide.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div><div><b>{zh ? "使用贴士" : "Tips"}</b>{site.product.usageTips.map((item) => <article key={item.title}><strong>{item.title}</strong><p>{item.body}</p><small>{item.source}</small></article>)}</div></div></section>{lifecycle && <section className="tenant-lifecycle-strip" aria-label={zh ? "实时生命周期" : "Live lifecycle"}><div className="tenant-panel-head"><strong>{zh ? "这批现在走到哪一步" : "Where this batch is now"}</strong><span>{lifecycleUpdated ? (zh ? "资料刚刚更新" : "Just updated") : `v${lifecycle.contextRevision}`}</span></div>{lifecycle.simulation && <p className="tenant-lifecycle-simulation" role="status">{zh ? `演示数据每 ${Math.round(lifecycle.simulation.intervalMs / 1000)} 秒刷新 · tick ${lifecycle.simulation.tick} · 新证据 ${lifecycle.simulation.generatedEvidenceId}` : `Demo data refreshes every ${Math.round(lifecycle.simulation.intervalMs / 1000)}s · tick ${lifecycle.simulation.tick} · evidence ${lifecycle.simulation.generatedEvidenceId}`}</p>}<div className="tenant-lifecycle-mini">{lifecycle.events.map((event) => <div className={`tenant-lifecycle-mini-item ${event.status}`} key={event.stage}><b>{event.label}</b><span>{event.status}</span><small>{event.detail}</small></div>)}</div></section>}</div></section>}
     </main>
   );
