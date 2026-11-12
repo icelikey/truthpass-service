@@ -9,6 +9,7 @@ import type { ChainStatusData } from "../types";
 export type AgentFlowSource =
   | "Agent SSE"
   | "Agent stream"
+  | "查询接口"
   | "批次总览 API"
   | "Batch overview API"
   | "生命周期 API"
@@ -59,9 +60,9 @@ const FLOW_STAGES: Array<{ key: string; zh: string; en: string }> = [
 
 function flowStageKey(event: AgentFlowEvent, locale: "zh" | "en"): string | undefined {
   const labels = locale === "zh"
-    ? ["读取当前批次", "Verifier 完成规则核验", "JEV 完成分流", "模型开始整理解释", "模型解释完成"]
-    : ["Reading this batch", "Verifier checked rules", "JEV routed next step", "Model started explanation", "Model explanation completed"];
-  const index = labels.indexOf(event.label);
+    ? [["读取当前批次"], ["Verifier 完成规则核验", "按规则核对"], ["JEV 完成分流", "判断还缺什么"], ["模型开始整理解释", "整理说明"], ["模型解释完成", "说明已完成"]]
+    : [["Reading this batch"], ["Verifier checked rules", "Rules checked"], ["JEV routed next step", "Next gap identified"], ["Model started explanation", "Organizing the explanation"], ["Model explanation completed", "Explanation ready"]];
+  const index = labels.findIndex((candidates) => candidates.includes(event.label));
   return index >= 0 ? FLOW_STAGES[index]?.key : undefined;
 }
 
@@ -73,6 +74,7 @@ export function AgentDataFlowRail({
   locale = "zh",
   chainStatus,
   onClear,
+  consumerFriendly = false,
 }: {
   events: AgentFlowEvent[];
   batchId: string;
@@ -81,11 +83,15 @@ export function AgentDataFlowRail({
   locale?: "zh" | "en";
   chainStatus?: ChainStatusData | null;
   onClear?: () => void;
+  consumerFriendly?: boolean;
 }) {
   const zh = locale === "zh";
   const logRef = useRef<HTMLDivElement | null>(null);
   const [follow, setFollow] = useState(true);
   const [showAll, setShowAll] = useState(false);
+  const friendlyStages = zh
+    ? ["读取资料", "核对检测", "检查缺口", "整理说明", "返回结论"]
+    : ["Read records", "Check testing", "Check gaps", "Organize the explanation", "Return the result"];
 
   // Lifecycle polling can append an event after the SSE stream has finished.
   // Derive completion from the current run history instead of only looking at
@@ -93,11 +99,11 @@ export function AgentDataFlowRail({
   // next poll even though the Agent already returned an answer. Conversely,
   // scope the check to the latest start event so a second question for the
   // same batch does not inherit the previous run's completed state.
-  const startMarkers = events.map((event) => event.label === (zh ? "Agent 开始运行" : "Agent run started"));
+  const startMarkers = events.map((event) => event.label === (zh ? "开始查找" : "Lookup started") || event.label === (zh ? "Agent 开始运行" : "Agent run started"));
   const latestStartIndex = startMarkers.lastIndexOf(true);
   const currentRunEvents = latestStartIndex >= 0 ? events.slice(latestStartIndex) : events;
   const runComplete = currentRunEvents.some((event) =>
-    event.label === (zh ? "Agent 运行结束" : "Agent run finished")
+    (event.label === (zh ? "本次查询结束" : "Lookup finished") || event.label === (zh ? "Agent 运行结束" : "Agent run finished"))
       || event.label === (zh ? "生命周期读取失败" : "Lifecycle read failed")
       || event.label === (zh ? "批次总览读取失败" : "Batch overview failed"),
   );
@@ -116,7 +122,7 @@ export function AgentDataFlowRail({
   // stream has finished. Keep the primary status line scoped to the latest
   // Agent SSE row so the user sees the actual run stage instead of a later
   // telemetry refresh.
-  const latestEvent = [...events].reverse().find((event) => event.source === "Agent SSE" || event.source === "Agent stream") ?? events.at(-1);
+  const latestEvent = [...events].reverse().find((event) => event.source === "Agent SSE" || event.source === "Agent stream" || event.source === "查询接口") ?? events.at(-1);
   const latestEventIsTerminal = latestEvent?.status === "completed" || latestEvent?.status === "fallback" || latestEvent?.status === "unavailable";
 
   useEffect(() => {
@@ -131,12 +137,12 @@ export function AgentDataFlowRail({
     : (zh ? "RPC 不可达" : "RPC unavailable");
 
   return (
-    <section className="agent-data-flow-rail" aria-label={zh ? "Agent 数据流" : "Agent data flow"}>
+    <section className="agent-data-flow-rail" aria-label={zh ? (consumerFriendly ? "查找过程" : "Agent 数据流") : (consumerFriendly ? "Lookup process" : "Agent data flow")}>
       <div className="agent-data-flow-head">
         <div>
-          <span className="tp-kicker">{zh ? "运行现场 · API 数据流" : "RUN TRACE · API DATA FLOW"}</span>
+          <span className="tp-kicker">{zh ? (consumerFriendly ? "查找过程 · 实时记录" : "运行现场 · API 数据流") : (consumerFriendly ? "LOOKUP · LIVE RECORD" : "RUN TRACE · API DATA FLOW")}</span>
           <h2>{runHeading}</h2>
-          <p>{zh ? "每一条记录都来自 SSE 或公开 API；没有事件就不会显示结果。" : "Every row comes from SSE or a public API; no event is shown without a source."}</p>
+          <p>{zh ? (consumerFriendly ? "每一步都来自这批货的登记资料或查询接口；没有记录，就不会给结论。" : "每一条记录都来自 SSE 或公开 API；没有事件就不会显示结果。") : (consumerFriendly ? "Each step comes from this batch record or the lookup service; no record, no conclusion." : "Every row comes from SSE or a public API; no event is shown without a source.")}</p>
         </div>
         <div className="agent-data-flow-actions">
           <span className="agent-flow-chip"><code>{batchId}</code></span>
@@ -146,9 +152,9 @@ export function AgentDataFlowRail({
         </div>
       </div>
       <div className="agent-data-flow-summary" aria-live="polite">
-        <span>{zh ? "已完成阶段" : "Stages returned"} <b>{latestByStage.size}/5</b></span>
-        <span>{zh ? "最新来源" : "Latest source"} <b>{latestEvent?.source ?? "—"}</b></span>
-        <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? latestEvent?.traceId ?? "—"}</code></span>
+        <span>{zh ? "已完成步骤" : "Steps returned"} <b>{latestByStage.size}/5</b></span>
+        {!consumerFriendly && <span>{zh ? "最新来源" : "Latest source"} <b>{latestEvent?.source ?? "—"}</b></span>}
+        {!consumerFriendly && <span>{zh ? "Trace ID" : "Trace ID"} <code>{traceId ?? latestEvent?.traceId ?? "—"}</code></span>}
       </div>
       {chainStatus && <section className="agent-chain-run" aria-label={zh ? "区块链运行状态" : "Blockchain run status"}>
         <div className="agent-chain-run-head">
@@ -167,8 +173,8 @@ export function AgentDataFlowRail({
       <div className={`agent-data-flow-live ${latestEvent?.status ?? "pending"}`} aria-live="polite">
         <span className="agent-data-flow-live-dot" aria-hidden="true" />
         <div>
-          <strong>{latestEventIsTerminal ? (zh ? "最近发生" : "Latest event") : (zh ? "当前正在发生" : "Happening now")}</strong>
-          <b>{latestEvent?.label ?? (zh ? "等待 Agent 查询" : "Waiting for the Agent query")}</b>
+          <strong>{latestEventIsTerminal ? (zh ? "最近一步" : "Latest step") : (zh ? "正在查找" : "Looking now")}</strong>
+          <b>{latestEvent?.label ?? (zh ? "等待查询" : "Waiting for a lookup")}</b>
           <small>{latestEvent?.detail ?? (zh ? "发送一个问题后，这里会按真实 SSE/API 事件更新。" : "Ask a question and this line will update from the live SSE/API events.")}</small>
         </div>
       </div>
@@ -184,7 +190,7 @@ export function AgentDataFlowRail({
           const status = rawStatus === "active" && (runComplete || stageIndex < latestStageIndex) ? "completed" : rawStatus;
           return <article className={`agent-flow-step ${status}`} key={stage.key}>
             <span className="agent-flow-step-number">{status === "completed" ? "✓" : index + 1}</span>
-            <div><strong>{zh ? stage.zh : stage.en}</strong><span>{event ? (event.detail || STATUS_LABELS[status][locale]) : (zh ? "等待前一步" : "Waiting")}</span></div>
+            <div><strong>{consumerFriendly ? friendlyStages[index] : (zh ? stage.zh : stage.en)}</strong><span>{event ? (event.detail || STATUS_LABELS[status][locale]) : (zh ? "等待前一步" : "Waiting")}</span></div>
             <em>{STATUS_LABELS[status][locale]}</em>
           </article>;
         })}
@@ -218,7 +224,7 @@ export function AgentDataFlowRail({
       </div>}
       <div className="agent-data-flow-foot">
         <span>{zh ? "数据模式" : "Data mode"}：{dataMode ?? "demo/synthetic"}</span>
-        <span>{zh ? "模型不能替代 Verifier、JEV 或钱包确认" : "The model does not replace Verifier, JEV, or wallet confirmation."}</span>
+        <span>{zh ? (consumerFriendly ? "说明只基于已登记资料；购买和写入仍由你确认。" : "模型不能替代 Verifier、JEV 或钱包确认") : (consumerFriendly ? "The explanation uses registered records; you confirm purchases and writes." : "The model does not replace Verifier, JEV, or wallet confirmation.")}</span>
       </div>
     </section>
   );

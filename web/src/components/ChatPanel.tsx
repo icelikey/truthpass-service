@@ -544,7 +544,7 @@ export function ChatPanel({
   const latestAgentMeta = [...messages].reverse().find((message) => message.role === "agent" && message.meta)?.meta;
   const runtimeStatus = latestAgentMeta?.serviceStatus ?? latestAgentMeta?.agentMode;
   const runtimeLabel = runtimeStatus === "model_assisted"
-    ? (en ? "Agent explanation verified" : "Agent 解释已校验")
+    ? (en ? "Records checked" : "资料已核对")
     : runtimeStatus === "provider_unavailable"
       ? (en ? "Provider unavailable · evidence still readable" : "模型服务暂不可用 · 资料仍可查")
       : runtimeStatus === "rate_limited"
@@ -553,7 +553,7 @@ export function ChatPanel({
           ? (en ? "Evidence answer · records still readable" : "依据回答 · 登记资料仍可查")
           : (en ? "Ask the Agent · see the record" : "直接问 Agent · 看清依据");
   const displayRuntimeLabel = minimal
-    ? (en ? "Ask about this batch" : "直接问这批资料")
+    ? (en ? "Check this batch" : "查这批资料")
     : runtimeLabel;
   const batchOptions = productLabel?.includes("米") || productLabel?.toLowerCase().includes("rice") ? RICE_BATCHES : FISH_OIL_BATCHES;
   const lastAutoQueryRef = useRef<string | null>(null);

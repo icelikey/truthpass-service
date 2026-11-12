@@ -57,7 +57,7 @@ const copy = {
     techTitle: "看我查到的依据",
     techBody: "这里可以看到查了哪些资料、规则怎么判断，以及下一步由谁处理。",
     pipeline: ["先查这批货", "再核对检测", "再看运输和保存", "再找还缺什么", "最后把话讲明白"],
-    pipelineNote: "模型只负责把已有结果讲明白，不能替机构签字，也不能替你付款。",
+    pipelineNote: "系统先按登记资料和规则核对，再把结果讲明白；不会替机构签字，也不会替你付款。",
     status: "演示环境在线",
     wallet: "连接钱包",
     walletConnected: "钱包已连接",
@@ -117,16 +117,16 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
   const lifecycleRevisionRef = useRef<number | undefined>(undefined);
 
   const agentBadge = agentStatus.modelAssisted === true
-    ? `${agentStatus.provider ?? (locale === "zh" ? "模型" : "Model")} · ${locale === "zh" ? "已参与解释" : "explanation active"}`
+    ? (locale === "zh" ? "已按登记资料核对" : "Checked against registered records")
     : agentStatus.status === "provider_unavailable"
-      ? (locale === "zh" ? "模型解释暂不可用 · 资料仍可查" : "Model explanation unavailable · evidence readable")
+      ? (locale === "zh" ? "资料仍可查" : "Records are still readable")
       : agentStatus.status === "rate_limited"
         ? (locale === "zh" ? "请求受限 · 已安全回退" : "Rate limited · safe fallback")
         : agentStatus.status === "deterministic_fallback" || agentStatus.status === "degraded"
           ? (locale === "zh" ? "基础回答 · 资料仍可查" : "Evidence fallback · records available")
           : agentStatus.status === "ready"
-            ? (locale === "zh" ? "Agent 已就绪" : "Agent ready")
-            : (locale === "zh" ? "Agent 连接中" : "Agent connecting");
+            ? (locale === "zh" ? "查询服务在线" : "Lookup is online")
+            : (locale === "zh" ? "准备查资料" : "Preparing the lookup");
 
   useEffect(() => {
     if (batchId) setQuery(batchId);
@@ -159,43 +159,43 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
     const stage = event.stage ?? (event.kind === "done" ? "done" : event.kind);
     const stageLabels: Record<string, string> = locale === "zh"
       ? {
-          begin: "Agent 开始运行",
+          begin: "开始查找",
           reading_batch: "读取当前批次",
-          verifier_checked: "Verifier 完成规则核验",
-          jev_routed: "JEV 完成分流",
-          model_started: "模型开始整理解释",
-          model_completed: "模型解释完成",
+          verifier_checked: "按规则核对",
+          jev_routed: "判断还缺什么",
+          model_started: "整理说明",
+          model_completed: "说明已完成",
           answer: "回答已生成",
-          done: "Agent 运行结束",
-          meta: "运行摘要已返回",
+          done: "本次查询结束",
+          meta: "查询记录已返回",
         }
       : {
-          begin: "Agent run started",
+          begin: "Lookup started",
           reading_batch: "Reading this batch",
-          verifier_checked: "Verifier checked rules",
-          jev_routed: "JEV routed next step",
-          model_started: "Model started explanation",
-          model_completed: "Model explanation completed",
+          verifier_checked: "Rules checked",
+          jev_routed: "Next gap identified",
+          model_started: "Organizing the explanation",
+          model_completed: "Explanation ready",
           answer: "Answer generated",
-          done: "Agent run finished",
-          meta: "Run metadata returned",
+          done: "Lookup finished",
+          meta: "Lookup record returned",
         };
     const status: AgentFlowStatus = event.status === "active" || event.status === "completed" || event.status === "fallback" || event.status === "unavailable"
       ? event.status
       : "info";
     const item: AgentFlowEvent = {
       id: `consumer-flow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      source: "Agent SSE",
+      source: "查询接口",
       label: stageLabels[stage] ?? stage,
       detail: event.detail
         ?? (event.providerIssue === "unauthorized"
-          ? (locale === "zh" ? "模型接口认证失败，已安全回退到当前批次的确定性资料回答。" : "Model authentication failed; safely fell back to the deterministic batch answer.")
+          ? (locale === "zh" ? "查询服务认证失败，已安全回退到当前批次的登记资料回答。" : "The lookup service authentication failed; the answer safely fell back to this batch's records.")
           : event.providerIssue === "rate_limited"
-            ? (locale === "zh" ? "模型接口请求受限，已安全回退到当前批次的确定性资料回答。" : "The model provider rate-limited this request; safely fell back to the deterministic batch answer.")
+            ? (locale === "zh" ? "查询服务暂时受限，已安全回退到当前批次的登记资料回答。" : "The lookup service limited this request; the answer safely fell back to this batch's records.")
             : event.providerIssue === "invalid_response"
-              ? (locale === "zh" ? "模型回答未通过格式或引用校验，原文未展示。" : "The model response failed format or citation checks and was not shown.")
+              ? (locale === "zh" ? "返回内容未通过格式或引用校验，原文未展示。" : "The returned content failed format or citation checks and was not shown.")
               : undefined)
-        ?? (event.pipelineDetail ? `Verifier ${event.pipelineDetail.verifier.status} · JEV ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "模型" : "model"} ${event.pipelineDetail.deepseek.status}` : event.text ?? ""),
+        ?? (event.pipelineDetail ? `规则 ${event.pipelineDetail.verifier.status} · 下一步 ${event.pipelineDetail.jev.decision} · ${locale === "zh" ? "说明" : "explanation"} ${event.pipelineDetail.deepseek.status}` : event.text ?? ""),
       status,
       at: new Date().toISOString(),
       batchId: event.batchId ?? batchId ?? undefined,
@@ -344,7 +344,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
               <input id="consumer-batch-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.searchPlaceholder} autoComplete="off" />
               <button type="submit" className="tp-red-btn">{t.search} <span aria-hidden="true">→</span></button>
             </div>
-            <div className="tp-consumer-search-actions"><button type="button" className="tp-consumer-sample" onClick={() => submitQuery("FO-2026-001")}>{t.sample}</button><button type="button" className="tp-paper-btn tp-consumer-ask-agent" onClick={() => submitExampleQuestion(t.askExamples[0])}>{locale === "zh" ? "直接问 Agent" : "Ask the Agent"} →</button></div>
+            <div className="tp-consumer-search-actions"><button type="button" className="tp-consumer-sample" onClick={() => submitQuery("FO-2026-001")}>{t.sample}</button><button type="button" className="tp-paper-btn tp-consumer-ask-agent" onClick={() => submitExampleQuestion(t.askExamples[0])}>{locale === "zh" ? "直接问" : "Ask directly"} →</button></div>
             <div className="tp-consumer-ask-guide">
               <strong>{t.askHint}</strong>
               <div className="tp-consumer-ask-chips">
@@ -357,7 +357,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           </form>
         </section>
 
-        <section className="tp-consumer-pipeline" aria-label={locale === "zh" ? "Agent 工作过程" : "Agent pipeline"}>
+        <section className="tp-consumer-pipeline" aria-label={locale === "zh" ? "查找过程" : "Lookup process"}>
           <div><span className="tp-kicker">{locale === "zh" ? "回答怎么来的" : "HOW THE ANSWER IS MADE"}</span><strong>{t.agentTitle}</strong></div>
           <div className="tp-consumer-pipeline-steps">{t.pipeline.map((step, index) => <span key={step}><b>{index + 1}</b>{step}{index < t.pipeline.length - 1 && <i aria-hidden="true">→</i>}</span>)}</div>
           <small>{t.pipelineNote}</small>
@@ -367,13 +367,14 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
 
         <section className="tp-consumer-workspace" id="agent">
           <div className="tp-consumer-agent-column">
-            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品助手" : "PRODUCT AGENT"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentBadge}</span></div>
+            <div className="tp-consumer-section-heading"><div><span className="tp-kicker">{locale === "zh" ? "商品查询" : "PRODUCT CHECK"}</span><h2>{t.agentTitle}</h2><p>{t.agentBody}</p></div><span className="tp-consumer-ai-badge">{agentBadge}</span></div>
             <AgentDataFlowRail
               events={flowEvents}
               batchId={batchId ?? "—"}
               dataMode={flowDataMode}
               traceId={flowTraceId ?? flowEvents.at(-1)?.traceId}
               locale={locale}
+              consumerFriendly
               onClear={() => setFlowEvents([])}
             />
             <ChatPanel
@@ -401,10 +402,10 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
               locale={locale}
               minimal
             />
-            <section className="consumer-auto-recommendation" aria-label={locale === "zh" ? "Agent 推荐结果" : "Agent recommendation"}>
+            <section className="consumer-auto-recommendation" aria-label={locale === "zh" ? "购买前核对" : "Pre-purchase check"}>
               <div className="consumer-auto-recommendation-head">
                 <div>
-                  <span className="tp-kicker">{locale === "zh" ? "Agent 建议" : "AGENT RECOMMENDATION"}</span>
+                  <span className="tp-kicker">{locale === "zh" ? "购买前核对" : "PRE-PURCHASE CHECK"}</span>
                   <h3>{locale === "zh" ? "先核对，再决定" : "Check the record before deciding"}</h3>
                 </div>
                 {recommendation?.dataMode && <span className="consumer-auto-recommendation-mode">{recommendation.dataMode}</span>}
@@ -443,7 +444,7 @@ export function ConsumerExperiencePage(props: ConsumerExperiencePageProps) {
           <button type="button" className="tp-consumer-how-toggle" onClick={() => setShowHow((value) => !value)} aria-expanded={showHow}>
             <span><span className="tp-kicker">{locale === "zh" ? "透明说明" : "TRANSPARENT BY DESIGN"}</span><strong id="consumer-how-title">{t.techTitle}</strong></span><span aria-hidden="true">{showHow ? "⌃" : "⌄"}</span>
           </button>
-          {showHow && <div className="tp-consumer-how-body"><p>{t.techBody}</p><div className="tp-consumer-how-grid"><span><b>{locale === "zh" ? "规则核验" : "Rule checks"}</b>{locale === "zh" ? "检查时间、批次、来源和缺口。" : "Check time, batch, source, and gaps."}</span><span><b>JEV</b>{locale === "zh" ? "决定补资料、复核或继续解释。" : "Routes to evidence, review, or explanation."}</span><span><b>{locale === "zh" ? "模型解释" : "Model"}</b>{locale === "zh" ? "把已有结果讲成人话，不能替代核验。" : "Explains registered results without replacing verification."}</span><span><b>{locale === "zh" ? "数据模式" : "Data mode"}</b>{locale === "zh" ? "当前页面标明演示或真实资料。" : "The page labels demo or external data."}</span></div></div>}
+          {showHow && <div className="tp-consumer-how-body"><p>{t.techBody}</p><div className="tp-consumer-how-grid"><span><b>{locale === "zh" ? "规则核验" : "Rule checks"}</b>{locale === "zh" ? "检查时间、批次、来源和缺口。" : "Check time, batch, source, and gaps."}</span><span><b>JEV</b>{locale === "zh" ? "决定补资料、复核或继续解释。" : "Routes to evidence, review, or explanation."}</span><span><b>{locale === "zh" ? "结果说明" : "Explanation"}</b>{locale === "zh" ? "把已登记结果讲清楚，不能替代核验。" : "Explains registered results without replacing verification."}</span><span><b>{locale === "zh" ? "数据模式" : "Data mode"}</b>{locale === "zh" ? "当前页面标明演示或真实资料。" : "The page labels demo or external data."}</span></div></div>}
         </section>
 
         <section className="tp-consumer-wallet-strip">
