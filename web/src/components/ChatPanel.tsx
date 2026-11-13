@@ -103,15 +103,15 @@ function LineView({ line }: { line: ChatLine }) {
 function serviceStatusMeta(status?: string): { pill: string; cls: string; sse: string } | null {
   switch (status) {
     case "model_assisted":
-      return { pill: "智能回答", cls: "verified", sse: "loading" };
+      return { pill: "资料已查", cls: "verified", sse: "loading" };
     case "deterministic_fallback":
-      return { pill: "基础回答", cls: "fallback", sse: "fallback" };
+      return { pill: "按登记资料", cls: "fallback", sse: "fallback" };
     case "provider_unavailable":
-      return { pill: "暂时无法连接", cls: "unavailable", sse: "unavailable" };
+      return { pill: "暂时没连上", cls: "unavailable", sse: "unavailable" };
     case "rate_limited":
-      return { pill: "请求较多", cls: "rate-limited", sse: "rate-limited" };
+      return { pill: "稍后再试", cls: "rate-limited", sse: "rate-limited" };
     case "maintenance":
-      return { pill: "maintenance", cls: "unavailable", sse: "unavailable" };
+      return { pill: "暂时维护", cls: "unavailable", sse: "unavailable" };
     default:
       return null;
   }
@@ -121,44 +121,55 @@ function providerIssueLabel(issue: string | undefined, en: boolean): string | nu
   switch (issue) {
     case "billing_required":
       return en
-        ? "The model account needs billing or available credits. The evidence fallback is still working."
-        : "OpenCode 请求已发送，返回 HTTP 402（额度不足）；当前使用当前批次登记资料回退，未经校验的模型原文未展示。";
+        ? "The request was sent, but the service account has no available credit. I am answering from the registered record instead."
+        : "请求已经发出，但当前服务额度或权限不足；我先按已登记资料回答。";
     case "unauthorized":
       return en
-        ? "The model credential was rejected. The evidence fallback is still working."
-        : "模型凭据未被接受；当前已安全回退到批次资料回答。";
+        ? "The service credential was not accepted. I am answering from the registered record instead."
+        : "服务凭据没有通过；我先按已登记资料回答。";
     case "rate_limited":
       return en
-        ? "The model provider rate limited this request. The evidence fallback is still working."
-        : "模型服务限制了本次请求；当前已安全回退到批次资料回答。";
+        ? "The service is handling too many requests. I am answering from the registered record instead."
+        : "当前请求较多；我先按已登记资料回答。";
     case "invalid_response":
       return en
-        ? "The model response failed the safety contract and was not shown."
-        : "模型回答没有通过安全契约，原文未展示。";
+        ? "The returned text did not pass the record checks, so it was not shown."
+        : "返回内容没有通过记录核对，所以没有直接展示。";
     case "unavailable":
       return en
-        ? "The model provider is unavailable. The evidence fallback is still working."
-        : "模型服务暂不可用；当前已安全回退到批次资料回答。";
+        ? "The explanation service is temporarily unavailable. I am answering from the registered record instead."
+        : "说明服务暂时不可用；我先按已登记资料回答。";
     default:
       return null;
   }
 }
 
 const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
-  begin: "先查这批货",
-  reading_batch: "正在读取这批货",
-  retrieval_completed: "登记资料已找到",
-  verifier_checked: "再核对检测",
-  jev_routed: "再看运输和保存",
-  model_started: "再找还缺什么",
-  model_completed: "正在整理解释",
-  answer: "最后把话讲明白",
-  done: "回答已生成",
+  begin: "先查这批",
+  reading_batch: "找到这批记录",
+  retrieval_completed: "把相关记录归拢",
+  verifier_checked: "逐项对照检测",
+  jev_routed: "看看运输和保存",
+  model_started: "挑出还缺的资料",
+  model_completed: "整理成结论",
+  answer: "把结论讲明白",
+  done: "查完了",
 };
 
 function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; history: AgentStreamStage[] } {
-  const raw = message.meta as (ChatMessage["meta"] & { stage?: AgentStreamStage; stages?: AgentStreamStage[] }) | undefined;
-  const rawHistory = Array.isArray(raw?.stages) ? raw.stages : raw?.stage ? [raw.stage] : [];
+  const raw = message.meta as (ChatMessage["meta"] & { stage?: AgentStreamStage; stages?: unknown[] }) | undefined;
+  const rawHistory = Array.isArray(raw?.stages)
+    ? raw.stages.flatMap((item) => {
+      if (typeof item === "string") return [item as AgentStreamStage];
+      if (item && typeof item === "object" && "stage" in item) {
+        const stage = (item as { stage?: unknown }).stage;
+        return typeof stage === "string" ? [stage as AgentStreamStage] : [];
+      }
+      return [];
+    })
+    : raw?.stage
+      ? [raw.stage]
+      : [];
   const collapse = (stage: AgentStreamStage): AgentStreamStage => {
     if (stage === "begin" || stage === "retrieval_completed") return "reading_batch";
     if (stage === "answer" || stage === "done") return "done";
@@ -166,15 +177,15 @@ function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; hi
   };
   const history = rawHistory.reduce<AgentStreamStage[]>((items, stage) => {
     const collapsed = collapse(stage);
-    if (!items.includes(collapsed)) items.push(collapsed);
+    if (Object.prototype.hasOwnProperty.call(STREAM_STAGE_LABELS, collapsed) && !items.includes(collapsed)) items.push(collapsed);
     return items;
   }, []);
   return { current: raw?.stage ? collapse(raw.stage) : undefined, history };
 }
 
 function stageStatusLabel(status: string | undefined, en: boolean): string {
-  if (en) return status === "active" ? "searching" : status === "fallback" ? "fallback" : status === "unavailable" ? "unavailable" : "checked";
-  return status === "active" ? "正在查找" : status === "fallback" ? "安全回退" : status === "unavailable" ? "暂不可用" : "已核对";
+  if (en) return status === "active" ? "searching" : status === "fallback" ? "using current records" : status === "unavailable" ? "not available" : "done";
+  return status === "active" ? "正在查" : status === "fallback" ? "改用现有记录" : status === "unavailable" ? "暂时没查到" : "已完成";
 }
 
 function answerValidationMeta(message: ChatMessage): {
@@ -285,7 +296,7 @@ function MessageView({
 
   return (
     <div className="msg agent">
-      {!minimal && <div className="chat-meta" aria-label={en ? "Answer metadata" : "回答元信息"}>
+      {!minimal && <div className="chat-meta" aria-label={en ? "Record check status" : "查记录状态"}>
         <span className={`status-pill ${agentMode === "model_assisted" ? "verified" : "fallback"}`}>
           {agentLabel}
         </span>
@@ -307,7 +318,7 @@ function MessageView({
       </div>}
       {!minimal && (message.meta?.model || message.meta?.provider || message.meta?.pipeline?.length) && (
         <details className="agent-trace-details">
-          <summary>{en ? "Answer basis" : "回答依据"} · {message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Model" : "模型")} ${en ? "helped explain" : "已参与解释"}` : (en ? "Current-record fallback" : "当前批次资料回退")} </summary>
+          <summary>{en ? "What I checked" : "这次查了什么"} · {message.meta.modelAssisted ? (en ? "record checked" : "资料已核对") : (en ? "registered record" : "按登记资料")}</summary>
           <div className="agent-trace-grid">
             <span><b>{en ? "Model" : "模型"}</b>{message.meta.modelAssisted ? `${message.meta.provider ?? (en ? "Compatible API" : "兼容接口")} · ${message.meta.model ?? (en ? "configured model" : "已配置模型")}` : "deterministic fallback"}</span>
             <span><b>{en ? "Runtime" : "运行结果"}</b>{message.meta.runtimeStatus ?? (message.meta.modelAssisted ? "completed" : "fallback")}{message.meta.providerResponseStatus ? ` · HTTP ${message.meta.providerResponseStatus}` : ""}{message.meta.providerIssue ? ` · ${message.meta.providerIssue}` : ""}</span>
@@ -329,7 +340,7 @@ function MessageView({
       )}
       {stream.history.length > 0 && (
         <details className={`chat-stage-details${minimal ? " compact" : ""}${message.done ? " is-complete" : ""}`} open>
-          <summary>{en ? "Search and verification trail" : "查找与核对过程"} · {message.done ? (en ? "checked" : "已核对") : (en ? "searching" : "正在查找")}{searchSummary ? ` · ${searchSummary}` : ""}</summary>
+          <summary>{en ? "How I checked it" : "我怎样查到的"} · {message.done ? (en ? "done" : "查完了") : (en ? "searching" : "正在查")}{searchSummary ? ` · ${searchSummary}` : ""}</summary>
           <div className="chat-stage-rail" role="status" aria-live="polite">
             {stream.history.map((stage, index) => {
               const rawMeta = message.meta as (ChatMessage["meta"] & { stageStatuses?: Record<string, string>; stageDetails?: Record<string, string> }) | undefined;
@@ -348,8 +359,8 @@ function MessageView({
       )}
       {!minimal && message.done && hasValidationMeta && (
         <div className={`answer-validation-summary ${deterministicFallback || (validationPassed && citationPassed) ? "passed" : "review"}`} role="status">
-          <strong>{deterministicFallback ? (en ? "Safely fell back to an evidence answer" : "已安全回退到基础回答") : validationPassed && citationPassed ? (en ? "Answer passed format and citation checks" : "回答通过格式与引用校验") : (en ? "Answer needs review" : "回答需要复核")}</strong>
-          <span>{deterministicFallback ? (en ? "Unvalidated model text was not published" : "未发布未经校验的模型原文") : validationPassed ? (en ? "Format check passed" : "格式校验通过") : `${en ? "Format check: " : "格式校验："}${answerValidation.validationStatus ?? (en ? "not provided" : "未提供")}`}</span>
+          <strong>{deterministicFallback ? (en ? "Answered from the registered record" : "这次先按登记资料回答") : validationPassed && citationPassed ? (en ? "The answer was checked against the record" : "回答已按记录核对") : (en ? "The answer needs review" : "回答需要复核")}</strong>
+          <span>{deterministicFallback ? (en ? "Only registered facts are shown" : "只展示已登记事实") : validationPassed ? (en ? "Format check passed" : "格式校验通过") : `${en ? "Format check: " : "格式校验："}${answerValidation.validationStatus ?? (en ? "not provided" : "未提供")}`}</span>
           <span>{deterministicFallback ? (en ? "Content comes from the current registered records" : "内容来自当前批次登记资料") : citationPassed ? (en ? "Citation check passed" : "引用校验通过") : `${en ? "Citation check: " : "引用校验："}${answerValidation.citationStatus ?? (en ? "not provided" : "未提供")}`}</span>
           {(answerValidation.validationReasons.length > 0 || answerValidation.citationReasons.length > 0) && (
             <small>{[...answerValidation.validationReasons, ...answerValidation.citationReasons].join(en ? "; " : "；")}</small>
@@ -357,10 +368,10 @@ function MessageView({
         </div>
       )}
       {!minimal && message.done && statusMeta?.sse === "fallback" && (
-        <div className="chat-sse-state fallback" role="status">{en ? "Using an evidence fallback. The content still comes from registered records." : "当前使用基础回答，内容仍来自已登记资料。"}</div>
+        <div className="chat-sse-state fallback" role="status">{en ? "I am answering from the registered record." : "这次先按已登记资料回答。"}</div>
       )}
       {!minimal && message.done && statusMeta?.sse === "unavailable" && (
-        <div className="chat-sse-state unavailable" role="status">{en ? "The model service is unavailable. Try again or request human support." : "模型服务暂不可用，请稍后重试或转人工。"}</div>
+        <div className="chat-sse-state unavailable" role="status">{en ? "The explanation service is unavailable for now. The registered record is still readable." : "说明服务暂时不可用，但已登记资料仍然可以查。"}</div>
       )}
       {!minimal && message.done && statusMeta?.sse === "rate-limited" && (
         <div className="chat-sse-state rate-limited" role="status">{en ? "Too many requests (rate limited). Please try again shortly." : "请求过于频繁（rate limited），请稍后再问。"}</div>
@@ -373,17 +384,17 @@ function MessageView({
 
       {!minimal && message.done && message.meta?.modelAssisted && (
         <div className="chat-provider-run success" role="status">
-          {en ? `${message.meta.provider ?? "Model"} completed the explanation` : `${message.meta.provider ?? "模型"} 已完成解释`} · {en ? "model-assisted" : "模型参与"} · {en ? "validation" : "校验"}: {message.meta.validationStatus ?? "accepted"}
+          {en ? "The record has been checked and the explanation is ready." : "这批记录已经核对好，说明也整理好了。"}
         </div>
       )}
       {!minimal && message.done && message.meta?.providerIssue === "billing_required" && (
         <div className="chat-provider-run billing" role="status">
-          {en ? `${message.meta.provider ?? "Model provider"} request sent · HTTP 402 billing required · safe evidence fallback applied; unvalidated model text was not shown.` : `${message.meta.provider ?? "模型服务"} 请求已发送 · HTTP 402 额度或计费未满足 · 已安全回退到当前批次资料，未经校验的模型原文未展示。`}
+          {en ? "The request was sent, but the service account has no available credit. I am answering from the registered record; unchecked text was not shown." : "请求已经发出，但当前服务额度或权限不足；我先按已登记资料回答，未经核对的内容没有展示。"}
         </div>
       )}
       <div className="msg-bubble">
         {structuredSections.length > 0 ? (
-          <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
+          <div className="agent-structured-answer" aria-label={en ? "Answer structure" : "回答结构"}>
             {structuredSections.map((section, index) => (
               <section key={`${section.label}-${index}`} className={`agent-answer-section agent-answer-${section.label}`}>
                 <strong>{en ? ({ "结论": "Conclusion", "依据": "Evidence", "不确定": "Uncertain", "下一步": "Next step" }[section.label]) : section.label}</strong>
@@ -561,7 +572,7 @@ export function ChatPanel({
         ? (en ? "Request limited · evidence fallback" : "请求受限 · 资料仍可查")
         : runtimeStatus === "deterministic_fallback"
           ? (en ? "Evidence answer · records still readable" : "按登记资料回答")
-          : (en ? "Ask the Agent · see the record" : "直接查记录 · 看清依据");
+          : (en ? "Check the record" : "查记录");
   const displayRuntimeLabel = minimal
     ? (en ? "Check this batch" : "查这批资料")
     : runtimeLabel;
@@ -857,7 +868,7 @@ export function ChatPanel({
               <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `先查登记资料，再把有记录和缺口讲清楚。`}</p>
               <p className="chat-welcome-note">{en ? "You do not need a special command. Choose a question below or type it in your own words." : "不用学怎么问，点下面的问题，也可以直接说你想知道的。"}</p>
               <p className="chat-welcome-note">{en ? "This demo uses synthetic records and is not product certification." : "当前使用演示资料，不能替代真实商品认证。"}</p>
-            </> : <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
+            </> : <div className="agent-structured-answer" aria-label={en ? "Answer structure" : "回答结构"}>
               <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "先说结论"}</strong><p>{en ? "I will check this batch record before you decide." : "我先查这批货的登记资料，再把结论讲明白。"}</p></section>
               <section className="agent-answer-section agent-answer-依据"><strong>{en ? "Evidence" : "我查到的依据"}</strong><p>{en ? "Production, testing, delivery, and usage notes are grouped by batch." : "生产、检测、运输和使用提醒都按批次整理。"}</p></section>
               <section className="agent-answer-section agent-answer-不确定"><strong>{en ? "Uncertain" : "目前还不能确认"}</strong><p>{en ? `This ${productLabel ?? "product"} record is synthetic demo data and is not certification.` : `目前还不能确认的，我会单独说清楚；当前资料是演示资料，不能替代真实认证。`}</p></section>
@@ -968,7 +979,7 @@ export function ChatPanel({
           placeholder={listening ? (en ? "Listening…" : "正在聆听，请说话…") : (en ? `Ask: did ${productLabel ?? "this product"} pass testing?` : `例如：这批${productLabel ?? "商品"}检测通过了吗？`)}
           autoComplete="off"
           disabled={busy}
-          aria-label={en ? "Agent question" : "Agent 问题输入框"}
+          aria-label={en ? "Question input" : "问题输入框"}
         />
         <button type="submit" aria-label={en ? "Send question" : "发送问题"} disabled={busy}>
           ➤

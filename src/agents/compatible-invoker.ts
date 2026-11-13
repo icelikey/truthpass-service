@@ -48,6 +48,9 @@ export function createCompatibleAgentInvoker(options: CompatibleModelOptions = {
           { role: "user", content: JSON.stringify(sanitized.value) },
         ],
         response_format: { type: "json_object" },
+        ...(resolved.provider === "opencode" && resolved.model === "deepseek-v4.1-flash"
+          ? { thinking: { type: "disabled" } }
+          : {}),
       }),
     });
     if (!response.ok) throw new Error("Agent 模型请求失败：HTTP " + response.status);

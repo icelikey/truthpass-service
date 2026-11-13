@@ -169,10 +169,10 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
     <main className="tenant-site-main">
       <section className="tenant-hero">
         <div>
-          <p className="tp-kicker">{zh ? "企业商品官网 · 公开证据" : "PRODUCT SITE · OPEN EVIDENCE"}</p>
-          <span className="tp-demo-ribbon">{zh ? "每一件资料，都回到一个批次" : "Every record returns to one batch"}</span>
+          <p className="tp-kicker">{zh ? "商品批次查询" : "BATCH LOOKUP"}</p>
+          <span className="tp-demo-ribbon">{zh ? "一批一查，记录说话" : "One batch. One record."}</span>
           <h1>{site.brand.slogans[locale]}</h1>
-          <p className="tenant-lead">{site.product.description}</p>
+          <p className="tenant-lead">{zh ? "扫码或输入批次，我来把这批货的记录查一遍：生产、检测、运输、保存，哪里有记录，哪里还缺，直接告诉你。" : "Scan or enter a batch and I will check its production, testing, delivery, and storage records, including what is missing."}</p>
           <div className="tenant-hero-actions">
             <a className="tp-red-btn" href={`${base}/agent?batch=${encodeURIComponent(scopedBatch(site, batch))}`}>{zh ? "查这一批" : "View this batch"} →</a>
             <a className="tp-paper-btn" href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}>{zh ? "查记录" : "Ask the Agent"} →</a>
@@ -183,7 +183,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
           <h2>{zh ? "把货查清楚，再把钱花明白。" : "Check first. Buy next."}</h2>
           <label htmlFor="tenant-batch">{zh ? "批次号" : "Batch ID"}</label>
           <div><input id="tenant-batch" value={batch} onChange={(event) => setBatch(event.target.value.toUpperCase())} /><button className="tp-red-btn" type="submit">{zh ? "查询" : "Inspect"}</button></div>
-          <small>{zh ? "输入包装上的批次号，先看看这批货有没有依据。" : "The Agent explains what is known, missing, and next."}</small>
+          <small>{zh ? "先看看这批货有没有记录，再决定要不要继续了解。" : "See what this batch records before you decide what to do next."}</small>
           <label className="tenant-qr-upload">{zh ? "上传包装二维码" : "Upload package QR"}<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void scanQr(file); }} /></label>
           <button type="button" className="tenant-camera-button" onClick={() => { setScanMessage(""); setCameraOpen(true); }}>{zh ? "打开相机扫码" : "Scan with camera"}</button>
           {scanMessage && <small className="tenant-scan-message" role="status">{scanMessage}</small>}
@@ -203,14 +203,14 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
 }
 
 const AGENT_FLOW_STAGE_LABELS: Record<string, { zh: string; en: string }> = {
-  begin: { zh: "先查这批货", en: "Check this batch" },
-  reading_batch: { zh: "正在读取这批货", en: "Reading this batch" },
-  verifier_checked: { zh: "再核对检测", en: "Verify testing" },
-  jev_routed: { zh: "再看运输和保存", en: "Review transport and storage" },
-  model_started: { zh: "再找还缺什么", en: "Find what is missing" },
-  model_completed: { zh: "正在整理解释", en: "Preparing the explanation" },
-  answer: { zh: "最后把话讲明白", en: "Explain the result" },
-  done: { zh: "回答已生成", en: "Answer generated" },
+  begin: { zh: "先查这批", en: "Check this batch" },
+  reading_batch: { zh: "找到这批记录", en: "Find the batch record" },
+  verifier_checked: { zh: "逐项对照检测", en: "Compare the test records" },
+  jev_routed: { zh: "看看运输和保存", en: "Check delivery and storage" },
+  model_started: { zh: "挑出还缺的资料", en: "Find what is missing" },
+  model_completed: { zh: "整理成结论", en: "Organize the result" },
+  answer: { zh: "把结论讲明白", en: "Explain the result" },
+  done: { zh: "查完了", en: "Done" },
 };
 
 function flowStatus(event: ChatEvent): AgentFlowStatus {
@@ -284,14 +284,14 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   useEffect(() => { void loadAgentGrants(); }, [loadAgentGrants]);
   const issueAgentGrant = useCallback(async () => {
     if (!user) {
-      setGrantError(zh ? "请先登录，再创建个人 Agent 授权。" : "Sign in before creating a personal Agent grant.");
+      setGrantError(zh ? "请先登录，再授权你的查询工具。" : "Sign in before authorizing your query tool.");
       return;
     }
     setGrantLoading(true);
     setGrantError(null);
     try {
       const result = await createConsumerAgentGrant({
-        label: zh ? "我的鱼油 Agent" : "My fish-oil Agent",
+        label: zh ? "我的鱼油查询" : "My fish-oil lookup",
         agentId: `consumer-${user.id.slice(0, 8)}`,
         scopes: ["purchases.read", "updates.read", "guidance.read", "agent.query", "feedback.prepare"],
         batchIds: [batchId],
@@ -341,7 +341,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         key: String(entry.batchId ?? batchId) + ":" + String(card.key ?? card.title ?? "guidance"),
         title: String(card.title ?? "使用提醒"),
         text: String(card.text ?? ""),
-        source: String(card.source ?? "TruthPass Agent"),
+        source: String(card.source ?? "TruthPass 商品记录"),
         batchId: String(entry.batchId ?? batchId),
       };
     });
@@ -552,7 +552,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
     }
   }, [appendFlowEvent, batchId, chainSource, demoRunning, lifecycleSource, overviewSource, site.product.demoMode, zh]);
   const agentRibbon = site.product.demoMode === "demo/synthetic"
-    ? (zh ? "演示资料 · 先看依据" : "Demo record · check the basis")
+    ? (zh ? "演示资料 · 先看记录" : "Demo record · check the record")
     : (zh ? "批次资料已整理" : "Batch record ready");
   const handleFlowEvent = useCallback((event: ChatEvent) => {
     const stage = event.stage ?? (AGENT_FLOW_STAGE_LABELS[event.kind] ? event.kind : undefined);
@@ -586,7 +586,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "让每一步都清晰可见" : "MAKE EVERY STEP CLEAR"}</p><h1>{zh ? "把货查清楚，再把钱花明白。" : "Check the goods. Spend with clarity."}</h1><p>{zh ? `你扫码，我来查。先看登记记录，再看检测、运输和保存；有依据就讲依据，缺资料就讲缺口。` : `Scan the batch and check the record. See production, testing, delivery, storage, what is supported, and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "查这一批鱼油" : "Ask about this batch"}</strong><span>{batchId}</span></div>
-        <p className="tenant-agent-prompt-hint">{zh ? "你可以直接说：检测、运输、保存，或者还缺什么。" : "Ask about testing, transport, storage, or what is still missing."}</p>
+        <p className="tenant-agent-prompt-hint">{zh ? "直接问就行：检测、运输、保存，或者还缺什么。" : "Ask about testing, transport, storage, or what is still missing."}</p>
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
@@ -629,16 +629,16 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
         <section className="tenant-agent-access" aria-label={zh ? "我的商品提醒" : "My product watch list"}>
           <div className="tenant-panel-head"><div><strong>{zh ? "我的商品" : "My products"}</strong><small>{zh ? "让它持续盯住你授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理我的批次" : "Manage watch list")}</button></div>
           {grantOpen && <div className="tenant-agent-access-body">
-            <p>{zh ? "授权后，你自己的 CLI 或其他 Agent 只能读取你的购买记录、已绑定批次更新，并在授权范围内向 TruthPass 提问。它不能替你付款、签名或写链。" : "After authorization, your CLI or another Agent can read only your purchases, updates for bound batches, and ask TruthPass within this scope. It cannot pay, sign, or write to chain for you."}</p>
+            <p>{zh ? "授权后，你自己的 CLI 或其他助手只能读取你的购买记录、已绑定批次更新，并在授权范围内向 TruthPass 提问。它不能替你付款、签名或写链。" : "After authorization, your CLI or another assistant can read only your purchases, updates for bound batches, and ask TruthPass within this scope. It cannot pay, sign, or write to chain for you."}</p>
             {!authConfigured && !authLoading && <p className="tenant-agent-access-muted">{zh ? "当前云主机还没有接入账号服务，登录/注册和长期授权暂不可用；匿名查询和证据解释仍可使用。" : "The cloud host has no account provider configured yet, so sign-in and durable grants are unavailable; anonymous inspection and evidence explanations still work."}</p>}
             {!user && !authLoading && <p className="tenant-agent-access-muted">{zh ? "请先使用右上角登录/注册。" : "Use the sign-in control above first."}</p>}
-            {user && <button type="button" className="tp-red-btn" onClick={() => void issueAgentGrant()} disabled={grantLoading}>{grantLoading ? (zh ? "处理中…" : "Working…") : (zh ? "创建个人 Agent 授权" : "Create personal Agent grant")}</button>}
+            {user && <button type="button" className="tp-red-btn" onClick={() => void issueAgentGrant()} disabled={grantLoading}>{grantLoading ? (zh ? "处理中…" : "Working…") : (zh ? "授权我的查询工具" : "Authorize my query tool")}</button>}
             {grantError && <p className="tenant-agent-access-error">{grantError}</p>}
-            {grantToken && <div className="tenant-agent-token"><strong>{zh ? "只显示这一次：复制到 CLI" : "Shown once: copy this to your CLI"}</strong><code>{grantToken}</code><small>{zh ? `示例：truthpass ask "这批鱼油最近有什么更新？" --remote ${window.location.origin} --token <PERSONAL_AGENT_TOKEN> --batch ${batchId}` : `Example: truthpass ask "What changed for this batch?" --remote ${window.location.origin} --token <PERSONAL_AGENT_TOKEN> --batch ${batchId}`}</small><button type="button" className="tp-paper-btn" onClick={() => { void navigator.clipboard?.writeText(grantToken); }}>{zh ? "复制授权凭证" : "Copy token"}</button></div>}
+            {grantToken && <div className="tenant-agent-token"><strong>{zh ? "只显示这一次：复制到你的工具" : "Shown once: copy to your tool"}</strong><code>{grantToken}</code><small>{zh ? `示例：truthpass ask "这批鱼油最近有什么更新？" --remote ${window.location.origin} --token <PERSONAL_AGENT_TOKEN> --batch ${batchId}` : `Example: truthpass ask "What changed for this batch?" --remote ${window.location.origin} --token <PERSONAL_AGENT_TOKEN> --batch ${batchId}`}</small><button type="button" className="tp-paper-btn" onClick={() => { void navigator.clipboard?.writeText(grantToken); }}>{zh ? "复制授权凭证" : "Copy token"}</button></div>}
             <div className="tenant-agent-guidance">
               <div className="tenant-panel-head"><div><strong>{zh ? "日常使用提醒" : "Daily use guidance"}</strong><small>{zh ? "只解释已授权批次资料" : "Scoped to authorized batches"}</small></div><button type="button" className="tp-paper-btn" onClick={() => void loadPersonalGuidance()} disabled={guidanceLoading || !user || agentGrants.length === 0}>{guidanceLoading ? (zh ? "读取中…" : "Reading…") : (zh ? "读取建议" : "Load guidance")}</button></div>
-              {!user && <p className="tenant-agent-access-muted">{zh ? "登录并创建个人 Agent 授权后，才能读取你的批次使用提醒。" : "Sign in and create a personal Agent grant to read scoped use guidance."}</p>}
-              {user && agentGrants.length === 0 && <p className="tenant-agent-access-muted">{zh ? "先创建一个个人 Agent 授权。" : "Create a personal Agent grant first."}</p>}
+              {!user && <p className="tenant-agent-access-muted">{zh ? "登录并授权后，才能读取你的批次使用提醒。" : "Sign in and authorize access to read reminders for your batches."}</p>}
+              {user && agentGrants.length === 0 && <p className="tenant-agent-access-muted">{zh ? "先授权你的查询工具。" : "Authorize your query tool first."}</p>}
               {guidanceCards.length > 0 && <div className="tenant-agent-guidance-grid">{guidanceCards.map((card) => <article key={card.key}><strong>{card.title}</strong><p>{card.text}</p><small>{card.source} · {card.batchId}</small></article>)}</div>}
               {guidanceCards.length === 0 && user && agentGrants.length > 0 && !guidanceLoading && <p className="tenant-agent-access-muted">{zh ? "点击“读取建议”，会按你授权的批次返回保存、使用和异常处理提醒。" : "Load guidance to see storage, use, and exception reminders for the authorized batch."}</p>}
             </div>

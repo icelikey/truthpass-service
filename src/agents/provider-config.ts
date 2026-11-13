@@ -21,22 +21,24 @@ const OPENCODE_GO_BASE_URL = "https://opencode.ai/inference/go/openai/v1";
 function resolveOpenCodeBaseUrl(value?: string): string {
   const base = value?.trim().replace(/\/+$/, "");
   if (!base) return OPENCODE_GO_BASE_URL;
-  // The old Console route accepts the same OpenAI shape but is not the Go
-  // service. Normalize it so copied legacy environment values use Go billing.
-  if (/^https:\/\/opencode\.ai\/inference\/openai\/v1$/i.test(base)) return OPENCODE_GO_BASE_URL;
+  // Normalize both the old Console route and a copied full chat-completions URL
+  // to OpenCode Go so a stale deployment cannot silently use the 402 route.
+  if (/^https:\/\/opencode\.ai\/inference\/openai\/v1(?:\/chat\/completions)?$/i.test(base)) return OPENCODE_GO_BASE_URL;
   return base;
 }
 
 export function resolveAgentProvider(env: NodeJS.ProcessEnv = process.env): ResolvedAgentProvider {
   const requestedProvider = env.AGENT_PROVIDER?.trim().toLowerCase();
   if (requestedProvider === "opencode") {
-    const openCodeKey = env.OPENCODE_API_KEY?.trim();
+    // Prefer the provider-specific secret, but accept the unified Agent secret
+    // for deployments that inject only AGENT_API_KEY. Both paths use Go.
+    const openCodeKey = env.OPENCODE_API_KEY?.trim() || env.AGENT_API_KEY?.trim();
     if (openCodeKey) {
       return {
         provider: "opencode",
         apiKey: openCodeKey,
-        baseUrl: resolveOpenCodeBaseUrl(env.OPENCODE_BASE_URL),
-        model: env.OPENCODE_MODEL?.trim() || "deepseek-v4.1-flash",
+        baseUrl: resolveOpenCodeBaseUrl(env.OPENCODE_BASE_URL || env.AGENT_BASE_URL),
+        model: env.OPENCODE_MODEL?.trim() || env.AGENT_MODEL?.trim() || "deepseek-v4.1-flash",
         configured: true,
         source: "opencode",
       };

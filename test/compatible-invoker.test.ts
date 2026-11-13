@@ -86,6 +86,18 @@ test("OpenCode Go is the default endpoint when no legacy base URL is supplied", 
   assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/go/openai/v1/chat/completions");
 });
 
+test("OpenCode selection accepts the unified secret and normalizes a copied legacy endpoint", () => {
+  const provider = resolveAgentProvider({
+    AGENT_PROVIDER: "opencode",
+    AGENT_API_KEY: TEST_API_KEY,
+    AGENT_MODEL: "deepseek-v4.1-flash",
+    AGENT_BASE_URL: "https://opencode.ai/inference/openai/v1/chat/completions",
+  });
+  assert.equal(provider.apiKey, TEST_API_KEY);
+  assert.equal(provider.baseUrl, "https://opencode.ai/inference/go/openai/v1");
+  assert.equal(providerEndpoint(provider.baseUrl), "https://opencode.ai/inference/go/openai/v1/chat/completions");
+});
+
 test("explicit DeepSeek selection uses the direct DeepSeek endpoint and default model", () => {
   const provider = resolveAgentProvider({
     AGENT_PROVIDER: "deepseek",
