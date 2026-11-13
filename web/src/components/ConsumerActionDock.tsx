@@ -34,7 +34,7 @@ export function ConsumerActionDock({ stage, batchId, locale = "zh" }: { stage: C
         {batchId && <button type="button" className="consumer-action-secondary" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-controls="consumer-action-more">{en ? "More actions" : "更多操作"} <span aria-hidden="true">{moreOpen ? "↑" : "↓"}</span></button>}
       </div>
       {batchId && moreOpen && <div className="consumer-action-more" id="consumer-action-more">
-        <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("agent")}>{en ? "Ask the Agent" : "问 Agent"}</button>
+        <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("agent")}>{en ? "Ask the Agent" : "查记录"}</button>
         <button type="button" className="consumer-action-secondary" onClick={() => setWalletModalOpen(true)}>{address && walletRole ? (en ? "Open bound wallet" : "打开已绑定钱包") : (en ? "Connect and bind wallet" : "连接并绑定钱包")}</button>
         <button type="button" className="consumer-action-secondary" onClick={() => jumpTo("community")}>{en ? "After-sales / feedback" : "售后 / 反馈"}</button>
       </div>}

@@ -322,7 +322,7 @@ function MessageView({
       )}
 
       {isLoading && (
-        <div className="chat-sse-state loading" role="status">{en ? "Searching the current record and checking its sources…" : "正在查找当前资料，并核对每个来源…"}</div>
+        <div className="chat-sse-state loading" role="status">{en ? "Searching the current record and checking its sources…" : "正在查这批资料，并核对来源…"}</div>
       )}
       {!message.done && message.lines.length > 0 && (
         <div className="chat-sse-state loading" role="status">{en ? "Still checking the record…" : "还在核对当前资料…"}</div>
@@ -395,7 +395,7 @@ function MessageView({
           <LineView key={i} line={line} />
         ))}
         {!message.done && message.lines.length === 0 && (
-          <div className="thinking">{en ? "TruthPass is finding the relevant records and checking their sources…" : "TruthPass 正在查找相关资料，并核对来源…"}</div>
+          <div className="thinking">{en ? "TruthPass is finding the relevant records and checking their sources…" : "正在查这批资料，并核对来源…"}</div>
         )}
         {message.recommendations && (
           <div className="recommend-list">
@@ -556,12 +556,12 @@ export function ChatPanel({
   const runtimeLabel = runtimeStatus === "model_assisted"
     ? (en ? "Records checked" : "资料已核对")
     : runtimeStatus === "provider_unavailable"
-      ? (en ? "Provider unavailable · evidence still readable" : "模型服务暂不可用 · 资料仍可查")
+      ? (en ? "Provider unavailable · evidence still readable" : "服务暂时没连上 · 资料仍可查")
       : runtimeStatus === "rate_limited"
         ? (en ? "Request limited · evidence fallback" : "请求受限 · 资料仍可查")
         : runtimeStatus === "deterministic_fallback"
-          ? (en ? "Evidence answer · records still readable" : "依据回答 · 登记资料仍可查")
-          : (en ? "Ask the Agent · see the record" : "直接问 Agent · 看清依据");
+          ? (en ? "Evidence answer · records still readable" : "按登记资料回答")
+          : (en ? "Ask the Agent · see the record" : "直接查记录 · 看清依据");
   const displayRuntimeLabel = minimal
     ? (en ? "Check this batch" : "查这批资料")
     : runtimeLabel;
@@ -838,10 +838,10 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>{en ? "TruthPass Product Check" : "TruthPass 商品查询"}</strong>
+          <strong>{en ? "TruthPass Product Check" : "这批商品"}</strong>
           <small>
             <span className={`status-dot ${!minimal && (runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited") ? "offline" : ""}`} title={minimal ? displayRuntimeLabel : runtimeLabel} />
-            {displayRuntimeLabel} · {en ? "shows records and gaps" : "会说明记录和缺口"}
+            {displayRuntimeLabel} · {en ? "shows records and gaps" : "记录和缺口都会说清楚"}
           </small>
         </div>
       </div>
@@ -854,8 +854,8 @@ export function ChatPanel({
           </div>}
           <div className="msg-bubble">
             {minimal ? <>
-              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `你把批次交给我，我先把登记资料查一遍。`}</p>
-              <p className="chat-welcome-note">{en ? "You do not need a special command. Choose a question below or type it in your own words." : "不用记命令，点下面的问题，或者直接用自己的话问。"}</p>
+              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `先查登记资料，再把有记录和缺口讲清楚。`}</p>
+              <p className="chat-welcome-note">{en ? "You do not need a special command. Choose a question below or type it in your own words." : "不用学怎么问，点下面的问题，也可以直接说你想知道的。"}</p>
               <p className="chat-welcome-note">{en ? "This demo uses synthetic records and is not product certification." : "当前使用演示资料，不能替代真实商品认证。"}</p>
             </> : <div className="agent-structured-answer" aria-label={en ? "Agent answer structure" : "Agent 回答结构"}>
               <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "先说结论"}</strong><p>{en ? "I will check this batch record before you decide." : "我先查这批货的登记资料，再把结论讲明白。"}</p></section>

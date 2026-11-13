@@ -231,7 +231,7 @@ function BatchCompleteness({ product, en = false }: { product: ProductBatch; en?
             ? (en ? "This is demo material and is not product certification." : "当前为演示资料，不能视为真实商品认证。")
             : (en ? "Some later stages or checks are still being completed." : "部分后期环节或检测项仍在补齐中。")}
           {gaps.length > 0 ? (en ? ` Known gaps: ${gaps.join("; ")}.` : ` 已知缺口：${gaps.join("；")}。`) : " "}
-          {en ? "A gap is not a failing verdict; the product Agent explains the source and next step." : "缺口不等于已判定不合格；商品助手会告诉你资料来自哪里以及下一步怎么做。"}
+          {en ? "A gap is not a failing verdict; the product Agent explains the source and next step." : "缺口不等于已判定不合格；这页会告诉你资料来自哪里以及下一步怎么做。"}
         </div>
       )}
     </>

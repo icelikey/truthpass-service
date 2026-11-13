@@ -18,7 +18,7 @@ export function ConsumerFlowBar({ stage, batchId, locale = "zh" }: { stage: Cons
         ? (zh ? "下一步：确认钱包操作" : "Next: confirm the wallet action")
         : stage === "receipt_verified"
           ? (zh ? "下一步：继续售后或反馈" : "Next: continue to after-sales or feedback")
-          : (zh ? "下一步：问 Agent 看依据" : "Next: ask the Agent for the record");
+          : (zh ? "下一步：查记录看依据" : "Next: ask the Agent for the record");
   return (
     <section className="consumer-flow" aria-label={zh ? "消费者 Agent 旅程" : "Consumer Agent journey"}>
       <div className="consumer-flow-head">

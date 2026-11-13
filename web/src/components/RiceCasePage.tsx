@@ -123,7 +123,7 @@ export function RiceCasePage({ locale }: { locale: RiceLocale }) {
 
       <main>
         <section className="tp-rice-hero">
-          <div><span className="tp-kicker">{zh ? "案例集 · 一粒米" : "CASE FILE · ONE GRAIN OF RICE"}</span><span className="tp-demo-ribbon">{dataLabel}</span><h1>{zh ? <>一粒米，<br /><span>先看证据。</span></> : <>One grain.<br /><span>See the record first.</span></>}</h1><p>{zh ? "产地、天气、土壤、检测和运输，按同一个批次串起来。" : "Origin, weather, soil, testing, and delivery linked to one batch."}</p><div className="tp-rice-hero-actions"><a className="tp-red-btn" href="#evidence">{zh ? "看证据" : "View evidence"} →</a><a className="tp-paper-btn" href="#agent">{zh ? "问商品助手" : "Ask the Agent"} →</a></div></div>
+          <div><span className="tp-kicker">{zh ? "案例集 · 一粒米" : "CASE FILE · ONE GRAIN OF RICE"}</span><span className="tp-demo-ribbon">{dataLabel}</span><h1>{zh ? <>一粒米，<br /><span>先看证据。</span></> : <>One grain.<br /><span>See the record first.</span></>}</h1><p>{zh ? "产地、天气、土壤、检测和运输，按同一个批次串起来。" : "Origin, weather, soil, testing, and delivery linked to one batch."}</p><div className="tp-rice-hero-actions"><a className="tp-red-btn" href="#evidence">{zh ? "看证据" : "View evidence"} →</a><a className="tp-paper-btn" href="#agent">{zh ? "查商品记录" : "Ask the Agent"} →</a></div></div>
           <aside className="tp-rice-batch-card"><span>{zh ? "当前演示批次" : "DEMO BATCH"}</span><strong>{RICE_BATCH}</strong><small>{zh ? "东北稻米 · 合成演示资料" : "Northeast rice · synthetic record"}</small><div><b>{zh ? "证据完整度" : "Evidence"}</b><strong>82%</strong></div></aside>
         </section>
 

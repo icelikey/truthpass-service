@@ -45,7 +45,7 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
   const batchId = currentBatch(site);
   const consumerLabels: Array<[TenantView, string, string]> = [
     ["home", zh ? "首页" : "Home", localizedSiteRoute(site, "home", locale, batchId)],
-    ["agent", zh ? "商品助手" : "Agent", localizedSiteRoute(site, "agent", locale, batchId)],
+    ["agent", zh ? "查商品" : "Agent", localizedSiteRoute(site, "agent", locale, batchId)],
     ["wallet", zh ? "钱包身份" : "Wallet", localizedSiteRoute(site, "wallet", locale, batchId)],
   ];
   const workspaceLabels: Array<[TenantView, string, string]> = [
@@ -175,7 +175,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
           <p className="tenant-lead">{site.product.description}</p>
           <div className="tenant-hero-actions">
             <a className="tp-red-btn" href={`${base}/agent?batch=${encodeURIComponent(scopedBatch(site, batch))}`}>{zh ? "查这一批" : "View this batch"} →</a>
-            <a className="tp-paper-btn" href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}>{zh ? "直接问 Agent" : "Ask the Agent"} →</a>
+            <a className="tp-paper-btn" href={localizedSiteRoute(site, "agent", locale, scopedBatch(site, batch))}>{zh ? "查记录" : "Ask the Agent"} →</a>
           </div>
         </div>
         <form className="tenant-batch-card" onSubmit={(event) => { event.preventDefault(); openBatch(batch); }}>
@@ -586,7 +586,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
       <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "让每一步都清晰可见" : "MAKE EVERY STEP CLEAR"}</p><h1>{zh ? "把货查清楚，再把钱花明白。" : "Check the goods. Spend with clarity."}</h1><p>{zh ? `你扫码，我来查。先看登记记录，再看检测、运输和保存；有依据就讲依据，缺资料就讲缺口。` : `Scan the batch and check the record. See production, testing, delivery, storage, what is supported, and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "查这一批鱼油" : "Ask about this batch"}</strong><span>{batchId}</span></div>
-        <p className="tenant-agent-prompt-hint">{zh ? "可以问：检测记录、运输保存，或者还缺什么资料。" : "Ask about testing, transport, storage, or what is still missing."}</p>
+        <p className="tenant-agent-prompt-hint">{zh ? "你可以直接说：检测、运输、保存，或者还缺什么。" : "Ask about testing, transport, storage, or what is still missing."}</p>
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
@@ -625,9 +625,9 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           productLabel={site.product.name}
           minimal
         />
-        <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起回答依据" : "Hide answer basis") : (zh ? "看我查到的依据" : "See answer basis")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "需要时再展开来源、状态和更新记录" : "Open sources and status only when needed")}</span></div>
+        <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起回答依据" : "Hide answer basis") : (zh ? "看这批的记录" : "See answer basis")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "需要时再展开来源、状态和更新记录" : "Open sources and status only when needed")}</span></div>
         <section className="tenant-agent-access" aria-label={zh ? "我的商品提醒" : "My product watch list"}>
-          <div className="tenant-panel-head"><div><strong>{zh ? "我的商品" : "My products"}</strong><small>{zh ? "让查询工具持续帮你盯住已授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理提醒" : "Manage watch list")}</button></div>
+          <div className="tenant-panel-head"><div><strong>{zh ? "我的商品" : "My products"}</strong><small>{zh ? "让它持续盯住你授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理我的批次" : "Manage watch list")}</button></div>
           {grantOpen && <div className="tenant-agent-access-body">
             <p>{zh ? "授权后，你自己的 CLI 或其他 Agent 只能读取你的购买记录、已绑定批次更新，并在授权范围内向 TruthPass 提问。它不能替你付款、签名或写链。" : "After authorization, your CLI or another Agent can read only your purchases, updates for bound batches, and ask TruthPass within this scope. It cannot pay, sign, or write to chain for you."}</p>
             {!authConfigured && !authLoading && <p className="tenant-agent-access-muted">{zh ? "当前云主机还没有接入账号服务，登录/注册和长期授权暂不可用；匿名查询和证据解释仍可使用。" : "The cloud host has no account provider configured yet, so sign-in and durable grants are unavailable; anonymous inspection and evidence explanations still work."}</p>}
@@ -640,13 +640,13 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
               {!user && <p className="tenant-agent-access-muted">{zh ? "登录并创建个人 Agent 授权后，才能读取你的批次使用提醒。" : "Sign in and create a personal Agent grant to read scoped use guidance."}</p>}
               {user && agentGrants.length === 0 && <p className="tenant-agent-access-muted">{zh ? "先创建一个个人 Agent 授权。" : "Create a personal Agent grant first."}</p>}
               {guidanceCards.length > 0 && <div className="tenant-agent-guidance-grid">{guidanceCards.map((card) => <article key={card.key}><strong>{card.title}</strong><p>{card.text}</p><small>{card.source} · {card.batchId}</small></article>)}</div>}
-              {guidanceCards.length === 0 && user && agentGrants.length > 0 && !guidanceLoading && <p className="tenant-agent-access-muted">{zh ? "点击“读取建议”，Agent 会按授权批次返回保存、使用和异常处理提醒。" : "Load guidance to see storage, use, and exception reminders for the authorized batch."}</p>}
+              {guidanceCards.length === 0 && user && agentGrants.length > 0 && !guidanceLoading && <p className="tenant-agent-access-muted">{zh ? "点击“读取建议”，会按你授权的批次返回保存、使用和异常处理提醒。" : "Load guidance to see storage, use, and exception reminders for the authorized batch."}</p>}
             </div>
             <div className="tenant-agent-grants">{agentGrants.length === 0 && !grantLoading && <span>{zh ? "还没有个人授权。" : "No personal grants yet."}</span>}{agentGrants.map((grant) => <div className="tenant-agent-grant-row" key={grant.grantId}><span><b>{grant.label}</b><small>{grant.scopes.join(" · ")} · {grant.batchIds.length ? grant.batchIds.join(", ") : (zh ? "所有已绑定批次" : "all bound batches")}</small></span>{!grant.revokedAt && <button type="button" className="tp-link-btn" onClick={() => void revokeAgentGrant(grant.grantId)}>{zh ? "撤销" : "Revoke"}</button>}</div>)}</div>
           </div>}
         </section>
       </section>
-      {showContext && <section className="tenant-context-drawer"><div className="tenant-context-column"><div className="tenant-panel-head"><strong>{zh ? "这次回答的来源" : "Sources for this answer"}</strong><span>{site.product.demoMode}</span></div><ProductPanel state={verifyState} batchId={batchId} locale={locale} /><EvidencePanel state={verifyState} batchId={batchId} locale={locale} /><AgentDataFlowRail
+      {showContext && <section className="tenant-context-drawer"><div className="tenant-context-column"><div className="tenant-panel-head"><strong>{zh ? "这批资料从哪里来" : "Sources for this answer"}</strong><span>{site.product.demoMode}</span></div><ProductPanel state={verifyState} batchId={batchId} locale={locale} /><EvidencePanel state={verifyState} batchId={batchId} locale={locale} /><AgentDataFlowRail
         events={flowEvents}
         batchId={batchId}
         dataMode={overview?.dataMode ?? lifecycle?.dataMode ?? site.product.demoMode}
