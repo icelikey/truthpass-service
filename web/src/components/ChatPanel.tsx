@@ -158,8 +158,18 @@ const STREAM_STAGE_LABELS: Record<AgentStreamStage, string> = {
 
 function streamStageMeta(message: ChatMessage): { current?: AgentStreamStage; history: AgentStreamStage[] } {
   const raw = message.meta as (ChatMessage["meta"] & { stage?: AgentStreamStage; stages?: AgentStreamStage[] }) | undefined;
-  const history = Array.isArray(raw?.stages) ? raw.stages : raw?.stage ? [raw.stage] : [];
-  return { current: raw?.stage, history };
+  const rawHistory = Array.isArray(raw?.stages) ? raw.stages : raw?.stage ? [raw.stage] : [];
+  const collapse = (stage: AgentStreamStage): AgentStreamStage => {
+    if (stage === "begin" || stage === "retrieval_completed") return "reading_batch";
+    if (stage === "answer" || stage === "done") return "done";
+    return stage;
+  };
+  const history = rawHistory.reduce<AgentStreamStage[]>((items, stage) => {
+    const collapsed = collapse(stage);
+    if (!items.includes(collapsed)) items.push(collapsed);
+    return items;
+  }, []);
+  return { current: raw?.stage ? collapse(raw.stage) : undefined, history };
 }
 
 function stageStatusLabel(status: string | undefined, en: boolean): string {
@@ -248,7 +258,7 @@ function MessageView({
   const statusMeta = serviceStatusMeta(serviceStatus);
   const agentLabel = en
     ? (agentMode === "model_assisted" ? "Model-assisted" : agentMode === "deterministic_fallback" ? "Evidence fallback" : "Product Agent")
-    : (agentMode === "model_assisted" ? "模型参与解释" : agentMode === "deterministic_fallback" ? "依据回答" : "商品助手");
+    : (agentMode === "model_assisted" ? "已按资料说明" : agentMode === "deterministic_fallback" ? "按登记资料回答" : "商品查询");
   const isLoading = !message.done && message.lines.length === 0;
   const showHandoff = !minimal && (
     serviceStatus === "provider_unavailable" ||
@@ -840,7 +850,7 @@ export function ChatPanel({
         <div className="msg agent chat-welcome">
           {!minimal && <div className="chat-meta" aria-label={en ? "Welcome message metadata" : "欢迎语元信息"}>
             <span className="status-pill demo">{en ? "Demo data" : "演示资料"}</span>
-            <span className="status-pill pending">{en ? "Product Agent" : "商品助手"}</span>
+            <span className="status-pill pending">{en ? "Product check" : "商品查询"}</span>
           </div>}
           <div className="msg-bubble">
             {minimal ? <>
