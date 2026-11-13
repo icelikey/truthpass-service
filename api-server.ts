@@ -2402,7 +2402,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     systemPrompt,
     `安全策略版本：${CONSUMER_PROMPT_POLICY_VERSION}；输出契约版本：${CONSUMER_MODEL_CONTRACT_VERSION}。`,
     "只输出 JSON，不要输出 Markdown 代码围栏。字段必须是 conclusion、evidence、uncertainty、nextAction、citations。citations 必须是当前输入允许的来源。没有依据就明确说不知道，不要猜型号、灯号或动作结果。",
-    "不要新增任何日期、数量、百分比、型号或编号；如果某个数字不在允许值列表中，请改用“不确定”说明，不要自行补全。",
+    "不要新增任何日期、数量、百分比、型号或编号；如果某个数字不在允许值列表中，请改用“不确定”说明，不要自行补全。当 dataMode=demo/synthetic 时，不确定字段必须明确说明“当前资料是演示资料，不能替代真实商品认证”或等义否定表达，不能把真实认证、安全或通过写成肯定结论。",
     `当前运行上下文：${JSON.stringify({
       batchId: safetyContract.batchId ?? null,
       evidenceIds: safetyContract.evidenceIds,
