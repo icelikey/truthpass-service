@@ -51,7 +51,7 @@ export default function App() {
   const tenantMatch = pathname.match(/^\/(en\/)?sites\/([^/]+)(?:\/([^/]+))?\/?$/);
   const tenantSite = tenantMatch ? getTenantSite(tenantMatch[2]) : null;
   const tenantLocale = tenantMatch?.[1] ? "en" : "zh";
-  const tenantView = (tenantMatch?.[3] || "home") as "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
+  const tenantView = (tenantMatch?.[3] || "home") as "home" | "agent" | "agent-demo" | "wallet" | "merchant" | "institution" | "developers" | "preview";
   const tenantBatchQuery = new URLSearchParams(window.location.search).get("batch")?.trim().toUpperCase() || "";
   const tenantBatchPrefix = tenantSite?.batch.defaultBatchId.split("-")[0];
   const tenantActiveBatch = tenantSite && tenantBatchQuery.startsWith(`${tenantBatchPrefix}-`) ? tenantBatchQuery : tenantSite?.batch.defaultBatchId ?? null;
@@ -180,7 +180,7 @@ export default function App() {
   }
 
   if (tenantMatch) {
-    if (!tenantSite || !["home", "agent", "wallet", "merchant", "institution", "developers", "preview"].includes(tenantView)) {
+    if (!tenantSite || !["home", "agent", "agent-demo", "wallet", "merchant", "institution", "developers", "preview"].includes(tenantView)) {
       return <div className="tp-route-missing"><h1>404</h1><p>企业站点不存在，或页面还没有发布。</p><a href="/">回到 TruthPass</a></div>;
     }
     return (

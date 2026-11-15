@@ -1,6 +1,6 @@
 const SCREENS = [
   ["01-platform-home.png", "平台首页", "/"],
-  ["02-fish-oil-agent.png", "鱼油 Agent 与证据卡", "/sites/fish-oil-demo/agent?batch=FO-2026-001"],
+  ["02-fish-oil-agent.png", "鱼油 Agent 与证据卡", "/sites/fish-oil-demo/agent-demo?batch=FO-2026-001"],
   ["03-wallet-purchase.png", "钱包与购买", "/sites/fish-oil-demo/wallet?batch=FO-2026-001"],
   ["04-merchant-trust.png", "企业信任工作台", "/sites/fish-oil-demo/merchant?batch=FO-2026-001"],
   ["05-institution-review.png", "机构审核", "/sites/fish-oil-demo/institution?batch=FO-2026-001"],

@@ -11,8 +11,9 @@ import type { ConsumerAgentStage } from "./ConsumerFlowBar";
 import type { TenantSiteConfig } from "../siteConfig";
 import { createConsumerAgentGrant, fetchBatchOverview, fetchChainStatus, fetchConsumerAgentGrants, fetchConsumerAgentGuidance, fetchLifecycle, revokeConsumerAgentGrant, simulateLifecycleStage, type ConsumerAgentGrantView } from "../api";
 import { useAuth } from "../hooks/useAuth";
+import { AgentDemoDashboard } from "./AgentDemoDashboard";
 
-type TenantView = "home" | "agent" | "wallet" | "merchant" | "institution" | "developers" | "preview";
+type TenantView = "home" | "agent" | "agent-demo" | "wallet" | "merchant" | "institution" | "developers" | "preview";
 
 const routeFor = (site: TenantSiteConfig, view: TenantView, locale: "zh" | "en") => {
   const base = locale === "en" ? `/en/sites/${site.slug}` : `/sites/${site.slug}`;
@@ -53,8 +54,8 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
     ["institution", zh ? "机构审核" : "Institution", localizedSiteRoute(site, "institution", locale, batchId)],
     ["developers", zh ? "开发者" : "Developers", routeFor(site, "developers", locale)],
   ];
-  const isConsumerView = view === "home" || view === "agent" || view === "wallet";
-  const isAgentConsumerView = view === "agent";
+  const isConsumerView = view === "home" || view === "agent" || view === "agent-demo" || view === "wallet";
+  const isAgentConsumerView = view === "agent" || view === "agent-demo";
   const alternateLocale = zh ? "en" : "zh";
   const localeHref = localizedSiteRoute(site, view, alternateLocale, view === "developers" ? undefined : batchId);
   return (
@@ -83,7 +84,7 @@ function SiteHeader({ site, view, locale }: { site: TenantSiteConfig; view: Tena
 
 function SiteStateBar({ site, locale, view, batchId }: { site: TenantSiteConfig; locale: "zh" | "en"; view: TenantView; batchId: string }) {
   const zh = locale === "zh";
-  const consumerView = view === "home" || view === "agent" || view === "wallet";
+  const consumerView = view === "home" || view === "agent" || view === "agent-demo" || view === "wallet";
   return (
     <div className="tenant-site-statebar">
       <span className="tp-demo-ribbon">{site.product.demoMode === "demo/synthetic" ? (zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION") : (zh ? "正式资料" : "PRODUCTION DATA")}</span>
@@ -727,6 +728,10 @@ function TenantDevelopers({ site, locale }: { site: TenantSiteConfig; locale: "z
 }
 
 export function TenantSitePage({ site, view = "home", locale = site.locale.default }: { site: TenantSiteConfig; view?: TenantView; locale?: "zh" | "en" }) {
+  if (view === "agent-demo") {
+    return <AgentDemoDashboard site={site} locale={locale} />;
+  }
+
   return (
     <div className={`tenant-site-page ${locale === "zh" ? "tp-lang-zh" : "tp-lang-en"}`}>
       <SiteHeader site={site} view={view} locale={locale} />
