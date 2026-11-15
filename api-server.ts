@@ -161,6 +161,81 @@ type CustomerModelRuntime = {
 
 let lastCustomerModelRuntime: CustomerModelRuntime | null = null;
 
+async function persistCustomerModelRuntime(runtime: CustomerModelRuntime): Promise<void> {
+  if (!persistenceEnabled()) return;
+  try {
+    await getDatabasePool().query(`
+      create table if not exists truthpass_customer_model_runtime (
+        runtime_id text primary key,
+        provider text not null,
+        model text not null,
+        status text not null,
+        response_status integer,
+        provider_issue text,
+        occurred_at timestamptz not null
+      );
+      create index if not exists truthpass_customer_model_runtime_time_idx
+        on truthpass_customer_model_runtime (occurred_at desc);
+    `);
+    await getDatabasePool().query(
+      `insert into truthpass_customer_model_runtime
+        (runtime_id, provider, model, status, response_status, provider_issue, occurred_at)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (runtime_id) do nothing`,
+      [
+        `model-runtime:${runtime.at}:${runtime.provider}:${runtime.model}`,
+        runtime.provider,
+        runtime.model,
+        runtime.status,
+        runtime.responseStatus ?? null,
+        runtime.providerIssue ?? null,
+        runtime.at,
+      ],
+    );
+  } catch {
+    // Runtime reporting must never break the model response path.
+  }
+}
+
+async function loadPersistedCustomerModelRuntime(): Promise<CustomerModelRuntime | null> {
+  if (!persistenceEnabled()) return null;
+  try {
+    await getDatabasePool().query(`
+      create table if not exists truthpass_customer_model_runtime (
+        runtime_id text primary key,
+        provider text not null,
+        model text not null,
+        status text not null,
+        response_status integer,
+        provider_issue text,
+        occurred_at timestamptz not null
+      );
+      create index if not exists truthpass_customer_model_runtime_time_idx
+        on truthpass_customer_model_runtime (occurred_at desc);
+    `);
+    const result = await getDatabasePool().query(
+      `select provider, model, status, response_status, provider_issue, occurred_at
+         from truthpass_customer_model_runtime
+        order by occurred_at desc
+        limit 1`,
+    );
+    const row = result.rows?.[0] as Record<string, unknown> | undefined;
+    if (!row || typeof row.provider !== "string" || typeof row.model !== "string" || typeof row.status !== "string" || typeof row.occurred_at !== "string") {
+      return null;
+    }
+    return {
+      provider: row.provider,
+      model: row.model,
+      status: row.status as CustomerModelRuntimeStatus,
+      responseStatus: typeof row.response_status === "number" ? row.response_status : undefined,
+      providerIssue: typeof row.provider_issue === "string" ? row.provider_issue as CustomerModelRuntime["providerIssue"] : undefined,
+      at: row.occurred_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
 type ConsumerAgentScope = "purchases.read" | "updates.read" | "guidance.read" | "agent.query" | "feedback.prepare";
 type ConsumerAgentGrant = {
   grantId: string;
@@ -2510,13 +2585,15 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
       lastCustomerModelDiagnostic = null;
       providerResponseStatus = res.status;
       runtimeStatus = "completed";
-      lastCustomerModelRuntime = {
+      const runtime: CustomerModelRuntime = {
         provider: candidate.provider,
         model: candidate.model,
         status: runtimeStatus,
         responseStatus: providerResponseStatus,
         at: new Date().toISOString(),
       };
+      lastCustomerModelRuntime = runtime;
+      void persistCustomerModelRuntime(runtime);
       return {
         lines: [{ cls: "plain", text: safety.text }],
         status: "model_assisted",
@@ -2539,7 +2616,7 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     }
   }
 
-  lastCustomerModelRuntime = {
+  const runtime: CustomerModelRuntime = {
     provider: provider.provider,
     model: provider.model,
     status: runtimeStatus,
@@ -2547,6 +2624,8 @@ async function callCustomerModel(systemPrompt: string, userPrompt: string, sourc
     providerIssue,
     at: new Date().toISOString(),
   };
+  lastCustomerModelRuntime = runtime;
+  void persistCustomerModelRuntime(runtime);
   return {
     lines: [],
     status: providerIssue === "rate_limited" ? "rate_limited" : "provider_unavailable",
@@ -4188,6 +4267,8 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/agent/status" && req.method === "GET") {
     const configuredProvider = resolveAgentProvider();
+    const persistedRuntime = await loadPersistedCustomerModelRuntime();
+    const runtime = lastCustomerModelRuntime ?? persistedRuntime;
     const jevProviderConfig = providerFromEnv();
     sendJson(res, 200, {
       schemaVersion: "truthpass.agent.status.v1",
@@ -4206,15 +4287,15 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       jevProvider: jevProviderConfig.source,
       jevModel: jevProviderConfig.source === "deepseek" ? (process.env.DEEPSEEK_MODEL ?? "deepseek-chat") : jevProviderConfig.source === "jev" ? (process.env.JEV_MODEL ?? "jev") : null,
       jevFallbackReason: jevProviderConfig.reason ?? null,
-      lastSuccessfulProvider: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.provider : null,
-      lastSuccessfulModel: lastCustomerModelRuntime?.status === "completed" ? lastCustomerModelRuntime.model : null,
-      lastModelRuntimeStatus: lastCustomerModelRuntime?.status ?? null,
-      lastProviderResponseStatus: lastCustomerModelRuntime?.responseStatus ?? null,
-      lastProviderIssue: lastCustomerModelRuntime?.providerIssue ?? null,
+      lastSuccessfulProvider: runtime?.status === "completed" ? runtime.provider : null,
+      lastSuccessfulModel: runtime?.status === "completed" ? runtime.model : null,
+      lastModelRuntimeStatus: runtime?.status ?? null,
+      lastProviderResponseStatus: runtime?.responseStatus ?? null,
+      lastProviderIssue: runtime?.providerIssue ?? null,
       configured: configuredProvider.configured,
-      lastRequestVerified: lastCustomerModelRuntime?.status === "completed",
-      lastRequestFallback: Boolean(lastCustomerModelRuntime && lastCustomerModelRuntime.status !== "completed"),
-      runtimeStatus: lastCustomerModelRuntime?.status ?? "runtime_unknown",
+      lastRequestVerified: runtime?.status === "completed",
+      lastRequestFallback: Boolean(runtime && runtime.status !== "completed"),
+      runtimeStatus: runtime?.status ?? "runtime_unknown",
       dataMode: "demo/synthetic",
       fallbackAvailable: true,
       chatEndpoint: "/api/agent/chat",
