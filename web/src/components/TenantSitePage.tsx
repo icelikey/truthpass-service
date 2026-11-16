@@ -584,7 +584,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }, [appendFlowEvent, batchId, locale, site.product.demoMode]);
   return (
     <main className="tenant-site-main tenant-agent-main">
-      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "先看记录，再决定" : "READ THE RECORD FIRST"}</p><h1>{zh ? "买之前，先看这批货。" : "See the batch before you buy."}</h1><p>{zh ? `把包装上的批次号给我，我去找生产、检测、运输和保存记录。查到什么直说，缺什么也直说。` : `Give me the batch number. I will find production, testing, delivery, and storage records, then tell you what is supported and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "先看记录，再决定" : "READ THE RECORD FIRST"}</p><h1>{zh ? "这件货，谁做的？怎么检的？路上有没有断记录？" : "Who made it? How was it tested? Did the record break on the way?"}</h1><p>{zh ? `把包装上的批次号给我，我去找生产、检测、运输和保存记录。查到什么直说，缺什么也直说。` : `Give me the batch number. I will find production, testing, delivery, and storage records, then tell you what is supported and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
         <div className="tenant-panel-head"><strong>{zh ? "我来查这批货" : "I check this batch"}</strong><span>{batchId}</span></div>
         <p className="tenant-agent-prompt-hint">{zh ? "你可以直接问：这鱼油从哪儿来、检测单怎么看、运输中有没有断记录，或者还缺哪份证明。" : "Ask where it came from, how to read the testing, whether delivery records have gaps, or which proof is missing."}</p>
