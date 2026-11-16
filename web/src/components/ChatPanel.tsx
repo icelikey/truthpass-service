@@ -20,20 +20,20 @@ const FISH_OIL_BATCHES = [
 ];
 
 const QUICK_PROMPTS = [
-  { label: "这批是什么？", q: "这批是什么？" },
-  { label: "检测结果怎么看？", q: "检测结果怎么看？" },
-  { label: "运输有没有问题？", q: "运输有没有问题？" },
-  { label: "还缺什么资料？", q: "还缺什么资料？" },
-  { label: "现在能不能继续了解？", q: "现在能不能继续了解？" },
-  { label: "链上有没有记录？", q: "查看这批商品的链上状态" },
+  { label: "这批鱼油从哪儿来？", q: "这批鱼油从哪儿来？" },
+  { label: "检测单上的数值怎么看？", q: "检测单上的数值怎么看？" },
+  { label: "运输中有没有断记录？", q: "运输中有没有断记录？" },
+  { label: "还缺哪份证明？", q: "还缺哪份证明？" },
+  { label: "我还该问商家什么？", q: "我还该问商家什么？" },
+  { label: "这份记录后来怎么留存？", q: "查看这批货的链上状态" },
 ];
 const EN_QUICK_PROMPTS = [
-  { label: "What is this batch?", q: "What is this batch?" },
-  { label: "How do I read the test results?", q: "How do I read the test results?" },
-  { label: "Any delivery issues?", q: "Are there any delivery issues?" },
-  { label: "What evidence is missing?", q: "What evidence is still missing?" },
-  { label: "Can I continue?", q: "Can I continue learning about this batch?" },
-  { label: "Is there a chain record?", q: "Check the chain status for this batch" },
+  { label: "Where did this batch come from?", q: "Where did this batch come from?" },
+  { label: "How should I read the test numbers?", q: "How should I read the test numbers?" },
+  { label: "Was there a gap in delivery records?", q: "Are there any delivery issues?" },
+  { label: "Which proof is still missing?", q: "What evidence is still missing?" },
+  { label: "What should I ask the seller?", q: "Can I continue learning about this batch?" },
+  { label: "How is this record kept?", q: "Check the chain status for this batch" },
 ];
 const RICE_BATCHES = [
   { id: "RC-2026-001", name: "北境稻作 · 五常米" },
@@ -269,7 +269,7 @@ function MessageView({
   const statusMeta = serviceStatusMeta(serviceStatus);
   const agentLabel = en
     ? (agentMode === "model_assisted" ? "Model-assisted" : agentMode === "deterministic_fallback" ? "Evidence fallback" : "Product Agent")
-    : (agentMode === "model_assisted" ? "已按资料说明" : agentMode === "deterministic_fallback" ? "按登记资料回答" : "商品查询");
+    : (agentMode === "model_assisted" ? "已按资料说明" : agentMode === "deterministic_fallback" ? "按登记资料回答" : "这批货");
   const isLoading = !message.done && message.lines.length === 0;
   const showHandoff = !minimal && (
     serviceStatus === "provider_unavailable" ||
@@ -849,10 +849,10 @@ export function ChatPanel({
           <img src="/assets/brand-mark.png" alt="" />
         </div>
         <div className="chat-head-text">
-          <strong>{en ? "TruthPass Product Check" : "这批商品"}</strong>
+          <strong>{en ? "I check this batch" : "我来查这批货"}</strong>
           <small>
             <span className={`status-dot ${!minimal && (runtimeStatus === "provider_unavailable" || runtimeStatus === "rate_limited") ? "offline" : ""}`} title={minimal ? displayRuntimeLabel : runtimeLabel} />
-            {displayRuntimeLabel} · {en ? "shows records and gaps" : "记录和缺口都会说清楚"}
+            {displayRuntimeLabel} · {en ? "I show what was found and what is missing" : "查到什么直说，缺什么也直说"}
           </small>
         </div>
       </div>
@@ -861,12 +861,12 @@ export function ChatPanel({
         <div className="msg agent chat-welcome">
           {!minimal && <div className="chat-meta" aria-label={en ? "Welcome message metadata" : "欢迎语元信息"}>
             <span className="status-pill demo">{en ? "Demo data" : "演示资料"}</span>
-            <span className="status-pill pending">{en ? "Product check" : "商品查询"}</span>
+            <span className="status-pill pending">{en ? "This batch" : "这批货"}</span>
           </div>}
           <div className="msg-bubble">
             {minimal ? <>
-              <p className="chat-welcome-copy">{en ? `Ask me about ${productLabel ?? "this product"}: testing, cold chain, production records, or missing evidence.` : `先查登记资料，再把有记录和缺口讲清楚。`}</p>
-              <p className="chat-welcome-note">{en ? "You do not need a special command. Choose a question below or type it in your own words." : "不用学怎么问，点下面的问题，也可以直接说你想知道的。"}</p>
+              <p className="chat-welcome-copy">{en ? `Give me the batch or ask about its source, testing, delivery, or missing records.` : `把批次号给我，我先去找这批货的记录。先看来源，再看检测和运输，最后告诉你还缺谁的记录。`}</p>
+              <p className="chat-welcome-note">{en ? "Choose a question below or ask in your own words." : "不用记命令，点下面的问题，或者直接说你最想知道的。"}</p>
               <p className="chat-welcome-note">{en ? "This demo uses synthetic records and is not product certification." : "当前使用演示资料，不能替代真实商品认证。"}</p>
             </> : <div className="agent-structured-answer" aria-label={en ? "Answer structure" : "回答结构"}>
               <section className="agent-answer-section agent-answer-结论"><strong>{en ? "Conclusion" : "先说结论"}</strong><p>{en ? "I will check this batch record before you decide." : "我先查这批货的登记资料，再把结论讲明白。"}</p></section>
@@ -893,7 +893,7 @@ export function ChatPanel({
 
       <div className={`chat-quick ${minimal ? "chat-quick-minimal" : ""}`}>
         {!minimal && <div className="quick-group">
-          <span className="chat-quick-label">{en ? "Batch:" : "批次查询："}</span>
+          <span className="chat-quick-label">{en ? "Start with:" : "你想先查："}</span>
           <div className="batch-select">
             <button
               className="batch-trigger"
@@ -927,7 +927,7 @@ export function ChatPanel({
         </div>}
         {batchId && (
           <div className="quick-group">
-            <span className="chat-quick-label">{en ? "You can ask:" : "你可以这样问："}</span>
+            <span className="chat-quick-label">{en ? "You can also ask:" : "你也可以直接问："}</span>
             {(en ? EN_QUICK_PROMPTS : QUICK_PROMPTS).slice(0, minimal ? 4 : undefined).map((prompt) => (
               <button
                 key={prompt.label}

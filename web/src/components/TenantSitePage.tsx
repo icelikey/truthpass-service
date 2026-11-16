@@ -181,7 +181,7 @@ function TenantHome({ site, locale }: { site: TenantSiteConfig; locale: "zh" | "
         </div>
         <form className="tenant-batch-card" onSubmit={(event) => { event.preventDefault(); openBatch(batch); }}>
           <span className="tp-kicker">{zh ? "查一批商品" : "INSPECT A BATCH"}</span>
-          <h2>{zh ? "把货查清楚，再把钱花明白。" : "Check first. Buy next."}</h2>
+          <h2>{zh ? "这件货，谁做的？怎么检的？路上有没有断记录？" : "Check first. Buy next."}</h2>
           <label htmlFor="tenant-batch">{zh ? "批次号" : "Batch ID"}</label>
           <div><input id="tenant-batch" value={batch} onChange={(event) => setBatch(event.target.value.toUpperCase())} /><button className="tp-red-btn" type="submit">{zh ? "查询" : "Inspect"}</button></div>
           <small>{zh ? "先看看这批货有没有记录，再决定要不要继续了解。" : "See what this batch records before you decide what to do next."}</small>
@@ -584,10 +584,10 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
   }, [appendFlowEvent, batchId, locale, site.product.demoMode]);
   return (
     <main className="tenant-site-main tenant-agent-main">
-      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "让每一步都清晰可见" : "MAKE EVERY STEP CLEAR"}</p><h1>{zh ? "把货查清楚，再把钱花明白。" : "Check the goods. Spend with clarity."}</h1><p>{zh ? `你扫码，我来查。先看登记记录，再看检测、运输和保存；有依据就讲依据，缺资料就讲缺口。` : `Scan the batch and check the record. See production, testing, delivery, storage, what is supported, and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
+      <section className="tenant-section-heading tenant-agent-heading"><div><p className="tp-kicker">{zh ? "先看记录，再决定" : "READ THE RECORD FIRST"}</p><h1>{zh ? "买之前，先看这批货。" : "See the batch before you buy."}</h1><p>{zh ? `把包装上的批次号给我，我去找生产、检测、运输和保存记录。查到什么直说，缺什么也直说。` : `Give me the batch number. I will find production, testing, delivery, and storage records, then tell you what is supported and what is missing.`}</p></div><span className="tp-demo-ribbon">{agentRibbon}</span></section>
       <section className="tenant-agent-single tenant-panel">
-        <div className="tenant-panel-head"><strong>{zh ? "查这一批鱼油" : "Ask about this batch"}</strong><span>{batchId}</span></div>
-        <p className="tenant-agent-prompt-hint">{zh ? "直接问就行：检测、运输、保存，或者还缺什么。" : "Ask about testing, transport, storage, or what is still missing."}</p>
+        <div className="tenant-panel-head"><strong>{zh ? "我来查这批货" : "I check this batch"}</strong><span>{batchId}</span></div>
+        <p className="tenant-agent-prompt-hint">{zh ? "你可以直接问：这鱼油从哪儿来、检测单怎么看、运输中有没有断记录，或者还缺哪份证明。" : "Ask where it came from, how to read the testing, whether delivery records have gaps, or which proof is missing."}</p>
         <ChatPanel
           onStart={() => { setVerifyState("running"); setStage("searching"); }}
           onDone={() => { setVerifyState("done"); setStage("evidence_review"); }}
@@ -626,7 +626,7 @@ function TenantAgent({ site, locale }: { site: TenantSiteConfig; locale: "zh" | 
           productLabel={site.product.name}
           minimal
         />
-        <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起回答依据" : "Hide answer basis") : (zh ? "看这批的记录" : "See answer basis")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "需要时再展开来源、状态和更新记录" : "Open sources and status only when needed")}</span></div>
+        <div className="tenant-agent-actions"><button type="button" className="tp-paper-btn" onClick={() => setShowContext((value) => !value)}>{showContext ? (zh ? "收起回答依据" : "Hide answer basis") : (zh ? "看我查到的依据" : "See answer basis")} →</button><span>{stage === "receipt_verified" ? (zh ? "购买回执已核验" : "Receipt verified") : (zh ? "想看来源、状态和更新记录时再展开" : "Open sources and status only when needed")}</span></div>
         <section className="tenant-agent-access" aria-label={zh ? "我的商品提醒" : "My product watch list"}>
           <div className="tenant-panel-head"><div><strong>{zh ? "我的商品" : "My products"}</strong><small>{zh ? "让它持续盯住你授权的商品批次" : "Keep authorized product batches under watch"}</small><small className="tenant-agent-account-state">{user ? user.email : (!authConfigured && !authLoading ? (zh ? "账号服务尚未接入" : "Account service not configured") : (zh ? "登录后可授权" : "Sign in to authorize"))}</small></div><button type="button" className="tp-paper-btn" onClick={() => setGrantOpen((value) => !value)}>{grantOpen ? (zh ? "收起" : "Hide") : (zh ? "管理我的批次" : "Manage watch list")}</button></div>
           {grantOpen && <div className="tenant-agent-access-body">

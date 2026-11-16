@@ -303,7 +303,7 @@ function PlatformBatchLookup({ zh }: { zh: boolean }) {
   };
   return (
     <form className="tp-platform-lookup" onSubmit={submit}>
-      <label htmlFor={zh ? "platform-batch-zh" : "platform-batch-en"}>{zh ? "输入批次号，先看一份商品记录" : "Enter a batch ID and read the record first"}</label>
+      <label htmlFor={zh ? "platform-batch-zh" : "platform-batch-en"}>{zh ? "有批次号？从这里查" : "Have a batch ID? Start here"}</label>
       <div className="tp-platform-lookup-row">
         <span className="tp-platform-search-icon" aria-hidden="true">⌕</span>
         <input
@@ -313,7 +313,7 @@ function PlatformBatchLookup({ zh }: { zh: boolean }) {
           placeholder={zh ? "例如 FO-2026-001 或 RC-2026-001" : "For example FO-2026-001 or RC-2026-001"}
           autoComplete="off"
         />
-        <button className="tp-red-btn" type="submit">{zh ? "查这一批" : "Check this batch"} <span aria-hidden="true">→</span></button>
+        <button className="tp-red-btn" type="submit">{zh ? "看这批货" : "See this batch"} <span aria-hidden="true">→</span></button>
       </div>
       <small className={error ? "has-error" : ""}>{error || (zh ? "有依据就讲依据，缺资料就讲缺口。" : "We show the evidence and say what is missing.")}</small>
     </form>
@@ -342,11 +342,11 @@ function PlatformHome({ route }: { route: "zh-home" | "en-home" }) {
       <main className="tp-platform-home">
         <section className="tp-platform-hero">
           <div className="tp-platform-hero-copy">
-            <p className="tp-kicker">{zh ? "商品记录和验证服务" : "PRODUCT RECORDS AND VERIFICATION"}</p>
+            <p className="tp-kicker">{zh ? "买之前，先查一批" : "CHECK BEFORE YOU BUY"}</p>
             <span className="tp-demo-ribbon">{zh ? "演示资料 · 不能替代真实商品认证" : "DEMO / SYNTHETIC · NOT CERTIFICATION"}</span>
             <h1>{zh ? <>把货查清楚，<br /><span>再把钱花明白。</span></> : <>Check the goods.<br /><span>Spend with clarity.</span></>}</h1>
-            <p className="tp-platform-lead">{zh ? "你扫码，我来查。生产、检测、运输和使用提醒，一项项讲明白。" : "You scan, I check. Production, testing, delivery, and usage notes, explained clearly."}</p>
-            <p className="tp-platform-capability">{zh ? "不看空话，先看记录。" : "No slogans first. Read the record."}</p>
+            <p className="tp-platform-lead">{zh ? "扫一下包装，或者把批次号给我。我去找生产、检测、运输和保存记录，查到什么就告诉你。" : "Scan the package or enter the batch. I will find the production, testing, delivery, and storage records and tell you what is there."}</p>
+            <p className="tp-platform-capability">{zh ? "不用看懂术语，问一句就行。" : "No jargon to learn. Just ask."}</p>
             <PlatformBatchLookup zh={zh} />
             <div className="tp-platform-actions">
               <a className="tp-paper-btn" href={zh ? "/merchant" : "/en/merchant"}>{zh ? "为企业建设信任能力" : "Build trust capability for your business"} <span aria-hidden="true">→</span></a>

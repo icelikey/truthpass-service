@@ -72,8 +72,8 @@ function EvidenceMetricGrid({ product, overview, lifecycle, zh }: { product: Pro
     { icon: "✣", label: zh ? "冷链异常（运输与存储）" : "Cold-chain status", value: coldChain ? (coldChain.status === "verified" || coldChain.status === "synced" ? (zh ? "未发现异常" : "No anomaly found") : coldChain.status) : (zh ? "未登记" : "Not registered"), rule: coldChain?.detail ?? (zh ? "暂无冷链记录" : "No cold-chain record"), status: coldChain?.status === "verified" || coldChain?.status === "synced" ? "pass" : "missing", source: coldChain ? (zh ? "冷链生命周期记录" : "Cold-chain lifecycle") : (zh ? "未找到证据" : "No evidence") },
     { icon: "□", label: missing?.label ?? (zh ? "缺失资料" : "Missing evidence"), value: missing ? (zh ? "缺失" : "Missing") : (zh ? "暂无明确缺口" : "No explicit gap"), rule: safeText(missing?.rule, zh ? "查询后由 Verifier 返回" : "Returned by Verifier"), status: missing ? "missing" : "pass", source: missing ? (zh ? "Verifier 缺口" : "Verifier gap") : (zh ? "批次核验结果" : "Batch verification") },
   ];
-  return <section className="agent-demo-evidence-grid" aria-label={zh ? "这批证据一览" : "Evidence overview"}>
-    <div className="agent-demo-section-title"><div><span className="agent-demo-kicker">{zh ? "证据一览" : "EVIDENCE OVERVIEW"}</span><h2>{zh ? "这批货的记录和缺口" : "Records and gaps for this batch"}</h2></div><span>{zh ? "数据来自当前批次 API" : "Current-batch API"}</span></div>
+  return <section className="agent-demo-evidence-grid" aria-label={zh ? "这批我找到的记录" : "Evidence overview"}>
+    <div className="agent-demo-section-title"><div><span className="agent-demo-kicker">{zh ? "我找到的记录" : "RECORDS FOUND"}</span><h2>{zh ? "这批货查到了什么" : "What I found for this batch"}</h2></div><span>{zh ? "来自这批货的实时查询" : "Live batch lookup"}</span></div>
     <div className="agent-demo-metric-grid">{cards.map((card) => <article className={`agent-demo-metric-card ${card.status}`} key={card.label}><div className="agent-demo-metric-head"><span className="agent-demo-metric-icon">{card.icon}</span><strong>{card.label}</strong></div><b>{card.value}</b><small>{card.rule}</small><div className="agent-demo-metric-meta"><span>{card.source}</span><em>{card.status === "pass" ? (zh ? "已登记" : "Registered") : (zh ? "需补充" : "Needs evidence")}</em></div></article>)}</div>
   </section>;
 }
@@ -82,8 +82,8 @@ function OnChainRecordCard({ chain, batchId, zh }: { chain: ChainStatusData | nu
   const history = (chain?.verifiedTransactions ?? []).filter((item) => item.batchId === batchId);
   const session = (chain?.sessionTransactions ?? []).filter((item) => item.batchId === batchId);
   const state = chain?.businessStatus ?? chain?.deploymentStatus ?? "anchor_pending";
-  return <aside className="agent-demo-chain-card" aria-label={zh ? "链上记录" : "On-chain record"}>
-    <div className="agent-demo-card-title"><span>↗</span><h2>{zh ? "链上记录" : "ON-CHAIN RECORD"}</h2></div>
+  return <aside className="agent-demo-chain-card" aria-label={zh ? "记录如何留存" : "On-chain record"}>
+    <div className="agent-demo-card-title"><span>↗</span><h2>{zh ? "记录如何留存" : "HOW THE RECORD IS KEPT"}</h2></div>
     <div className="agent-demo-chain-badge"><strong>Chain {chain?.chainId ?? 677}</strong><span>{state}</span></div>
     <div className="agent-demo-chain-summary"><div><span>{zh ? "网络" : "Network"}</span><b>{chain?.chainName ?? "BOT Chain"}</b></div><div><span>{zh ? "RPC" : "RPC"}</span><b className={chain?.liveRpc.reachable ? "ok" : "warn"}>{chain?.liveRpc.reachable ? (zh ? "可达" : "Reachable") : (zh ? "不可达" : "Unavailable")}</b></div><div><span>{zh ? "历史事件" : "History"}</span><b>{history.length}</b></div><div><span>{zh ? "当前会话 receipt" : "Current receipt"}</span><b>{session.length > 0 ? session.length : (zh ? "无" : "None")}</b></div></div>
     <div className="agent-demo-chain-events">{history.length ? history.slice(0, 4).map((item) => <a href={item.explorerUrl ?? chain?.explorerUrl} target="_blank" rel="noreferrer" key={`${item.event}-${item.txHash}`}><span><strong>{item.label ?? item.event}</strong><small>block {item.blockNumber} · {zh ? "历史回放" : "historical replay"}</small></span><code>{item.txHash.slice(0, 10)}…</code></a>) : <p>{zh ? "当前批次暂无历史事件。" : "No history for this batch."}</p>}</div>
@@ -92,8 +92,8 @@ function OnChainRecordCard({ chain, batchId, zh }: { chain: ChainStatusData | nu
 }
 
 function BatchProcessMap({ lifecycle, busy, answered, zh }: { lifecycle: LifecycleView | null; busy: boolean; answered: boolean; zh: boolean }) {
-  return <section className="agent-demo-process-card" aria-label={zh ? "批次核查流程" : "Batch inspection flow"}>
-    <div className="agent-demo-card-title"><span>▱</span><div><h2>{zh ? "批次核查流程" : "BATCH INSPECTION FLOW"}</h2><small>{busy ? (zh ? "Agent 运行中" : "Agent running") : (zh ? "按当前批次资料更新" : "Updated from this batch")}</small></div></div>
+  return <section className="agent-demo-process-card" aria-label={zh ? "这批货经过哪些环节" : "Batch inspection flow"}>
+    <div className="agent-demo-card-title"><span>▱</span><div><h2>{zh ? "这批货经过哪些环节" : "BATCH JOURNEY"}</h2><small>{busy ? (zh ? "正在查这批货" : "Agent running") : (zh ? "按这批货的记录更新" : "Updated from this batch")}</small></div></div>
     <div className="agent-demo-process-track">{lifecycleNodes.map((node) => { const event = lifecycle?.events.find((item) => item.stage === node.stage); const isQuery = node.stage === "consumer_query"; const status = isQuery ? (busy ? "active" : answered ? "completed" : "pending") : event?.status ?? "pending"; return <div className={`agent-demo-process-node ${status}`} key={node.stage}><span>{node.icon}</span><strong>{zh ? node.zh : node.en}</strong><small>{isQuery ? (zh ? "扫描 / 批次查询" : "Scan / batch query") : (event?.detail ?? (zh ? "等待资料" : "Waiting for record"))}</small></div>; })}</div>
   </section>;
 }
@@ -105,7 +105,7 @@ function SearchSteps({ events, zh }: { events: ChatEvent[]; zh: boolean }) {
   const hasAnswer = Boolean(answerEvent);
   const hasFallback = events.some((event) => Boolean(event.providerIssue) || event.runtimeStatus === "fallback" || event.runtimeStatus === "billing_required" || event.runtimeStatus === "unauthorized" || event.runtimeStatus === "rate_limited" || event.runtimeStatus === "invalid_response");
   const latestIndex = searchSteps.reduce((index, step, stepIndex) => latest.has(step.key) ? stepIndex : index, -1);
-  return <section className="agent-demo-search-card"><div className="agent-demo-card-title"><span>⌁</span><div><h2>{zh ? "Agent 查找步骤" : "AGENT SEARCH STEPS"}</h2><small>{zh ? "每一步都有来源" : "Every step has a source"}</small></div></div><div className="agent-demo-search-list">{searchSteps.map((step, index) => {
+  return <section className="agent-demo-search-card"><div className="agent-demo-card-title"><span>⌁</span><div><h2>{zh ? "我正在查什么" : "WHAT I AM CHECKING"}</h2><small>{zh ? "先找记录，再把结果讲明白" : "Every step has a source"}</small></div></div><div className="agent-demo-search-list">{searchSteps.map((step, index) => {
     const event = latest.get(step.key);
     const finalStep = step.key === "model_completed";
     const raw = finalStep && hasAnswer ? (hasFallback ? "fallback" : "completed") : event ? statusFromChat(event) : "pending";
@@ -160,19 +160,19 @@ export function AgentDemoDashboard({ site, locale = "zh" }: { site: TenantSiteCo
     } finally { setRunningDemo(false); }
   }, [batchId, refreshData, runningDemo, site.product.demoMode]);
 
-  const agentStatus = meta?.modelAssisted ? (zh ? "模型已参与" : "Model assisted") : meta?.providerIssue ? (zh ? "资料安全回退" : "Evidence fallback") : (zh ? "确定性核对" : "Deterministic check");
+  const agentStatus = meta?.modelAssisted ? (zh ? "已经按记录回答" : "Answered from records") : meta?.providerIssue ? (zh ? "记录可以查，先按登记资料回答" : "Records available; using registered data") : (zh ? "只按登记资料回答" : "Registered data only");
   const headerBatch = overview?.batchId ?? batchId;
   const contextSummary = useMemo(() => `${site.product.name} · ${headerBatch}`, [headerBatch, site.product.name]);
 
   return <div className="agent-demo-dashboard">
-    <header className="agent-demo-header"><a className="agent-demo-brand" href="/"><span>◆</span><strong>TruthPass</strong><small>· Agent 演示台</small></a><span className="agent-demo-ribbon">{site.product.demoMode === "demo/synthetic" ? (zh ? "演示资料" : "DEMO DATA") : (zh ? "正式资料" : "PRODUCTION")}</span><nav><a href={zh ? "/product" : "/en/product"}>{zh ? "使用说明" : "Guide"}</a><a href={zh ? "/" : "/en"}>{zh ? "关于 TruthPass" : "About"}</a></nav></header>
-    <section className="agent-demo-hero"><div><span className="agent-demo-kicker">{zh ? "把货查清楚，再把钱花明白。" : "CHECK THE GOODS. SPEND WITH CLARITY."}</span><h1>{zh ? "让每一步都清晰可见" : "Make every step clear"}</h1><p>{contextSummary} · {zh ? "Agent 读取登记资料，讲清楚依据、缺口和下一步。" : "The Agent reads registered records and explains evidence, gaps, and the next step."}</p></div><button type="button" onClick={() => void runDemo()} disabled={runningDemo}>{runningDemo ? (zh ? "资料更新中…" : "Updating…") : (zh ? "运行一次完整核查" : "Run full inspection")}</button></section>
+    <header className="agent-demo-header"><a className="agent-demo-brand" href="/"><span>◆</span><strong>TruthPass</strong><small>· 查货助手</small></a><span className="agent-demo-ribbon">{site.product.demoMode === "demo/synthetic" ? (zh ? "公开体验" : "PUBLIC DEMO") : (zh ? "正式资料" : "PRODUCTION")}</span><nav><a href={zh ? "/product" : "/en/product"}>{zh ? "使用说明" : "Guide"}</a><a href={zh ? "/" : "/en"}>{zh ? "关于 TruthPass" : "About"}</a></nav></header>
+    <section className="agent-demo-hero"><div><span className="agent-demo-kicker">{zh ? "先看记录，再决定。" : "READ THE RECORD FIRST."}</span><h1>{zh ? "买之前，先看这批货。" : "See the batch before you buy."}</h1><p>{contextSummary} · {zh ? "你不用学怎么问。把包装上的批次号给我，或者直接问一句；我去找生产、检测、运输和保存记录，查到什么就告诉你。" : "Give me the batch number or ask a question. I will find the production, testing, delivery, and storage records and tell you what is there."}</p><div className="agent-demo-hero-actions"><button type="button" className="agent-demo-primary-action" onClick={() => document.getElementById("agent")?.scrollIntoView({ behavior: "smooth", block: "center" })}>{zh ? "直接问我" : "Ask me"} <span aria-hidden="true">→</span></button><button type="button" className="agent-demo-secondary-action" onClick={() => void runDemo()} disabled={runningDemo}>{runningDemo ? (zh ? "记录更新中…" : "Updating…") : (zh ? "看一遍完整流程" : "See the full flow")}</button></div><small className="agent-demo-hero-note">{zh ? "不用记命令，问一句就行。" : "No command to learn. Just ask."}</small></div></section>
     <main className="agent-demo-main">
-      <section className="agent-demo-conversation-card"><div className="agent-demo-card-title"><span>◌</span><div><h2>{zh ? "Agent 对话" : "AGENT CHAT"}</h2><small>{agentStatus} · {zh ? "只解释已登记资料" : "Registered records only"}</small></div></div><ChatPanel onStart={() => { setBusy(true); setVerifyState("running"); setEvents([]); setAnswered(false); autoRun.current = false; }} onDone={() => { setBusy(false); setVerifyState("done"); setAnswered(true); void refreshData(); }} onMeta={(value) => setMeta(value as ChatEvent | undefined)} onFlowEvent={handleFlowEvent} onBatch={() => undefined} batchId={batchId} autoQueryBatch={autoRun.current ? batchId : null} locale={locale} productLabel={site.product.name} minimal /></section>
+      <section className="agent-demo-conversation-card"><div className="agent-demo-card-title"><span>◌</span><div><h2>{zh ? "这批货的 Agent" : "YOUR PRODUCT AGENT"}</h2><small>{agentStatus} · {zh ? "只根据查到的记录说话" : "Registered records only"}</small></div></div><ChatPanel onStart={() => { setBusy(true); setVerifyState("running"); setEvents([]); setAnswered(false); autoRun.current = false; }} onDone={() => { setBusy(false); setVerifyState("done"); setAnswered(true); void refreshData(); }} onMeta={(value) => setMeta(value as ChatEvent | undefined)} onFlowEvent={handleFlowEvent} onBatch={() => undefined} batchId={batchId} autoQueryBatch={autoRun.current ? batchId : null} locale={locale} productLabel={site.product.name} minimal /></section>
       <div className="agent-demo-center"><BatchProcessMap lifecycle={lifecycle} busy={busy} answered={answered} zh={zh} /><SearchSteps events={events} zh={zh} /></div>
       <OnChainRecordCard chain={chain} batchId={batchId} zh={zh} />
     </main>
     <EvidenceMetricGrid product={product} overview={overview} lifecycle={lifecycle} zh={zh} />
-    <footer className="agent-demo-footer"><span>{zh ? "数据模式" : "Data mode"}：{overview?.dataMode ?? site.product.demoMode}</span><span>{zh ? "区块链保存摘要和责任事件；它不替商品做质量承诺。" : "The chain stores summaries and responsibility events; it does not promise product quality."}</span><span>{verifyState === "done" ? (zh ? "本次查询已返回" : "Query returned") : (zh ? "等待查询" : "Waiting")}</span></footer>
+    <footer className="agent-demo-footer"><span>{zh ? "资料来源" : "Source"}：{overview?.dataMode ?? site.product.demoMode}</span><span>{zh ? "区块链保存摘要和责任事件；它不替商品做质量承诺。" : "The chain stores summaries and responsibility events; it does not promise product quality."}</span><span>{verifyState === "done" ? (zh ? "本次查询已返回" : "Query returned") : (zh ? "等待查询" : "Waiting")}</span></footer>
   </div>;
 }
