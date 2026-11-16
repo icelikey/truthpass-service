@@ -79,6 +79,7 @@ import {
   buildCfiManifest,
   createDefaultProductPolicyRegistry,
   publicStandardDocument,
+  FISH_OIL_STANDARD_PACK_V1,
 } from "./src/standards/v1_4.js";
 import { DEFAULT_CLI_REFERENCE_REGISTRY } from "./src/cli-reference/v1.js";
 import { EnterprisePilotStore, type EnterpriseEvidenceEnvelope } from "./src/enterprise/pilot-store.js";
@@ -4553,6 +4554,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         productionImprovementReport: `${origin}/api/tenants/{tenantId}/production-improvement-report?batchId={batchId}`,
         cfiManifest: `${origin}/api/cfi/manifest`,
         publicStandard: `${origin}/api/standards`,
+        fishOilStandard: `${origin}/api/standards/fish-oil`,
       },
       chain: {
         network: BOT_CHAIN_MAINNET.network,
@@ -5192,6 +5194,14 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
 
   if (p === "/api/standards" && req.method === "GET") {
     sendJson(res, 200, publicStandardDocument());
+    return true;
+  }
+
+  if (p === "/api/standards/fish-oil" && req.method === "GET") {
+    sendJson(res, 200, {
+      ...FISH_OIL_STANDARD_PACK_V1,
+      standardHash: sha256Hex32(JSON.stringify(FISH_OIL_STANDARD_PACK_V1)),
+    });
     return true;
   }
 

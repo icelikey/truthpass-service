@@ -84,6 +84,48 @@ export class ProductPolicyRegistry {
   }
 }
 
+export interface IndustryStandardPack {
+  schemaVersion: "truthpass.industry.standard.v1";
+  standardId: string;
+  version: string;
+  domain: ProductCategory;
+  policyRef: string;
+  requiredProductionStages: string[];
+  requiredFields: Array<{
+    key: string;
+    label: string;
+    sourceKinds: string[];
+    required: boolean;
+    unit?: string;
+    verification: string[];
+  }>;
+  decisionStates: ["recommend_with_scope", "review_before_recommendation", "do_not_recommend"];
+  forbiddenClaims: string[];
+}
+
+export const FISH_OIL_STANDARD_PACK_V1: IndustryStandardPack = {
+  schemaVersion: "truthpass.industry.standard.v1",
+  standardId: "fish-oil-standard",
+  version: "v1",
+  domain: "fish-oil",
+  policyRef: "fish-oil-quality@v1",
+  requiredProductionStages: ["原料接收", "精炼", "浓缩", "脱臭", "灌装", "包装", "仓储"],
+  requiredFields: [
+    { key: "batch.identity", label: "批次身份", sourceKinds: ["manufacturer"], required: true, verification: ["tenantId/productId/batchId binding", "occurredAt", "issuerId"] },
+    { key: "material.lot", label: "原料批次", sourceKinds: ["manufacturer", "supplier"], required: true, verification: ["supplier binding", "quantity", "receivedAt"] },
+    { key: "inspection.epa_dha", label: "EPA+DHA", sourceKinds: ["third_party"], required: true, unit: "%", verification: ["sampleId", "method", "issuer signature", "policy range"] },
+    { key: "inspection.peroxide", label: "过氧化值", sourceKinds: ["third_party"], required: true, unit: "meq/kg", verification: ["sampleId", "method", "issuer signature", "policy range"] },
+    { key: "inspection.totox", label: "TOTOX", sourceKinds: ["third_party"], required: true, unit: "指数", verification: ["sampleId", "method", "issuer signature", "policy range"] },
+    { key: "inspection.heavy_metals", label: "重金属", sourceKinds: ["third_party"], required: true, unit: "mg/kg", verification: ["sampleId", "method", "issuer signature", "policy range"] },
+    { key: "cold_chain.window", label: "冷链窗口", sourceKinds: ["iot", "logistics"], required: true, unit: "小时", verification: ["deviceId", "capturedAt", "sequence", "signature"] },
+    { key: "shipment.handoff", label: "物流交接", sourceKinds: ["logistics"], required: true, verification: ["shipmentId", "handoffAt", "batchId binding", "issuer signature"] },
+    { key: "purchase.binding", label: "购买绑定", sourceKinds: ["payment", "wallet"], required: false, verification: ["orderId", "batchId", "payment callback", "receipt when anchored"] },
+    { key: "feedback.authorization", label: "反馈授权", sourceKinds: ["consumer"], required: false, verification: ["purchaseId", "consentScope", "one-time submission"] },
+  ],
+  decisionStates: ["recommend_with_scope", "review_before_recommendation", "do_not_recommend"],
+  forbiddenClaims: ["真实认证", "已证明安全", "治疗", "保证疗效", "替代医生建议", "购买已完成"],
+};
+
 export const PUBLIC_STANDARD = Object.freeze({
   schemaVersion: "truthpass.public-standard.v1" as const,
   standardId: "truthpass-public-standard",

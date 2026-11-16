@@ -37,6 +37,20 @@ test("v1.4 public APIs expose CFI manifest, standard, and honey policy", async (
   });
 });
 
+
+test("fish oil standard endpoint exposes the manufacturer-facing field contract", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(baseUrl + "/api/standards/fish-oil");
+    const body = await response.json() as Record<string, any>;
+    assert.equal(response.status, 200);
+    assert.equal(body.standardId, "fish-oil-standard");
+    assert.equal(body.policyRef, "fish-oil-quality@v1");
+    assert.ok(body.requiredProductionStages.includes("脱臭"));
+    assert.ok(body.requiredFields.some((field: any) => field.key === "inspection.epa_dha"));
+    assert.deepEqual(body.decisionStates, ["recommend_with_scope", "review_before_recommendation", "do_not_recommend"]);
+  });
+});
+
 test("integrated API exposes a grounded CLI explanation endpoint", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/cli/explain?batchId=FO-2026-001`);
