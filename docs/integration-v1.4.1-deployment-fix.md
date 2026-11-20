@@ -41,6 +41,13 @@ Invoke-WebRequest `
   -Body '{"action":"purchase","batchId":"FO-2026-001","wallet":"0x..."}'
 ```
 
+当 Production 启用 `TRUTHPASS_ENFORCE_WALLET_BINDING=true` 时，消费者钱包必须先完成一次签名绑定。先读取
+`GET /api/wallet/bind/challenge?address={address}&tenantId=demo&role=consumer`，由钱包签名返回的 `message`，再将
+`address`、`tenantId`、`role`、`message` 和 `signature` 提交到 `POST /api/wallet/bind`。绑定返回
+`status=bound_verified` 后，再执行上面的 `/api/wallet/prepare`，最后由同一钱包签名、广播并调用
+`POST /api/chain/tx-confirm` 回读 receipt 与业务事件。未完成绑定时，`/api/wallet/prepare` 会返回
+`403 WALLET_ROLE_REQUIRED:consumer`。
+
 ## 安全说明
 
 本次不关闭 Vercel Deployment Protection，也不把 Preview 绕过令牌写入仓库、前端或交付文档。评委和公众应使用 Production 链接；队友调试受保护 Preview 时使用已授权的 Vercel 身份。
