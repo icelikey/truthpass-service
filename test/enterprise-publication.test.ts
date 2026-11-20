@@ -15,7 +15,7 @@ function productionPayload() {
     startedAt: "2026-11-01T08:00:00.000Z",
     endedAt: "2026-11-01T08:30:00.000Z",
     inputs: [],
-    outputs: [],
+    outputs: [{ lotId: "OUTPUT-REAL-001", quantity: 100, unit: "kg" }],
     observations: [],
     deviations: [],
     sourceEvidenceIds: [],
@@ -29,12 +29,17 @@ function evidence(kind: EnterpriseEvidenceEnvelope["kind"], evidenceId: string, 
     brandId: "brand-real",
     productId: "fish-oil",
     batchId: "FO-REAL-001",
+    ...(kind === "inspection" ? { sampleId: "SAMPLE-REAL-001" } : {}),
     evidenceId,
     kind,
     issuerId: kind === "inspection" ? "lab-real" : "issuer-real",
     sourceKind: kind === "inspection" ? "third_party" as const : kind === "cold_chain" ? "platform_device" as const : "manufacturer" as const,
     occurredAt: "2026-11-01T08:00:00.000Z",
-    payload: kind === "production" ? productionPayload() : { batchId: "FO-REAL-001", source: "external" },
+    payload: kind === "production"
+      ? productionPayload()
+      : kind === "shipment"
+        ? { batchId: "FO-REAL-001", source: "external", quantity: 100 }
+        : { batchId: "FO-REAL-001", source: "external" },
     dataMode: "external" as const,
   };
   if (!signed) return base;
@@ -65,6 +70,31 @@ test("publishes only a fully signed external batch and is idempotent", async () 
     if (beforeDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = beforeDatabase;
   }
 });
+
+test("publication blocks a shipment quantity conflict", async () => {
+  const beforeBackend = process.env.DATA_BACKEND;
+  const beforeDatabase = process.env.DATABASE_URL;
+  process.env.DATA_BACKEND = "memory";
+  delete process.env.DATABASE_URL;
+  try {
+    const store = new EnterprisePilotStore({ resolveTrustedKey: (issuerId, keyId) => issuerId !== "" && keyId === "issuer-real-key-1" ? publicKeyPem : undefined });
+    for (const [index, kind] of (["production", "inspection", "cold_chain"] as const).entries()) {
+      await store.importEvidence(evidence(kind, `EV-CONFLICT-${index}`), `import-conflict-${index}`);
+    }
+    await store.importEvidence(
+      { ...evidence("shipment", "EV-CONFLICT-3"), payload: { batchId: "FO-REAL-001", source: "external", quantity: 101 } },
+      "import-conflict-3",
+    );
+    await assert.rejects(
+      store.publishBatch("tenant-real", "FO-REAL-001", "publish-conflict"),
+      /PUBLISH_(GATE|RECONCILIATION)_BLOCKED/,
+    );
+  } finally {
+    if (beforeBackend === undefined) delete process.env.DATA_BACKEND; else process.env.DATA_BACKEND = beforeBackend;
+    if (beforeDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = beforeDatabase;
+  }
+});
+
 
 test("rejects demo-marked payloads when imported as external", async () => {
   const beforeBackend = process.env.DATA_BACKEND;

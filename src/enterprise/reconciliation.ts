@@ -19,6 +19,11 @@ function payloadNumber(record: EnterpriseEvidenceRecord, keys: string[]): number
   for (const key of keys) {
     const value = asNumber(record.payload[key]);
     if (value !== undefined) return value;
+    if (key === "outputQuantity" && Array.isArray(record.payload.outputs)) {
+      const output = record.payload.outputs.find((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+      const outputQuantity = output ? asNumber(output.quantity) : undefined;
+      if (outputQuantity !== undefined) return outputQuantity;
+    }
   }
   return undefined;
 }

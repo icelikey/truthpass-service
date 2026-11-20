@@ -42,7 +42,7 @@ Invoke-WebRequest `
 ```
 
 当 Production 启用 `TRUTHPASS_ENFORCE_WALLET_BINDING=true` 时，消费者钱包必须先完成一次签名绑定。先读取
-`GET /api/wallet/bind/challenge?address={address}&tenantId=demo&role=consumer`，由钱包签名返回的 `message`，再将
+`GET /api/wallet/bind/challenge?address={address}&tenantId=demo&role=consumer`，让钱包对返回的 `message` 签名，再将
 `address`、`tenantId`、`role`、`message` 和 `signature` 提交到 `POST /api/wallet/bind`。绑定返回
 `status=bound_verified` 后，再执行上面的 `/api/wallet/prepare`，最后由同一钱包签名、广播并调用
 `POST /api/chain/tx-confirm` 回读 receipt 与业务事件。未完成绑定时，`/api/wallet/prepare` 会返回

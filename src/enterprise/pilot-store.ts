@@ -4,6 +4,7 @@ import { getDatabasePool, persistenceEnabled } from "../data/persistence.js";
 import { validateEvidence } from "../data/validation.js";
 import type { EvidenceAttestation, EvidenceKind, NewEvidenceRecord, SourceKind } from "../data/model.js";
 import { verifyEvidenceAttestation, type TrustedIssuerKeyResolver } from "../security/evidence-signatures.js";
+import { reconcileBatch } from "./reconciliation.js";
 
 export type EnterpriseEvidenceEnvelope = NewEvidenceRecord & {
   tenantId: string;
@@ -302,25 +303,35 @@ export class EnterprisePilotStore {
       const signatureOk = !signatureRequired || items.some((item) => signatureState(item, this.#resolveTrustedKey) === "verified");
       return { code: kind, status: signatureOk ? "passed" as const : "review" as const, evidenceIds: items.map((item) => item.evidenceId) };
     });
+    const reconciliation = reconcileBatch(batchId, evidence);
+    const reconciliationChecks = reconciliation.checks.map((check) => ({
+      code: `reconcile:${check.code}`,
+      status: check.status === "conflict" ? "failed" as const : check.status,
+      evidenceIds: check.evidenceIds,
+    }));
+    const allChecks = [...checks, ...reconciliationChecks];
     const failed = evidence.some((item) => item.status === "revoked");
-    const missing = checks.some((check) => check.status === "missing");
-    const review = checks.some((check) => check.status === "review");
-    const status = failed ? "rejected" : missing || review ? "review" : "accepted_with_scope";
+    const missing = allChecks.some((check) => check.status === "missing");
+    const review = allChecks.some((check) => check.status === "review");
+    const conflict = reconciliation.status === "conflict" || allChecks.some((check) => check.status === "failed");
+    const status = failed || conflict ? "rejected" : missing || review || reconciliation.status === "review" ? "review" : "accepted_with_scope";
     const reasons = [
       ...(missing ? ["核心证据未完整覆盖，当前只能进入 review。"] : []),
-      ...(review ? ["部分机构证据尚未通过当前公钥注册表验证。"] : []),
+      ...(review ? ["部分机构证据或批次对账尚未通过当前验证。"] : []),
+      ...(conflict ? ["批次对账发现冲突，发布门禁已关闭。"] : []),
       ...(evidence.some((item) => item.status === "revoked") ? ["当前批次存在已撤销证据。"] : []),
+      ...reconciliation.reasons,
     ];
     const evidenceRoot = sha256Canonical(active.map((item) => [item.evidenceId, item.payloadHash, item.status]));
     const result: EnterpriseBatchVerification = {
       schemaVersion: "truthpass.enterprise.verification.v1", tenantId, brandId: first.brandId, productId: first.productId,
-      batchId, status, dataMode: first.dataMode, verifierVersion: "enterprise-evidence-gate-v1", checks, reasons,
+      batchId, status, dataMode: first.dataMode, verifierVersion: "enterprise-evidence-gate-v1", checks: allChecks, reasons,
       evidenceRoot, evaluatedAt: new Date().toISOString(),
     };
     const event: EnterpriseAuditEvent = {
       eventId: sha256Canonical([tenantId, requestId, "batch_validated", batchId, evidenceRoot]),
       tenantId, requestId, eventType: "batch_validated", batchId, payloadHash: evidenceRoot,
-      createdAt: result.evaluatedAt, metadata: { status, verifierVersion: result.verifierVersion },
+      createdAt: result.evaluatedAt, metadata: { status, verifierVersion: result.verifierVersion, reconciliationStatus: reconciliation.status },
     };
     this.appendAudit(event);
     await this.persistAudit(event);
@@ -330,8 +341,12 @@ export class EnterprisePilotStore {
   async publishBatch(tenantId: string, batchId: string, requestId: string): Promise<{ publication: EnterpriseBatchPublication; idempotent: boolean }> {
     const verification = await this.validateBatch(tenantId, batchId, requestId);
     const evidence = await this.listEvidence(tenantId, batchId);
+    const reconciliation = reconcileBatch(batchId, evidence);
     if (verification.status !== "accepted_with_scope") {
       throw new Error(`PUBLISH_GATE_BLOCKED: 当前批次状态为 ${verification.status}，需要先补齐证据并通过复核`);
+    }
+    if (reconciliation.status !== "passed") {
+      throw new Error(`PUBLISH_RECONCILIATION_BLOCKED: 当前批次对账状态为 ${reconciliation.status}，需要先解决批次、样品、时间或数量冲突`);
     }
     if (evidence.length === 0 || evidence.some((item) => item.dataMode !== "external")) {
       throw new Error("PUBLISH_EXTERNAL_DATA_REQUIRED: 发布批次必须全部使用 external 资料");
