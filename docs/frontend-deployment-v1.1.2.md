@@ -26,8 +26,10 @@ Consumer Gateway: 0x5192484B107E51EADFda4DBF4c9fFa41C03453F1
 ## 本地启动
 
 ```powershell
-npm run web:server
+npm run start
 ```
+
+`npm run start` 会先构建当前 `web/dist`，再启动集成 API 与 React 根页面。`npm run web:server` 仍保留给旧的 `web-frontend/dist` 观察台兼容入口，云主机发布当前根页面时不要使用它。
 
 打开根路径后，右下角应出现 `TruthPass 钱包` 浮层。点击 `Connect Wallet`，再由用户在钱包弹窗中确认网络、目标合约和 Gas。
 
