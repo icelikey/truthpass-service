@@ -4550,6 +4550,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
         enterpriseEvidenceReconcile: `${origin}/api/tenants/{tenantId}/evidence/reconcile`,
         enterpriseEvidenceValidate: `${origin}/api/tenants/{tenantId}/evidence/validate`,
         enterpriseEvidenceCard: `${origin}/api/tenants/{tenantId}/batches/{batchId}/evidence-card`,
+        enterpriseBatchPublication: `${origin}/api/tenants/{tenantId}/batches/{batchId}/publish`,
         enterpriseAuditExport: `${origin}/api/tenants/{tenantId}/audit/export`,
         productionImprovementReport: `${origin}/api/tenants/{tenantId}/production-improvement-report?batchId={batchId}`,
         cfiManifest: `${origin}/api/cfi/manifest`,
@@ -4630,7 +4631,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     if (req.method === "GET") {
-      const packs = expertAgentCore.listKnowledgePacks(tenantId);
+      const packs = await expertAgentCore.listKnowledgePacks(tenantId);
       sendJson(res, 200, { schemaVersion: "truthpass.knowledge-packs.v1", tenantId, packs, knowledgeMode: "tenant_scoped", traceId: requestTraceId(req) });
       return true;
     }
@@ -4671,7 +4672,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
     const role = url.searchParams.get("role") === "merchant" ? "merchant" : "consumer";
     sendJson(res, 200, {
       schemaVersion: "truthpass.expert-agent-profile.v1",
-      profile: expertAgentCore.expertProfile({ tenantId: requestedTenant || undefined, domain, role }),
+      profile: await expertAgentCore.expertProfile({ tenantId: requestedTenant || undefined, domain, role }),
       knowledgeMode: requestedTenant ? "tenant_scoped" : "public_reference",
       traceId: requestTraceId(req),
     });
@@ -4734,7 +4735,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     if (req.method === "GET") {
-      sendJson(res, 200, { schemaVersion: "truthpass.product-specs.v1", tenantId, specs: expertAgentCore.listProductSpecs(tenantId), traceId: requestTraceId(req) });
+      sendJson(res, 200, { schemaVersion: "truthpass.product-specs.v1", tenantId, specs: await expertAgentCore.listProductSpecs(tenantId), traceId: requestTraceId(req) });
       return true;
     }
     const body = await readBody(req) as Record<string, unknown>;
@@ -4761,7 +4762,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     if (req.method === "GET") {
-      sendJson(res, 200, { schemaVersion: "truthpass.brand-proposals.v1", tenantId, proposals: expertAgentCore.listBrandProposals(tenantId), traceId: requestTraceId(req) });
+      sendJson(res, 200, { schemaVersion: "truthpass.brand-proposals.v1", tenantId, proposals: await expertAgentCore.listBrandProposals(tenantId), traceId: requestTraceId(req) });
       return true;
     }
     const body = await readBody(req) as Record<string, unknown>;
@@ -4783,7 +4784,7 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       return true;
     }
     const batchId = url.searchParams.get("batchId")?.trim().toUpperCase() || undefined;
-    sendJson(res, 200, { schemaVersion: "truthpass.production-improvement-report.v2", ...expertAgentCore.improvementReport(tenantId, batchId), traceId: requestTraceId(req) });
+    sendJson(res, 200, { schemaVersion: "truthpass.production-improvement-report.v2", ...(await expertAgentCore.improvementReport(tenantId, batchId)), traceId: requestTraceId(req) });
     return true;
   }
 
@@ -5056,6 +5057,40 @@ export async function handleApi(url: URL, req: IncomingMessage, res: ServerRespo
       sendJson(res, 200, await enterprisePilotStore.validateBatch(tenantId, batchId, ctx.requestId));
     } catch (error) {
       sendJson(res, 404, { error: error instanceof Error ? error.message : String(error), tenantId, batchId });
+    }
+    return true;
+  }
+
+  const enterprisePublishMatch = p.match(/^\/api\/tenants\/([^/]+)\/batches\/([^/]+)\/publish\/?$/);
+  if (enterprisePublishMatch && (req.method === "POST" || req.method === "GET")) {
+    const tenantId = decodeURIComponent(enterprisePublishMatch[1]!);
+    const batchId = decodeURIComponent(enterprisePublishMatch[2]!);
+    const ctx = await enterpriseRequestContext(req, tenantId);
+    if (!ctx.authorized) {
+      sendJson(res, ctx.error === "TENANT_AUTH_NOT_CONFIGURED" ? 503 : 401, { error: ctx.error, tenantId, batchId });
+      return true;
+    }
+    if (req.method === "GET") {
+      const publication = await enterprisePilotStore.getPublication(tenantId, batchId);
+      sendJson(res, publication ? 200 : 404, publication
+        ? { ...publication, traceId: requestTraceId(req) }
+        : { error: "BATCH_NOT_PUBLISHED", tenantId, batchId, traceId: requestTraceId(req) });
+      return true;
+    }
+    try {
+      const result = await enterprisePilotStore.publishBatch(tenantId, batchId, ctx.requestId);
+      sendJson(res, result.idempotent ? 200 : 201, {
+        schemaVersion: "truthpass.enterprise.batch-publication.v1",
+        tenantId,
+        batchId,
+        idempotent: result.idempotent,
+        publication: result.publication,
+        traceId: requestTraceId(req),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.startsWith("PUBLISH_") ? 422 : message.startsWith("BATCH_NOT_FOUND") ? 404 : 500;
+      sendJson(res, status, { error: message, tenantId, batchId, traceId: requestTraceId(req) });
     }
     return true;
   }
@@ -7007,7 +7042,14 @@ const isDirectExecution = process.argv[1] !== undefined
   && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isDirectExecution && process.env.TRUTHPASS_DISABLE_LISTEN !== "1") {
-  createApiServer().listen(PORT, () => {
-    console.log(`TruthPass API 对接层已启动: http://localhost:${PORT}`);
-  });
+  void expertAgentCore.ready()
+    .then(() => {
+      createApiServer().listen(PORT, () => {
+        console.log(`TruthPass API 对接层已启动: http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error("TruthPass Agent 持久化初始化失败，服务未启动:", error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
 }

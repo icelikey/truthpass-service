@@ -34,11 +34,26 @@ export type EnterpriseBatchVerification = {
   evaluatedAt: string;
 };
 
+
+export type EnterpriseBatchPublication = {
+  schemaVersion: "truthpass.enterprise.batch-publication.v1";
+  publicationId: string;
+  tenantId: string;
+  brandId: string;
+  productId: string;
+  batchId: string;
+  status: "published";
+  dataMode: "external";
+  evidenceRoot: string;
+  verification: EnterpriseBatchVerification;
+  publishedAt: string;
+};
+
 export type EnterpriseAuditEvent = {
   eventId: string;
   tenantId: string;
   requestId: string;
-  eventType: "evidence_imported" | "evidence_rejected" | "evidence_revoked" | "batch_validated";
+  eventType: "evidence_imported" | "evidence_rejected" | "evidence_revoked" | "batch_validated" | "batch_published";
   evidenceId?: string;
   batchId?: string;
   payloadHash?: string;
@@ -56,6 +71,14 @@ const evidenceKey = (tenantId: string, evidenceId: string): string => `${tenantI
 function nonEmpty(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim() === "") throw new Error(`${label} 不能为空`);
   return value.trim();
+}
+
+
+function hasDemoMarker(payload: Record<string, unknown>): boolean {
+  return payload.demo === true
+    || payload.demoMode === true
+    || payload.dataMode === "demo/synthetic"
+    || payload.evidenceMode === "demo/synthetic";
 }
 
 function signatureState(record: EnterpriseEvidenceRecord, resolveTrustedKey?: TrustedIssuerKeyResolver): ConsumerEvidenceFact["signature"] {
@@ -83,6 +106,7 @@ function toConsumerFact(record: EnterpriseEvidenceRecord, resolveTrustedKey?: Tr
 export class EnterprisePilotStore {
   #evidence = new Map<string, EnterpriseEvidenceRecord>();
   #audit: EnterpriseAuditEvent[] = [];
+  #publications = new Map<string, EnterpriseBatchPublication>();
   #schemaReady: Promise<void> | undefined;
   #resolveTrustedKey?: TrustedIssuerKeyResolver;
 
@@ -128,6 +152,21 @@ export class EnterprisePilotStore {
       );
       create index if not exists truthpass_enterprise_audit_tenant_idx
         on truthpass_enterprise_audit_events (tenant_id, created_at, event_id);
+      create table if not exists truthpass_enterprise_batch_publications (
+        publication_id text primary key,
+        tenant_id text not null,
+        brand_id text not null,
+        product_id text not null,
+        batch_id text not null,
+        status text not null default 'published' check (status = 'published'),
+        data_mode text not null check (data_mode = 'external'),
+        evidence_root text not null,
+        payload jsonb not null,
+        published_at timestamptz not null,
+        unique (tenant_id, batch_id, evidence_root)
+      );
+      create index if not exists truthpass_enterprise_batch_publications_scope_idx
+        on truthpass_enterprise_batch_publications (tenant_id, batch_id, published_at desc);
     `).then(() => undefined);
     await this.#schemaReady;
   }
@@ -185,6 +224,9 @@ export class EnterprisePilotStore {
     const evidenceId = nonEmpty(input.evidenceId, "evidenceId");
     const validation = validateEvidence(input);
     if (!validation.ok) throw new Error("证据格式无效：" + validation.errors.join("；"));
+    if (input.dataMode === "external" && hasDemoMarker(input.payload)) {
+      throw new Error("EXTERNAL_DEMO_MARKER_REJECTED: external 资料不能携带 demo 标记");
+    }
     const payloadHash = sha256Canonical(input.payload);
     const existing = await this.loadExisting(tenantId, evidenceId);
     if (existing) {
@@ -283,6 +325,95 @@ export class EnterprisePilotStore {
     this.appendAudit(event);
     await this.persistAudit(event);
     return result;
+  }
+
+  async publishBatch(tenantId: string, batchId: string, requestId: string): Promise<{ publication: EnterpriseBatchPublication; idempotent: boolean }> {
+    const verification = await this.validateBatch(tenantId, batchId, requestId);
+    const evidence = await this.listEvidence(tenantId, batchId);
+    if (verification.status !== "accepted_with_scope") {
+      throw new Error(`PUBLISH_GATE_BLOCKED: 当前批次状态为 ${verification.status}，需要先补齐证据并通过复核`);
+    }
+    if (evidence.length === 0 || evidence.some((item) => item.dataMode !== "external")) {
+      throw new Error("PUBLISH_EXTERNAL_DATA_REQUIRED: 发布批次必须全部使用 external 资料");
+    }
+    if (evidence.some((item) => hasDemoMarker(item.payload))) {
+      throw new Error("PUBLISH_EXTERNAL_DEMO_MARKER: external 批次不能包含 demo 标记");
+    }
+    if (evidence.some((item) => !item.issuerId || !item.attestation)) {
+      throw new Error("PUBLISH_ATTESTATION_REQUIRED: 发布批次的每条证据都必须带 issuerId 和 attestation");
+    }
+    if (evidence.some((item) => signatureState(item, this.#resolveTrustedKey) !== "verified")) {
+      throw new Error("PUBLISH_SIGNATURE_UNVERIFIED: 发布批次的每条证据都必须通过当前可信公钥注册表核验");
+    }
+    if (evidence.some((item) => item.status !== "submitted")) {
+      throw new Error("PUBLISH_REVOKED_EVIDENCE: 当前批次包含已撤销证据");
+    }
+    const existing = await this.loadPublication(tenantId, batchId);
+    if (existing && existing.evidenceRoot === verification.evidenceRoot) {
+      return { publication: structuredClone(existing), idempotent: true };
+    }
+
+    const publishedAt = new Date().toISOString();
+    const publication: EnterpriseBatchPublication = {
+      schemaVersion: "truthpass.enterprise.batch-publication.v1",
+      publicationId: sha256Canonical([tenantId, batchId, verification.evidenceRoot, "published"]),
+      tenantId,
+      brandId: verification.brandId,
+      productId: verification.productId,
+      batchId,
+      status: "published",
+      dataMode: "external",
+      evidenceRoot: verification.evidenceRoot,
+      verification,
+      publishedAt,
+    };
+    this.#publications.set(`${tenantId}:${batchId}`, structuredClone(publication));
+    if (persistenceEnabled()) {
+      await this.ensureSchema();
+      await getDatabasePool().query(
+        `insert into truthpass_enterprise_batch_publications
+         (publication_id, tenant_id, brand_id, product_id, batch_id, status, data_mode, evidence_root, payload, published_at)
+         values ($1,$2,$3,$4,$5,'published','external',$6,$7::jsonb,$8)
+         on conflict (publication_id) do nothing`,
+        [publication.publicationId, tenantId, publication.brandId, publication.productId, batchId, publication.evidenceRoot, JSON.stringify(publication), publishedAt],
+      );
+    }
+    const event: EnterpriseAuditEvent = {
+      eventId: sha256Canonical([tenantId, requestId, "batch_published", batchId, verification.evidenceRoot]),
+      tenantId,
+      requestId,
+      eventType: "batch_published",
+      batchId,
+      payloadHash: verification.evidenceRoot,
+      createdAt: publishedAt,
+      metadata: { publicationId: publication.publicationId, dataMode: publication.dataMode },
+    };
+    this.appendAudit(event);
+    await this.persistAudit(event);
+    return { publication: structuredClone(publication), idempotent: false };
+  }
+
+  async getPublication(tenantId: string, batchId: string): Promise<EnterpriseBatchPublication | undefined> {
+    return this.loadPublication(tenantId, batchId);
+  }
+
+  private async loadPublication(tenantId: string, batchId: string): Promise<EnterpriseBatchPublication | undefined> {
+    const key = `${tenantId}:${batchId}`;
+    const memory = this.#publications.get(key);
+    if (memory) return structuredClone(memory);
+    if (!persistenceEnabled()) return undefined;
+    await this.ensureSchema();
+    const result = await getDatabasePool().query(
+      `select payload from truthpass_enterprise_batch_publications
+       where tenant_id = $1 and batch_id = $2
+       order by published_at desc limit 1`,
+      [tenantId, batchId],
+    );
+    const payload = result.rows[0]?.payload;
+    if (!payload || typeof payload !== "object") return undefined;
+    const publication = payload as EnterpriseBatchPublication;
+    this.#publications.set(key, structuredClone(publication));
+    return structuredClone(publication);
   }
 
   async evidenceCard(tenantId: string, batchId: string, question: string, requestId: string): Promise<{ verification: EnterpriseBatchVerification; card: ConsumerAnswer }> {

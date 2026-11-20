@@ -52,3 +52,23 @@ Agent 可以读取当前批次、引用证据、解释实测值与规则范围�
 - 错批次、重复证据、吊销证据、未签名报告和时间冲突全部进入复核队列。
 - 每条公开结论都能回到 `evidenceId`、`traceId` 和当前 policy 版本。
 - 真实厂家接入前，演示批次继续标记为 `demo/synthetic`。
+
+## 发布门禁
+
+批次只有在以下条件全部满足后才能发布给消费者：
+
+- 所有必需证据均为 `external`。
+- 每条证据都有 `issuerId` 和 Ed25519 `attestation`。
+- `production`、`inspection`、`cold_chain`、`shipment` 四类证据均已登记。
+- 检测和冷链证据通过当前可信公钥注册表核验。
+- 当前批次没有撤销证据、演示标记或跨批次引用。
+- Verifier 状态为 `accepted_with_scope`。
+
+服务端发布接口：
+
+```text
+POST /api/tenants/{tenantId}/batches/{batchId}/publish
+GET  /api/tenants/{tenantId}/batches/{batchId}/publish
+```
+
+发布接口不会把 `demo/synthetic` 升级成正式资料。未满足门禁时返回 `PUBLISH_*` 错误，并保留批次在 `review` 状态。

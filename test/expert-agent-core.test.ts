@@ -77,7 +77,7 @@ test("consumer needs become merchant-reviewed product and brand proposals", asyn
   const proposal = await core.createBrandProposal({ tenantId: "tenant-fish-oil-demo", productSpecId: spec.id });
   assert.equal(proposal.status, "merchant_review");
   assert.match(proposal.positioning, /日常补充/);
-  const report = core.improvementReport("tenant-fish-oil-demo", "FO-REAL-001");
+  const report = await core.improvementReport("tenant-fish-oil-demo", "FO-REAL-001");
   assert.equal(report.sampleCount, 2);
   assert.equal(report.concerns[0]?.concern, "胶囊有腥味");
 });

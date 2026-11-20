@@ -169,24 +169,25 @@ export class ExpertAgentCore {
     return structuredClone(normalizedPack);
   }
 
-  listKnowledgePacks(tenantId?: string, domain?: string): KnowledgePack[] {
+  async listKnowledgePacks(tenantId?: string, domain?: string): Promise<KnowledgePack[]> {
+    await this.ensureSchema();
     return [...this.#knowledge.values()]
       .filter((pack) => (!domain || pack.domain === domain) && (pack.scope === "public" || pack.tenantId === tenantId))
       .map((pack) => structuredClone(pack));
   }
 
-  expertProfile(input: { tenantId?: string; domain?: string; role?: ExpertProfile["role"] }): ExpertProfile {
+  async expertProfile(input: { tenantId?: string; domain?: string; role?: ExpertProfile["role"] }): Promise<ExpertProfile> {
     const domain = input.domain?.trim() || "fish-oil";
     const role = input.role ?? (input.tenantId ? "merchant" : "consumer");
-    const packs = this.listKnowledgePacks(input.tenantId, domain);
+    const packs = await this.listKnowledgePacks(input.tenantId, domain);
     return {
-      id: `${role}:${input.tenantId ?? "public"}:${domain}`,
+      id: role + ":" + (input.tenantId ?? "public") + ":" + domain,
       tenantId: input.tenantId,
       domain,
       role,
       scope: input.tenantId ? "tenant_private" : "public",
       knowledgePackIds: packs.map((pack) => pack.id),
-      policyPackIds: [`${domain}-policy-v1`],
+      policyPackIds: [domain + "-policy-v1"],
       allowedActions: role === "merchant"
         ? ["read_evidence", "import_evidence", "request_review", "create_product_spec", "create_brand_proposal"]
         : ["read_public_evidence", "ask_agent", "submit_need", "prepare_purchase", "submit_feedback"],
@@ -195,15 +196,14 @@ export class ExpertAgentCore {
   }
 
   async searchScopedKnowledge(input: SagScopedQuery): Promise<KnowledgeHit[]> {
-    await this.ensureSchema();
     const tokens = tokensOf(input.query);
     const domain = input.productId === "fish-oil" ? "fish-oil" : input.productId === "rice-wuchang" ? "rice" : input.productId;
-    const packs = this.listKnowledgePacks(input.tenantId, domain);
+    const packs = await this.listKnowledgePacks(input.tenantId, domain);
     const hits = packs.flatMap((pack) => pack.documents.map((document) => {
-      const haystack = normalize(`${document.title} ${document.text} ${document.tags.join(" ")}`);
+      const haystack = normalize(document.title + " " + document.text + " " + document.tags.join(" "));
       const score = tokens.length === 0 ? 0 : tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0);
       return {
-        hitId: `${pack.id}:${document.id}`,
+        hitId: pack.id + ":" + document.id,
         packId: pack.id,
         documentId: document.id,
         title: document.title,
@@ -234,7 +234,8 @@ export class ExpertAgentCore {
     return structuredClone(need);
   }
 
-  listConsumerNeeds(filter: { tenantId?: string; productId?: string; batchId?: string; consentScope?: ConsentScope } = {}): ConsumerNeed[] {
+  async listConsumerNeeds(filter: { tenantId?: string; productId?: string; batchId?: string; consentScope?: ConsentScope } = {}): Promise<ConsumerNeed[]> {
+    await this.ensureSchema();
     return [...this.#needs.values()]
       .filter((need) => (!filter.tenantId || need.tenantId === filter.tenantId)
         && (!filter.productId || need.productId === filter.productId)
@@ -300,23 +301,25 @@ export class ExpertAgentCore {
     return structuredClone(proposal);
   }
 
-  listProductSpecs(tenantId: string): ProductSpec[] {
+  async listProductSpecs(tenantId: string): Promise<ProductSpec[]> {
+    await this.ensureSchema();
     return [...this.#specs.values()].filter((spec) => spec.tenantId === tenantId).map((spec) => structuredClone(spec));
   }
 
-  listBrandProposals(tenantId: string): BrandProposal[] {
+  async listBrandProposals(tenantId: string): Promise<BrandProposal[]> {
+    await this.ensureSchema();
     return [...this.#proposals.values()].filter((proposal) => proposal.tenantId === tenantId).map((proposal) => structuredClone(proposal));
   }
 
-  improvementReport(tenantId: string, batchId?: string): {
+  async improvementReport(tenantId: string, batchId?: string): Promise<{
     tenantId: string;
     batchId?: string;
     sampleCount: number;
     concerns: Array<{ concern: string; count: number; needIds: string[] }>;
     nextAction: string;
     dataMode: "external" | "demo/synthetic";
-  } {
-    const needs = this.listConsumerNeeds({ tenantId, batchId, consentScope: "anonymous_research" });
+  }> {
+    const needs = await this.listConsumerNeeds({ tenantId, batchId, consentScope: "anonymous_research" });
     const grouped = new Map<string, { count: number; needIds: string[] }>();
     for (const need of needs) {
       const current = grouped.get(need.concern) ?? { count: 0, needIds: [] };

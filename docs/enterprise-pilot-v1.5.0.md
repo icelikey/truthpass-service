@@ -43,6 +43,8 @@ X-TruthPass-Request-Id: <requestId>
 POST /api/tenants/{tenantId}/evidence/import
 POST /api/tenants/{tenantId}/evidence/validate
 GET  /api/tenants/{tenantId}/batches/{batchId}/evidence-card
+POST /api/tenants/{tenantId}/batches/{batchId}/publish
+GET  /api/tenants/{tenantId}/batches/{batchId}/publish
 GET  /api/tenants/{tenantId}/audit/export
 POST /api/tenants/{tenantId}/evidence/{evidenceId}/revoke
 ```
@@ -56,6 +58,18 @@ POST /api/tenants/{tenantId}/evidence/{evidenceId}/revoke
 - 缺失证据或签名未核验返回 `review`。
 - 已撤销证据返回 `rejected`。
 - `accepted_with_scope` 只代表当前证据门禁通过，不代表政府商品质量认证。
+
+## 批次发布门禁
+
+发布接口只接受满足以下条件的批次：
+
+- 四类必需证据均已登记
+- 所有证据均为 `external`
+- 每条证据都有 issuerId 和已注册公钥核验通过的 Ed25519 attestation
+- 当前批次没有撤销证据或演示标记
+- 确定性 Verifier 返回 `accepted_with_scope`
+
+发布结果会写入批次发布表并记录 `batch_published` 审计事件。服务启动时会先完成专家数据 hydrate，企业读取不会在重启后回退为空内存状态。
 
 ## 上线验收
 
